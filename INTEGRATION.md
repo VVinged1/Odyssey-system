@@ -144,14 +144,11 @@ send_roll_event(
 
 1. Зайди в комнату как GM.
 2. Добавь character token на сцену.
-3. Открой расширение и нажми `Track Character`.
-4. В блоке `Odyssey ownership` укажи:
-   - `Owner Player ID`
-   - `Owner Name`
-5. В блоке `Odyssey stats` задай минимум:
+3. Открой расширение и выбери токен на карте.
+4. В блоке `Odyssey ownership` назначь игрока через список игроков комнаты.
+5. В GM-блоках характеристик/навыков задай минимум:
    - один боевой skill
    - `Parry`
-   - `Default weapon damage`
 6. В блоке `Odyssey actions` выбери:
    - skill
    - часть тела цели

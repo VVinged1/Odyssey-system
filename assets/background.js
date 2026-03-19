@@ -3837,13 +3837,20 @@ var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
 var BODY_ORDER = ["L.Arm", "Head", "R.Arm", "L.Leg", "Torso", "R.Leg"];
 var ROLL_HISTORY_LIMIT = 12;
+var DEFAULT_ODYSSEY_SKILLS = {
+  Hand: 0,
+  Cold: 0,
+  Throwing: 0,
+  Rifle: 0,
+  Turrets: 0
+};
 var BODY_DEFAULTS = {
-  "L.Arm": { current: 2, max: 2, armor: 2 },
-  Head: { current: 1, max: 1, armor: 0 },
-  "R.Arm": { current: 2, max: 2, armor: 2 },
-  "L.Leg": { current: 2, max: 2, armor: 2 },
-  Torso: { current: 3, max: 3, armor: 6 },
-  "R.Leg": { current: 2, max: 2, armor: 2 }
+  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  Head: { current: 1, max: 1, armor: 0, minor: 0, serious: 0 },
+  "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
+  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 }
 };
 var DEFAULT_TRACKER_DATA = {
   enabled: true,
@@ -3865,13 +3872,7 @@ var DEFAULT_TRACKER_DATA = {
       playerId: "",
       playerName: ""
     },
-    skills: {
-      Hand: 0,
-      Cold: 0,
-      Throwing: 0,
-      Rifle: 0,
-      Turrets: 0
-    },
+    skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -3881,7 +3882,7 @@ var DEFAULT_TRACKER_DATA = {
       Intelligence: 0,
       Charisma: 0,
       Willpower: 0,
-      Psionics: 0,
+      Magic: 0,
       Parry: 0
     },
     weapons: {
@@ -3923,6 +3924,8 @@ function sanitizeTrackerData(raw) {
       part.max
     );
     part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 99);
+    part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
+    part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
   }
   return next;
 }
@@ -3931,11 +3934,15 @@ function sanitizeOdysseyData(raw) {
   if (!raw || typeof raw !== "object") return next;
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
-  for (const key of Object.keys(next.skills)) {
-    next.skills[key] = clamp(Number(raw.skills?.[key] ?? 0) || 0, 0, 10);
+  const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
+  for (const key of Object.keys({ ...DEFAULT_ODYSSEY_SKILLS, ...rawSkills })) {
+    const normalizedKey = String(key).trim();
+    if (!normalizedKey) continue;
+    next.skills[normalizedKey] = clamp(Number(rawSkills[key] ?? DEFAULT_ODYSSEY_SKILLS[key] ?? 0) || 0, 0, 10);
   }
   for (const key of Object.keys(next.attributes)) {
-    next.attributes[key] = clamp(Number(raw.attributes?.[key] ?? 0) || 0, 0, 10);
+    const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;
+    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 99);
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged);
@@ -4111,6 +4118,16 @@ function applyBodyEffects(body, bodyEffects) {
       const baseArmor = patch.armor != null ? Number(patch.armor) || 0 : part.armor;
       const deltaArmor = Number(patch.armor_delta) || 0;
       part.armor = clamp(baseArmor + deltaArmor, 0, 99);
+    }
+    if (patch.minor != null || patch.minor_delta != null) {
+      const baseMinor = patch.minor != null ? Number(patch.minor) || 0 : part.minor;
+      const deltaMinor = Number(patch.minor_delta) || 0;
+      part.minor = clamp(baseMinor + deltaMinor, 0, 3);
+    }
+    if (patch.serious != null || patch.serious_delta != null) {
+      const baseSerious = patch.serious != null ? Number(patch.serious) || 0 : part.serious;
+      const deltaSerious = Number(patch.serious_delta) || 0;
+      part.serious = clamp(baseSerious + deltaSerious, 0, 1);
     }
   }
 }

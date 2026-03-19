@@ -3993,23 +3993,10 @@ function sortCharacters(items) {
 }
 function formatOverlayText(data) {
   const body = data.body;
-  const lines = [
+  return [
     `L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
     `L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
-  ];
-  if (data.lastRoll) {
-    lines.push(`Last roll: ${formatLastRoll(data.lastRoll)}`);
-  }
-  return lines.join("\n");
-}
-function formatLastRoll(lastRoll) {
-  const parts = [];
-  if (lastRoll.actorName) parts.push(lastRoll.actorName);
-  if (lastRoll.total != null) parts.push(`roll ${lastRoll.total}`);
-  if (lastRoll.outcome) parts.push(lastRoll.outcome);
-  if (lastRoll.targetPart) parts.push(`target ${lastRoll.targetPart}`);
-  if (lastRoll.summary) parts.push(lastRoll.summary);
-  return parts.join(" | ");
+  ].join("\n");
 }
 function getOdysseyData(item) {
   return sanitizeOdysseyData(getTrackerData(item).odyssey);
@@ -4099,28 +4086,6 @@ function buildOverlayCard(token, data, metrics) {
   const offsetX = metrics.width / 2 + width / 2 + 18;
   return buildLabel().name(`Body HP: ${getCharacterName(token)}`).plainText(formatOverlayText(data)).width(width).height(height).padding(10).fontSize(13).fontWeight(600).lineHeight(1.18).textAlign("LEFT").textAlignVertical("MIDDLE").fillColor("#f8fafc").backgroundColor("#020617").backgroundOpacity(0.58).strokeColor("#cbd5e1").strokeOpacity(0.45).strokeWidth(1).cornerRadius(12).pointerDirection("LEFT").pointerWidth(10).pointerHeight(12).position(getWorldPosition(token, metrics.center, offsetX, 0)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).metadata({ [OVERLAY_KEY]: token.id, kind: "body-card" }).build();
 }
-function buildMinorDots(token, data, metrics) {
-  const items = [];
-  const startX = -metrics.markerSize / 2 + 12;
-  const y = metrics.markerSize / 2 - 12;
-  for (let index = 0; index < data.minor; index += 1) {
-    items.push(
-      buildShape().shapeType("CIRCLE").width(8).height(8).position(getWorldPosition(token, metrics.center, startX + index * 10, y)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor("#f59e0b").fillOpacity(0.98).strokeColor("#111827").strokeWidth(1).metadata({ [OVERLAY_KEY]: token.id, kind: "minor", index }).build()
-    );
-  }
-  return items;
-}
-function buildSeriousBars(token, data, metrics) {
-  const items = [];
-  const x = metrics.markerSize / 2 - 12;
-  const startY = -metrics.markerSize / 2 + 13;
-  for (let index = 0; index < data.serious; index += 1) {
-    items.push(
-      buildShape().shapeType("RECTANGLE").width(4).height(18).position(getWorldPosition(token, metrics.center, x - index * 8, startY)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor("#ef4444").fillOpacity(0.98).strokeColor("#111827").strokeWidth(1).metadata({ [OVERLAY_KEY]: token.id, kind: "serious", index }).build()
-    );
-  }
-  return items;
-}
 function buildBodyFigure(token, data, metrics) {
   const parts = [];
   const spacing = 14;
@@ -4152,9 +4117,7 @@ function buildBodyFigure(token, data, metrics) {
 function buildOverlayItems(token, data, metrics) {
   return [
     buildOverlayCard(token, data, metrics),
-    ...buildBodyFigure(token, data, metrics),
-    ...buildMinorDots(token, data, metrics),
-    ...buildSeriousBars(token, data, metrics)
+    ...buildBodyFigure(token, data, metrics)
   ];
 }
 async function updateTrackerData(tokenId, updater) {
@@ -4342,6 +4305,7 @@ var ui = {
   statusBox: document.getElementById("statusBox"),
   selectionHint: document.getElementById("selectionHint"),
   selectedTokenPanel: document.getElementById("selectedTokenPanel"),
+  debugConsole: document.getElementById("debugConsole"),
   trackedCount: document.getElementById("trackedCount"),
   trackedList: document.getElementById("trackedList"),
   allCount: document.getElementById("allCount"),
@@ -4353,6 +4317,7 @@ var playerName = "";
 var sceneItems = [];
 var selectionIds = [];
 var activeTokenId = null;
+var debugEntries = [];
 function setStatus(message, kind = "info") {
   ui.statusBox.textContent = message;
   ui.statusBox.className = `status ${kind}`;
@@ -4389,10 +4354,109 @@ function isEditable() {
 function canUseToken(token) {
   return canPlayerControlToken(playerRole, playerId, token);
 }
+function resolveDefaultTargetTokenId(attackerId) {
+  const otherSelected = selectionIds.find((id) => id !== attackerId);
+  if (otherSelected) return otherSelected;
+  const fallback = getTrackedCharacters().find((token) => token.id !== attackerId);
+  return fallback?.id ?? "";
+}
+function pushDebugEntry(title, body, kind = "info") {
+  debugEntries = [
+    {
+      id: Date.now(),
+      title,
+      body,
+      kind,
+      timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString()
+    },
+    ...debugEntries
+  ].slice(0, 12);
+}
+function renderDebugConsole() {
+  if (!debugEntries.length) {
+    ui.debugConsole.innerHTML = `
+      <div class="hint-box">
+        <div class="field-label">Current viewer</div>
+        <pre class="console-output">Name: ${escapeHtml(playerName || "Unknown")}
+Player ID: ${escapeHtml(playerId || "Unavailable")}
+
+Roll debug will appear here after Attack or Roll Dice.</pre>
+      </div>`;
+    return;
+  }
+  ui.debugConsole.innerHTML = debugEntries.map(
+    (entry) => `
+        <div class="debug-entry">
+          <div class="debug-head">
+            <div class="debug-title">${escapeHtml(entry.title)}</div>
+            <div class="muted">${escapeHtml(entry.timestamp)}</div>
+          </div>
+          <pre class="console-output">${escapeHtml(entry.body)}</pre>
+        </div>`
+  ).join("");
+}
+function formatAttackDebug({
+  attackerName,
+  targetName,
+  targetPart,
+  attackSkillName,
+  attackSkillValue,
+  weaponDamage,
+  attackBonuses,
+  attackPenalties,
+  defenseBonuses,
+  defensePenalties,
+  targetParry,
+  targetArmor,
+  result,
+  beforeHp,
+  afterHp
+}) {
+  const lines = [
+    `Attacker: ${attackerName}`,
+    `Target: ${targetName}`,
+    `Target Part: ${targetPart}`,
+    "",
+    `Attack Roll: ${result.attackRoll}`,
+    `Attack Skill: ${attackSkillName} (${attackSkillValue} -> ${attackSkillValue * 10})`,
+    `Attack Bonuses: ${attackBonuses}`,
+    `Attack Penalties: ${attackPenalties}`,
+    `Attack Total: ${result.attackTotal}`,
+    "",
+    `Defense Roll: ${result.defenseRoll}`,
+    `Target Parry: ${targetParry} -> ${targetParry * 10}`,
+    `Defense Bonuses: ${defenseBonuses}`,
+    `Defense Penalties: ${defensePenalties}`,
+    `Defense Total: ${result.defenseTotal}`,
+    "",
+    `Weapon Damage: ${weaponDamage}`,
+    `Target Armor: ${targetArmor}`,
+    `Final Attack: ${result.damage?.totalAttack ?? result.attackTotal}`,
+    `Final Defense: ${result.damage?.totalDefense ?? result.defenseTotal}`,
+    `Outcome: ${result.outcome}`,
+    `Damage Label: ${result.damage?.label ?? "No damage"}`,
+    `HP Change: ${beforeHp} -> ${afterHp}`
+  ];
+  return lines.join("\n");
+}
+function formatDiceDebug({ tokenName, result }) {
+  return [
+    `Actor: ${tokenName}`,
+    `Dice: d${result.sides}`,
+    `Raw Roll: ${result.roll}`,
+    `Modifier: ${result.modifier}`,
+    `Total: ${result.total}`
+  ].join("\n");
+}
 function renderOwnerFields(data, disabledAttr) {
   return `
     <div class="preview-box">
       <div class="field-label">Odyssey ownership</div>
+      <div class="hint-box">
+        <div class="field-label">Current viewer</div>
+        <pre class="console-output">Name: ${escapeHtml(playerName || "Unknown")}
+Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
+      </div>
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Owner Player ID</span>
@@ -4402,6 +4466,9 @@ function renderOwnerFields(data, disabledAttr) {
           <span class="field-label">Owner Name</span>
           <input type="text" value="${escapeHtml(data.odyssey.owner.playerName)}" data-action="set-owner" data-field="playerName" ${disabledAttr}>
         </label>
+      </div>
+      <div class="row row-gap">
+        <button type="button" class="secondary" data-action="assign-owner-to-me" ${disabledAttr}>Assign To Current Viewer</button>
       </div>
     </div>
   `;
@@ -4414,9 +4481,7 @@ function renderOdysseyStats(token, data, disabledAttr) {
           <input type="number" min="0" max="10" value="${value}" data-action="set-odyssey-skill" data-skill="${escapeHtml(key)}" ${disabledAttr}>
         </label>`
   ).join("");
-  const weaponOptions = getAvailableWeapons(token, "melee").map(
-    (weapon) => `<option value="${escapeHtml(weapon.name)}">${escapeHtml(weapon.name)} (${weapon.damage >= 0 ? "+" : ""}${weapon.damage})</option>`
-  ).join("");
+  const primaryWeapon = getAvailableWeapons(token, "melee")[0] ?? { name: "Default", damage: 0 };
   return `
     <div class="preview-box">
       <div class="field-label">Odyssey stats</div>
@@ -4427,17 +4492,21 @@ function renderOdysseyStats(token, data, disabledAttr) {
           <input type="number" min="0" max="10" value="${data.odyssey.attributes.Parry}" data-action="set-odyssey-attribute" data-attribute="Parry" ${disabledAttr}>
         </label>
         <label class="field-stack">
+          <span class="field-label">Primary weapon name</span>
+          <input type="text" value="${escapeHtml(primaryWeapon.name)}" data-action="set-weapon-name" data-weapon-index="0" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
           <span class="field-label">Default weapon damage</span>
-          <input type="number" min="-99" max="99" value="${getAvailableWeapons(token, "melee")[0]?.damage ?? 0}" data-action="set-weapon-damage" data-weapon-index="0" ${disabledAttr}>
+          <input type="number" min="-99" max="99" value="${primaryWeapon.damage}" data-action="set-weapon-damage" data-weapon-index="0" ${disabledAttr}>
         </label>
       </div>
-      <div class="field-label">Primary melee weapon</div>
-      <div class="muted">${weaponOptions ? "Default weapon can be edited above." : "No weapons configured yet."}</div>
     </div>
   `;
 }
 function renderOdysseyActions(token, data, tokenLocked) {
-  const disabledAttr = tokenLocked ? "disabled" : "";
+  const targetCharacters = getTrackedCharacters().filter((item) => item.id !== token.id);
+  const defaultTargetId = resolveDefaultTargetTokenId(token.id);
+  const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const skillOptions = Object.entries(data.odyssey.skills).map(([key, value]) => `<option value="${escapeHtml(key)}">${escapeHtml(key)} (${value})</option>`).join("");
   const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
   return `
@@ -4447,6 +4516,16 @@ function renderOdysseyActions(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Attack skill</span>
           <select data-attack-field="skill">${skillOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Target token</span>
+          <select data-attack-field="targetTokenId" ${disabledAttr}>
+            ${targetCharacters.map(
+    (target) => `<option value="${target.id}" ${target.id === defaultTargetId ? "selected" : ""}>${escapeHtml(
+      getCharacterName(target)
+    )}</option>`
+  ).join("")}
+          </select>
         </label>
         <label class="field-stack">
           <span class="field-label">Target body part</span>
@@ -4475,6 +4554,7 @@ function renderOdysseyActions(token, data, tokenLocked) {
           <input type="number" value="0" data-attack-field="defensePenalties" ${disabledAttr}>
         </label>
       </div>
+      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the chosen target token." : "Track at least two tokens to perform an attack."}</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
       </div>
@@ -4508,18 +4588,9 @@ function renderSelectedToken() {
   const totals = getBodyTotals(data);
   const selected = selectionIds.includes(token.id);
   const tokenLocked = !canUseToken(token);
-  const lastRollText = data.lastRoll ? escapeHtml(
-    [
-      data.lastRoll.actorName || "Unknown",
-      data.lastRoll.total != null ? `roll ${data.lastRoll.total}` : "",
-      data.lastRoll.outcome || "",
-      data.lastRoll.targetPart ? `target ${data.lastRoll.targetPart}` : "",
-      data.lastRoll.summary || ""
-    ].filter(Boolean).join(" | ")
-  ) : "No rolls synced yet";
+  const lastRollText = data.lastRoll ? escapeHtml(data.lastRoll.summary || "Last roll recorded") : "No rolls synced yet";
   ui.selectionHint.textContent = selected ? "Selected on map" : "Showing current focus";
   const toggleButton = isEditable() ? `<button type="button" data-action="toggle-tracking" class="${tracked ? "danger" : "success"}">${tracked ? "Remove Tracking" : "Track Character"}</button>` : "";
-  const damageDisabled = !tracked || !isEditable() ? "disabled" : "";
   const fieldDisabled = !tracked || !isEditable() ? "disabled" : "";
   const odysseyOwnerDisabled = !tracked || !isEditable() ? "disabled" : "";
   ui.selectedTokenPanel.innerHTML = `
@@ -4541,14 +4612,6 @@ function renderSelectedToken() {
           <span class="chip-value">${totals.current}/${totals.max}</span>
         </div>
         <div class="stat-chip">
-          <span class="chip-label">Minor</span>
-          <span class="chip-value">${data.minor}</span>
-        </div>
-        <div class="stat-chip">
-          <span class="chip-label">Serious</span>
-          <span class="chip-value">${data.serious}</span>
-        </div>
-        <div class="stat-chip">
           <span class="chip-label">Owner</span>
           <span class="chip-value">${escapeHtml(odyssey.owner.playerName || odyssey.owner.playerId || "Unassigned")}</span>
         </div>
@@ -4559,42 +4622,23 @@ function renderSelectedToken() {
       ${renderOdysseyActions(token, { odyssey }, !tracked || tokenLocked)}
 
       <div class="preview-box">
-        <div class="field-label">Bridge identity</div>
-        <div class="damage-grid">
-          <div class="damage-card">
-            <div class="field-label">Player ID</div>
+        <div class="field-label">Token links</div>
+        <div class="form-grid">
+          <label class="field-stack">
+            <span class="field-label">Player ID</span>
             <input class="compact-input" type="text" value="${escapeHtml(
     data.identity.playerId
   )}" data-action="set-identity" data-field="playerId" ${fieldDisabled}>
-          </div>
-          <div class="damage-card">
-            <div class="field-label">Character ID</div>
+          </label>
+          <label class="field-stack">
+            <span class="field-label">Character ID</span>
             <input class="compact-input" type="text" value="${escapeHtml(
     data.identity.characterId
   )}" data-action="set-identity" data-field="characterId" ${fieldDisabled}>
-          </div>
+          </label>
         </div>
-        <div class="field-label">Last synced roll</div>
-        <pre>${lastRollText}</pre>
-      </div>
-
-      <div class="damage-grid">
-        <div class="damage-card">
-          <div class="field-label">Minor damage dots</div>
-          <div class="stepper">
-            <button type="button" data-action="change-damage" data-kind="minor" data-delta="-1" ${damageDisabled}>-</button>
-            <span>${data.minor}/4</span>
-            <button type="button" data-action="change-damage" data-kind="minor" data-delta="1" ${damageDisabled}>+</button>
-          </div>
-        </div>
-        <div class="damage-card">
-          <div class="field-label">Serious damage bars</div>
-          <div class="stepper">
-            <button type="button" data-action="change-damage" data-kind="serious" data-delta="-1" ${damageDisabled}>-</button>
-            <span>${data.serious}/2</span>
-            <button type="button" data-action="change-damage" data-kind="serious" data-delta="1" ${damageDisabled}>+</button>
-          </div>
-        </div>
+        <div class="field-label">Last roll summary</div>
+        <pre class="console-output">${lastRollText}</pre>
       </div>
 
       <div class="body-table-wrap">
@@ -4666,7 +4710,7 @@ function renderTrackedList() {
             <span>${escapeHtml(getCharacterName(token))}</span>
             <span class="pill hp">${totals.current}/${totals.max}</span>
           </div>
-          <div class="list-item-sub">Minor ${data.minor} - Serious ${data.serious} - ${controllable ? "Playable" : "Read only"}</div>
+          <div class="list-item-sub">${controllable ? "Playable" : "Read only"}</div>
         </button>`;
   }).join("");
 }
@@ -4696,6 +4740,7 @@ function renderAllCharacters() {
 function render() {
   ui.roleBadge.textContent = playerRole === "GM" ? "GM" : "PLAYER";
   renderSelectedToken();
+  renderDebugConsole();
   renderTrackedList();
   renderAllCharacters();
 }
@@ -4740,27 +4785,6 @@ async function toggleTracking(tokenId) {
     enableTracking ? `Tracking enabled for ${getCharacterName(token)}.` : `Tracking removed for ${getCharacterName(token)}.`,
     "success"
   );
-}
-async function changeDamage(kind, delta) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit damage values.", "error");
-    return;
-  }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
-    return;
-  }
-  await updateTrackerData(token.id, (current2) => ({
-    ...current2,
-    [kind]: clamp(
-      (current2[kind] ?? 0) + delta,
-      0,
-      kind === "minor" ? 4 : 2
-    )
-  }));
-  await ensureOverlayForToken(token.id);
-  await syncState();
 }
 async function changeBodyField(partName, field, delta) {
   if (!isEditable()) {
@@ -4913,6 +4937,28 @@ async function setWeaponDamage(index, value) {
   });
   await syncState();
 }
+async function setWeaponName(index, value) {
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapon names.", "error");
+    return;
+  }
+  const token = getCharacterById(activeTokenId);
+  if (!token || !isTrackedCharacter(token)) {
+    setStatus("Select a tracked character first.", "error");
+    return;
+  }
+  await updateTrackerData(token.id, (current2) => {
+    var _a;
+    const next = structuredClone(current2);
+    (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
+    if (!next.odyssey.weapons.melee[index]) {
+      next.odyssey.weapons.melee[index] = { name: "Default", damage: 0 };
+    }
+    next.odyssey.weapons.melee[index].name = String(value || "").trim() || "Default";
+    return next;
+  });
+  await syncState();
+}
 function getActionFieldValue(selector) {
   const tokenPanel = ui.selectedTokenPanel;
   const field = tokenPanel.querySelector(selector);
@@ -4922,17 +4968,29 @@ function getActionFieldValue(selector) {
   return field.value;
 }
 async function performAttack() {
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  const attacker = getCharacterById(activeTokenId);
+  if (!attacker || !isTrackedCharacter(attacker)) {
+    setStatus("Select an attacker token first.", "error");
     return;
   }
-  if (!canUseToken(token)) {
-    setStatus("You cannot roll for this token.", "error");
+  if (!canUseToken(attacker)) {
+    setStatus("You cannot roll for this attacker token.", "error");
     return;
   }
-  const trackerData = getTrackerData(token);
-  const odyssey = getOdysseyData(token);
+  const targetTokenId = getActionFieldValue('[data-attack-field="targetTokenId"]') || resolveDefaultTargetTokenId(attacker.id);
+  const target = getCharacterById(targetTokenId);
+  if (!target || !isTrackedCharacter(target)) {
+    setStatus("Choose a valid target token.", "error");
+    return;
+  }
+  if (target.id === attacker.id) {
+    setStatus("Attacker and target must be different tokens.", "error");
+    return;
+  }
+  const attackerData = getTrackerData(attacker);
+  const attackerOdyssey = getOdysseyData(attacker);
+  const targetData = getTrackerData(target);
+  const targetOdyssey = getOdysseyData(target);
   const skillName = getActionFieldValue('[data-attack-field="skill"]');
   const targetPart = getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(getActionFieldValue('[data-attack-field="weaponDamage"]')) || 0;
@@ -4940,23 +4998,48 @@ async function performAttack() {
   const attackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
-  const targetArmor = trackerData.body[targetPart]?.armor ?? 0;
+  const targetArmor = targetData.body[targetPart]?.armor ?? 0;
+  const beforeHp = targetData.body[targetPart]?.current ?? 0;
+  const targetParry = targetOdyssey.attributes.Parry ?? 0;
   const result = resolveAttack({
-    attackSkill: odyssey.skills[skillName] ?? 0,
+    attackSkill: attackerOdyssey.skills[skillName] ?? 0,
     weaponDamage,
     defenseBonuses,
     defensePenalties,
     attackBonuses,
     attackPenalties,
-    parry: odyssey.attributes.Parry ?? 0,
+    parry: targetParry,
     targetPart,
     targetArmor
   });
-  await updateTrackerData(token.id, (current2) => {
+  const afterHp = result.hit ? clamp(beforeHp + result.bodyDelta, 0, targetData.body[targetPart]?.max ?? beforeHp) : beforeHp;
+  await updateTrackerData(attacker.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
       actorName: playerName || "Owlbear Player",
+      summary: `${getCharacterName(attacker)} -> ${getCharacterName(target)}: ${result.summary}`,
+      outcome: result.outcome,
+      total: result.attackTotal,
+      targetPart: result.targetPart,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      source: "owlbear-extension"
+    };
+    next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
+    return next;
+  });
+  await updateTrackerData(target.id, (current2) => {
+    const next = structuredClone(current2);
+    if (result.hit && next.body[result.targetPart]) {
+      next.body[result.targetPart].current = clamp(
+        next.body[result.targetPart].current + result.bodyDelta,
+        0,
+        next.body[result.targetPart].max
+      );
+    }
+    next.lastRoll = {
+      eventId: 0,
+      actorName: getCharacterName(attacker),
       summary: result.summary,
       outcome: result.outcome,
       total: result.attackTotal,
@@ -4965,18 +5048,33 @@ async function performAttack() {
       source: "owlbear-extension"
     };
     next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
-    if (result.hit && next.body[result.targetPart]) {
-      next.body[result.targetPart].current = clamp(
-        next.body[result.targetPart].current + result.bodyDelta,
-        0,
-        next.body[result.targetPart].max
-      );
-    }
     return next;
   });
-  await ensureOverlayForToken(token.id);
+  await ensureOverlayForToken(attacker.id);
+  await ensureOverlayForToken(target.id);
+  pushDebugEntry(
+    `${getCharacterName(attacker)} attacks ${getCharacterName(target)}`,
+    formatAttackDebug({
+      attackerName: getCharacterName(attacker),
+      targetName: getCharacterName(target),
+      targetPart,
+      attackSkillName: skillName,
+      attackSkillValue: attackerOdyssey.skills[skillName] ?? 0,
+      weaponDamage,
+      attackBonuses,
+      attackPenalties,
+      defenseBonuses,
+      defensePenalties,
+      targetParry,
+      targetArmor,
+      result,
+      beforeHp,
+      afterHp
+    }),
+    result.hit ? "success" : "info"
+  );
   await syncState();
-  setStatus(result.summary, result.hit ? "success" : "info");
+  setStatus(`${getCharacterName(attacker)} -> ${getCharacterName(target)}: ${result.summary}`, result.hit ? "success" : "info");
 }
 async function performRollDice() {
   const token = getCharacterById(activeTokenId);
@@ -5007,6 +5105,10 @@ async function performRollDice() {
     return next;
   });
   await ensureOverlayForToken(token.id);
+  pushDebugEntry(`${getCharacterName(token)} rolls dice`, formatDiceDebug({
+    tokenName: getCharacterName(token),
+    result
+  }), "success");
   await syncState();
   setStatus(`d${result.sides} rolled ${result.total}.`, "success");
 }
@@ -5052,16 +5154,17 @@ function bindUiEvents() {
         setStatus(error?.message ?? "Unable to toggle tracking.", "error");
       });
     }
+    if (action === "assign-owner-to-me") {
+      void Promise.all([
+        setOwnerField("playerId", playerId),
+        setOwnerField("playerName", playerName)
+      ]).catch((error) => {
+        setStatus(error?.message ?? "Unable to assign current viewer.", "error");
+      });
+    }
     if (action === "focus-token" && activeTokenId) {
       void selectCharacter(activeTokenId).catch((error) => {
         setStatus(error?.message ?? "Unable to focus token.", "error");
-      });
-    }
-    if (action === "change-damage") {
-      const kind = actionNode.dataset.kind;
-      if (!kind) return;
-      void changeDamage(kind, delta).catch((error) => {
-        setStatus(error?.message ?? "Unable to update damage.", "error");
       });
     }
     if (action === "change-part" && partName && field) {
@@ -5111,6 +5214,13 @@ function bindUiEvents() {
       const index = Number(target.dataset.weaponIndex ?? 0);
       void setWeaponDamage(index, target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save weapon damage.", "error");
+      });
+      return;
+    }
+    if (target.dataset.action === "set-weapon-name") {
+      const index = Number(target.dataset.weaponIndex ?? 0);
+      void setWeaponName(index, target.value).catch((error) => {
+        setStatus(error?.message ?? "Unable to save weapon name.", "error");
       });
       return;
     }

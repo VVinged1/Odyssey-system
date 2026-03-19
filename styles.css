@@ -232,6 +232,44 @@ select:disabled {
   padding: 10px;
 }
 
+.debug-entry {
+  background: rgba(7, 16, 31, 0.78);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.debug-entry + .debug-entry {
+  margin-top: 10px;
+}
+
+.debug-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.debug-title {
+  font-weight: 700;
+}
+
+.console-output {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #dbeafe;
+}
+
+.hint-box {
+  background: rgba(29, 78, 216, 0.12);
+  border: 1px solid rgba(147, 197, 253, 0.18);
+  border-radius: 12px;
+  padding: 10px;
+}
+
 .field-label {
   color: var(--muted);
   font-size: 12px;

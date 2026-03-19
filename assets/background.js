@@ -3988,23 +3988,10 @@ function getCharacterName(item) {
 }
 function formatOverlayText(data) {
   const body = data.body;
-  const lines = [
+  return [
     `L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
     `L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
-  ];
-  if (data.lastRoll) {
-    lines.push(`Last roll: ${formatLastRoll(data.lastRoll)}`);
-  }
-  return lines.join("\n");
-}
-function formatLastRoll(lastRoll) {
-  const parts = [];
-  if (lastRoll.actorName) parts.push(lastRoll.actorName);
-  if (lastRoll.total != null) parts.push(`roll ${lastRoll.total}`);
-  if (lastRoll.outcome) parts.push(lastRoll.outcome);
-  if (lastRoll.targetPart) parts.push(`target ${lastRoll.targetPart}`);
-  if (lastRoll.summary) parts.push(lastRoll.summary);
-  return parts.join(" | ");
+  ].join("\n");
 }
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
@@ -4069,28 +4056,6 @@ function buildOverlayCard(token, data, metrics) {
   const height = data.lastRoll ? 96 : 72;
   const offsetX = metrics.width / 2 + width / 2 + 18;
   return buildLabel().name(`Body HP: ${getCharacterName(token)}`).plainText(formatOverlayText(data)).width(width).height(height).padding(10).fontSize(13).fontWeight(600).lineHeight(1.18).textAlign("LEFT").textAlignVertical("MIDDLE").fillColor("#f8fafc").backgroundColor("#020617").backgroundOpacity(0.58).strokeColor("#cbd5e1").strokeOpacity(0.45).strokeWidth(1).cornerRadius(12).pointerDirection("LEFT").pointerWidth(10).pointerHeight(12).position(getWorldPosition(token, metrics.center, offsetX, 0)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).metadata({ [OVERLAY_KEY]: token.id, kind: "body-card" }).build();
-}
-function buildMinorDots(token, data, metrics) {
-  const items = [];
-  const startX = -metrics.markerSize / 2 + 12;
-  const y = metrics.markerSize / 2 - 12;
-  for (let index = 0; index < data.minor; index += 1) {
-    items.push(
-      buildShape().shapeType("CIRCLE").width(8).height(8).position(getWorldPosition(token, metrics.center, startX + index * 10, y)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor("#f59e0b").fillOpacity(0.98).strokeColor("#111827").strokeWidth(1).metadata({ [OVERLAY_KEY]: token.id, kind: "minor", index }).build()
-    );
-  }
-  return items;
-}
-function buildSeriousBars(token, data, metrics) {
-  const items = [];
-  const x = metrics.markerSize / 2 - 12;
-  const startY = -metrics.markerSize / 2 + 13;
-  for (let index = 0; index < data.serious; index += 1) {
-    items.push(
-      buildShape().shapeType("RECTANGLE").width(4).height(18).position(getWorldPosition(token, metrics.center, x - index * 8, startY)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor("#ef4444").fillOpacity(0.98).strokeColor("#111827").strokeWidth(1).metadata({ [OVERLAY_KEY]: token.id, kind: "serious", index }).build()
-    );
-  }
-  return items;
 }
 function buildBodyFigure(token, data, metrics) {
   const parts = [];
@@ -4189,9 +4154,7 @@ function applyRollEventToData(current2, event) {
 function buildOverlayItems(token, data, metrics) {
   return [
     buildOverlayCard(token, data, metrics),
-    ...buildBodyFigure(token, data, metrics),
-    ...buildMinorDots(token, data, metrics),
-    ...buildSeriousBars(token, data, metrics)
+    ...buildBodyFigure(token, data, metrics)
   ];
 }
 async function updateTrackerData(tokenId, updater) {

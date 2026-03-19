@@ -1,15 +1,15 @@
 {
-   "name": "Odyssey System",
-  "version": "1.1.0",
+  "name": "Body HP Tracker",
+  "version": "1.1.1",
   "manifest_version": 1,
-  "description": "OS.",
+  "description": "Track body part HP, armor, minor damage and serious damage for character tokens.",
   "author": "Codex",
-  "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg",
-  "background_url": "https://VVinged1.github.io/Odyssey-system/background.html",
+  "icon": "https://limonety995-maker.github.io/owlbear-hp/icon.svg",
+  "background_url": "https://limonety995-maker.github.io/owlbear-hp/background.html",
   "action": {
-    "title": "OS",
-    "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg",
-    "popover": "https://VVinged1.github.io/Odyssey-system/index.html",
+    "title": "Body HP",
+    "icon": "https://limonety995-maker.github.io/owlbear-hp/icon.svg",
+    "popover": "https://limonety995-maker.github.io/owlbear-hp/index.html",
     "height": 860,
     "width": 560
   }

@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Body HP Tracker</title>
+    <title>Odyssey Combat Console</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div id="app">
       <header class="topbar">
         <div>
-          <h1>Body HP Tracker</h1>
+          <h1>Odyssey Combat Console</h1>
           <p class="sub">
-            Select a character token on the map, then edit its body HP here.
+            Select an attacker token, choose a target token, and resolve combat here.
           </p>
         </div>
         <div id="roleBadge" class="role-badge">...</div>
@@ -36,6 +36,14 @@
 
       <section class="panel">
         <div class="section-head">
+          <div class="section-title">Debug Console</div>
+          <div class="muted">Last rolls and full combat tables</div>
+        </div>
+        <div id="debugConsole"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
           <div class="section-title">Tracked Characters</div>
           <div id="trackedCount" class="muted">0</div>
         </div>
@@ -51,6 +59,6 @@
       </section>
     </div>
 
-    <script type="module" src="./assets/main.js?v=1.1.0"></script>
+    <script type="module" src="./assets/main.js?v=1.1.1"></script>
   </body>
 </html>

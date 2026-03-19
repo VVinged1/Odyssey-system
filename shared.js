@@ -195,16 +195,10 @@ export function sortCharacters(items) {
 
 export function formatOverlayText(data) {
   const body = data.body;
-  const lines = [
+  return [
     `L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
     `L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`,
-  ];
-
-  if (data.lastRoll) {
-    lines.push(`Last roll: ${formatLastRoll(data.lastRoll)}`);
-  }
-
-  return lines.join("\n");
+  ].join("\n");
 }
 
 export function formatLastRoll(lastRoll) {
@@ -536,8 +530,6 @@ export function buildOverlayItems(token, data, metrics) {
   return [
     buildOverlayCard(token, data, metrics),
     ...buildBodyFigure(token, data, metrics),
-    ...buildMinorDots(token, data, metrics),
-    ...buildSeriousBars(token, data, metrics),
   ];
 }
 

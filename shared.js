@@ -5,25 +5,29 @@ export { OBR };
 export const EXTENSION_ID = "com.codex.body-hp";
 export const META_KEY = `${EXTENSION_ID}/data`;
 export const OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
-export const BODY_ORDER = ["L.Arm", "Head", "R.Arm", "L.Leg", "Torso", "R.Leg"];
+export const BODY_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
 export const ROLL_HISTORY_LIMIT = 12;
 export const COMBAT_SKILL_CATEGORY = "combat";
 export const APPLIED_SKILL_CATEGORY = "applied";
-export const MELEE_SKILL_NAME = "Рукопашный";
+export const MELEE_SKILL_NAME = "Melee";
+export const PARRY_SKILL_NAME = "Parry";
+const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
 export const DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
+  [PARRY_SKILL_NAME]: 0,
 };
 export const DEFAULT_ODYSSEY_SKILL_CATEGORIES = {
   [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
+  [PARRY_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
 };
 
 export const BODY_DEFAULTS = {
-  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   Head: { current: 1, max: 1, armor: 0, minor: 0, serious: 0 },
+  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
+  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
 };
 
@@ -59,7 +63,6 @@ export const DEFAULT_TRACKER_DATA = {
       Charisma: 0,
       Willpower: 0,
       Magic: 0,
-      Parry: 0,
     },
     weapons: {
       melee: [],
@@ -132,18 +135,29 @@ export function sanitizeOdysseyData(raw) {
 
   const migratedMeleeValue = Math.max(
     Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
-    Number(rawSkills.Hand ?? 0) || 0,
-    Number(rawSkills.Cold ?? 0) || 0,
+    ...Array.from(LEGACY_MELEE_SKILL_NAMES).map((skillName) => Number(rawSkills[skillName] ?? 0) || 0),
     Number(DEFAULT_ODYSSEY_SKILLS[MELEE_SKILL_NAME] ?? 0) || 0,
+  );
+  const migratedParryValue = Math.max(
+    Number(rawSkills[PARRY_SKILL_NAME] ?? 0) || 0,
+    Number(raw.attributes?.Parry ?? 0) || 0,
+    Number(DEFAULT_ODYSSEY_SKILLS[PARRY_SKILL_NAME] ?? 0) || 0,
   );
 
   next.skills[MELEE_SKILL_NAME] = clamp(migratedMeleeValue, 0, 10);
   next.skillCategories[MELEE_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  next.skills[PARRY_SKILL_NAME] = clamp(migratedParryValue, 0, 10);
+  next.skillCategories[PARRY_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
 
   for (const [key, value] of Object.entries(rawSkills)) {
     const normalizedKey = String(key).trim();
     if (!normalizedKey) continue;
-    if (normalizedKey === MELEE_SKILL_NAME || LEGACY_REMOVED_SKILLS.has(normalizedKey)) {
+    if (
+      normalizedKey === MELEE_SKILL_NAME ||
+      normalizedKey === PARRY_SKILL_NAME ||
+      LEGACY_MELEE_SKILL_NAMES.has(normalizedKey) ||
+      LEGACY_REMOVED_SKILLS.has(normalizedKey)
+    ) {
       continue;
     }
 
@@ -162,7 +176,7 @@ export function sanitizeOdysseyData(raw) {
       key === "Magic"
         ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0
         : raw.attributes?.[key] ?? 0;
-    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 99);
+    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 15);
   }
 
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
@@ -241,8 +255,8 @@ export function sortCharacters(items) {
 export function formatOverlayText(data) {
   const body = data.body;
   return [
-    `L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
-    `L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`,
+    `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
+    `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`,
   ].join("\n");
 }
 

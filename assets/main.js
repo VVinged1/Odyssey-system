@@ -3835,24 +3835,28 @@ var lib_default = OBR;
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
-var BODY_ORDER = ["L.Arm", "Head", "R.Arm", "L.Leg", "Torso", "R.Leg"];
+var BODY_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
-var MELEE_SKILL_NAME = "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439";
+var MELEE_SKILL_NAME = "Melee";
+var PARRY_SKILL_NAME = "Parry";
+var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
 var DEFAULT_ODYSSEY_SKILLS = {
-  [MELEE_SKILL_NAME]: 0
+  [MELEE_SKILL_NAME]: 0,
+  [PARRY_SKILL_NAME]: 0
 };
 var DEFAULT_ODYSSEY_SKILL_CATEGORIES = {
-  [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY
+  [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
+  [PARRY_SKILL_NAME]: COMBAT_SKILL_CATEGORY
 };
 var BODY_DEFAULTS = {
-  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   Head: { current: 1, max: 1, armor: 0, minor: 0, serious: 0 },
+  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
+  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 }
 };
 var DEFAULT_TRACKER_DATA = {
@@ -3886,8 +3890,7 @@ var DEFAULT_TRACKER_DATA = {
       Intelligence: 0,
       Charisma: 0,
       Willpower: 0,
-      Magic: 0,
-      Parry: 0
+      Magic: 0
     },
     weapons: {
       melee: [],
@@ -3942,16 +3945,22 @@ function sanitizeOdysseyData(raw) {
   const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
   const migratedMeleeValue = Math.max(
     Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
-    Number(rawSkills.Hand ?? 0) || 0,
-    Number(rawSkills.Cold ?? 0) || 0,
+    ...Array.from(LEGACY_MELEE_SKILL_NAMES).map((skillName) => Number(rawSkills[skillName] ?? 0) || 0),
     Number(DEFAULT_ODYSSEY_SKILLS[MELEE_SKILL_NAME] ?? 0) || 0
+  );
+  const migratedParryValue = Math.max(
+    Number(rawSkills[PARRY_SKILL_NAME] ?? 0) || 0,
+    Number(raw.attributes?.Parry ?? 0) || 0,
+    Number(DEFAULT_ODYSSEY_SKILLS[PARRY_SKILL_NAME] ?? 0) || 0
   );
   next.skills[MELEE_SKILL_NAME] = clamp(migratedMeleeValue, 0, 10);
   next.skillCategories[MELEE_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  next.skills[PARRY_SKILL_NAME] = clamp(migratedParryValue, 0, 10);
+  next.skillCategories[PARRY_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
   for (const [key, value] of Object.entries(rawSkills)) {
     const normalizedKey = String(key).trim();
     if (!normalizedKey) continue;
-    if (normalizedKey === MELEE_SKILL_NAME || LEGACY_REMOVED_SKILLS.has(normalizedKey)) {
+    if (normalizedKey === MELEE_SKILL_NAME || normalizedKey === PARRY_SKILL_NAME || LEGACY_MELEE_SKILL_NAMES.has(normalizedKey) || LEGACY_REMOVED_SKILLS.has(normalizedKey)) {
       continue;
     }
     next.skills[normalizedKey] = clamp(Number(value) || 0, 0, 10);
@@ -3962,7 +3971,7 @@ function sanitizeOdysseyData(raw) {
   }
   for (const key of Object.keys(next.attributes)) {
     const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;
-    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 99);
+    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 15);
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged);
@@ -4025,8 +4034,8 @@ function sortCharacters(items) {
 function formatOverlayText(data) {
   const body = data.body;
   return [
-    `L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
-    `L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
+    `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
+    `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
   ].join("\n");
 }
 function getOdysseyData(item) {
@@ -4277,8 +4286,20 @@ function resolveAttack({
   let bodyDelta = 0;
   if (criticalSuccess) {
     outcome = "critical-success";
-    damage = calculateDamage(accuracy.attackTotal + 20, accuracy.defenseTotal, weaponDamage, targetArmor);
-    bodyDelta = -(damage.crit || 0);
+    const baseDamage = calculateDamage(
+      accuracy.attackTotal,
+      accuracy.defenseTotal,
+      weaponDamage,
+      targetArmor
+    );
+    damage = {
+      ...baseDamage,
+      label: "Critical hit: 2 Crit.",
+      crit: 2,
+      serious: 0,
+      minor: 0
+    };
+    bodyDelta = -2;
   } else if (criticalFailure) {
     outcome = "critical-failure";
   } else if (hit) {
@@ -4320,18 +4341,19 @@ function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, de
 
 // main.js
 var DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
+var DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
 var CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
+var ATTACK_ONLY_EXCLUDED_SKILLS = /* @__PURE__ */ new Set([PARRY_SKILL_NAME]);
 var ATTRIBUTE_UI_FIELDS = [
-  ["Strength", "\u0421\u0438\u043B\u0430 (\u0421)"],
-  ["Agility", "\u041B\u043E\u0432\u043A\u043E\u0441\u0442\u044C (\u041B)"],
-  ["Reaction", "\u0420\u0435\u0430\u043A\u0446\u0438\u044F (\u0420)"],
-  ["Endurance", "\u0412\u044B\u043D\u043E\u0441\u043B\u0438\u0432\u043E\u0441\u0442\u044C (\u0412\u041D)"],
-  ["Perception", "\u0412\u043E\u0441\u043F\u0440\u0438\u044F\u0442\u0438\u0435 (\u0412\u0421)"],
-  ["Intelligence", "\u0418\u043D\u0442\u0435\u043B\u043B\u0435\u043A\u0442 (\u0418)"],
-  ["Charisma", "\u0425\u0430\u0440\u0438\u0437\u043C\u0430 (\u0425)"],
-  ["Willpower", "\u0421\u0438\u043B\u0430 \u0412\u043E\u043B\u0438 (\u0421\u0412)"],
-  ["Magic", "\u041C\u0430\u0433\u0438\u044F (\u041C)"],
-  ["Parry", "Parry"]
+  ["Strength", "Strength"],
+  ["Agility", "Agility"],
+  ["Reaction", "Reaction"],
+  ["Endurance", "Endurance"],
+  ["Perception", "Perception"],
+  ["Intelligence", "Intelligence"],
+  ["Charisma", "Charisma"],
+  ["Willpower", "Willpower"],
+  ["Magic", "Magic"]
 ];
 var ui = {
   roleBadge: document.getElementById("roleBadge"),
@@ -4371,6 +4393,15 @@ function sanitizeDebugEntries(raw) {
     timestamp: String(entry.timestamp ?? "")
   })).slice(0, 30);
 }
+function mergeDebugEntries(...entryGroups) {
+  const merged = /* @__PURE__ */ new Map();
+  for (const group of entryGroups) {
+    for (const entry of sanitizeDebugEntries(group)) {
+      merged.set(entry.id, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => Number(right.id) - Number(left.id)).slice(0, 30);
+}
 function setStatus(message, kind = "info") {
   ui.statusBox.textContent = message;
   ui.statusBox.className = `status ${kind}`;
@@ -4392,6 +4423,11 @@ function getCombatSkillEntries(odyssey) {
     ([skillName]) => getSkillCategory(odyssey, skillName) === COMBAT_SKILL_CATEGORY
   );
 }
+function getAttackSkillEntries(odyssey) {
+  return getCombatSkillEntries(odyssey).filter(
+    ([skillName]) => !ATTACK_ONLY_EXCLUDED_SKILLS.has(skillName)
+  );
+}
 function getAppliedSkillEntries(odyssey) {
   return getSortedSkillEntries(odyssey).filter(
     ([skillName]) => getSkillCategory(odyssey, skillName) === APPLIED_SKILL_CATEGORY
@@ -4406,8 +4442,8 @@ function buildGroupedSkillOptions(odyssey, selectedValue = "") {
   const combatOptions = buildSkillOptions(getCombatSkillEntries(odyssey), selectedValue);
   const appliedOptions = buildSkillOptions(getAppliedSkillEntries(odyssey), selectedValue);
   return [
-    combatOptions ? `<optgroup label="\u0411\u043E\u0435\u0432\u044B\u0435">${combatOptions}</optgroup>` : "",
-    appliedOptions ? `<optgroup label="\u041F\u0440\u0438\u043A\u043B\u0430\u0434\u043D\u044B\u0435">${appliedOptions}</optgroup>` : ""
+    combatOptions ? `<optgroup label="Combat">${combatOptions}</optgroup>` : "",
+    appliedOptions ? `<optgroup label="Applied">${appliedOptions}</optgroup>` : ""
   ].filter(Boolean).join("");
 }
 function getTransientFieldKey(field) {
@@ -4557,16 +4593,19 @@ async function pushDebugEntry(title, body, kind = "info") {
     timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString()
   };
   const metadata = await lib_default.room.getMetadata();
-  const currentEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
-  const nextEntries = [
-    entry,
-    ...currentEntries
-  ].slice(0, 30);
+  const nextEntries = mergeDebugEntries([entry], metadata?.[DEBUG_LOG_KEY], debugEntries);
   debugEntries = nextEntries;
   renderDebugConsole();
-  await lib_default.room.setMetadata({
-    [DEBUG_LOG_KEY]: nextEntries
-  });
+  await lib_default.broadcast.sendMessage(
+    DEBUG_BROADCAST_CHANNEL,
+    { type: "debug-entry", entry },
+    { destination: "REMOTE" }
+  );
+  if (playerRole === "GM") {
+    await lib_default.room.setMetadata({
+      [DEBUG_LOG_KEY]: nextEntries
+    });
+  }
 }
 function renderDebugConsole() {
   if (!debugEntries.length) {
@@ -4593,7 +4632,7 @@ Actions from all players and the GM will appear here after rolls and attacks.</p
 }
 async function loadSharedDebugConsole() {
   const metadata = await lib_default.room.getMetadata();
-  debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+  debugEntries = mergeDebugEntries(metadata?.[DEBUG_LOG_KEY], debugEntries);
 }
 function arraysEqual(left, right) {
   if (left.length !== right.length) return false;
@@ -4761,7 +4800,7 @@ function formatTextTable(headers, rows) {
 function getAttackDraft(token, data, targetCharacters) {
   const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
   const stored = attackFormDrafts.get(token.id) ?? {};
-  const combatSkillNames = getCombatSkillEntries(data.odyssey).map(([skillName]) => skillName);
+  const combatSkillNames = getAttackSkillEntries(data.odyssey).map(([skillName]) => skillName);
   const fallbackSkill = combatSkillNames[0] ?? CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0];
   return {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
@@ -4842,7 +4881,7 @@ function renderOwnerFields(data, disabledAttr) {
     )
   ].join("");
   return renderCollapsibleSection(
-    "Odyssey ownership",
+    "Ownership",
     `
       <div class="hint-box">
         <div class="field-label">Current viewer</div>
@@ -4864,11 +4903,11 @@ function renderCharacteristicsBlock(data, disabledAttr) {
     ([key, label]) => `
       <label class="field-stack">
         <span class="field-label">${escapeHtml(label)}</span>
-        <input type="number" min="0" max="99" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
+        <input type="number" min="0" max="15" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
       </label>`
   ).join("");
   return renderCollapsibleSection(
-    "\u0425\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A\u0438",
+    "Characteristics",
     `<div class="form-grid">${attributeInputs}</div>`,
     false
   );
@@ -4883,7 +4922,7 @@ function renderOdysseySkillRows(skillEntries, disabledAttr) {
         </div>`
   ).join("");
 }
-function renderOdysseySkillsBlock(data, disabledAttr) {
+function renderEnglishSkillsBlock(data, disabledAttr) {
   const combatSkillRows = renderOdysseySkillRows(
     getCombatSkillEntries(data.odyssey),
     disabledAttr
@@ -4893,26 +4932,26 @@ function renderOdysseySkillsBlock(data, disabledAttr) {
     disabledAttr
   );
   return renderCollapsibleSection(
-    "\u0420\u045C\u0420\xB0\u0420\u0406\u0421\u2039\u0420\u0454\u0420\u0451",
+    "Skills",
     `
-      <div class="field-label">\u0411\u043E\u0435\u0432\u044B\u0435</div>
-      <div class="list">${combatSkillRows || '<div class="empty">\u041D\u0435\u0442 \u0431\u043E\u0435\u0432\u044B\u0445 \u043D\u0430\u0432\u044B\u043A\u043E\u0432.</div>'}</div>
-      <div class="field-label">\u041F\u0440\u0438\u043A\u043B\u0430\u0434\u043D\u044B\u0435</div>
-      <div class="list">${appliedSkillRows || '<div class="empty">\u041D\u0435\u0442 \u043F\u0440\u0438\u043A\u043B\u0430\u0434\u043D\u044B\u0445 \u043D\u0430\u0432\u044B\u043A\u043E\u0432.</div>'}</div>
+      <div class="field-label">Combat</div>
+      <div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div>
+      <div class="field-label">Applied</div>
+      <div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div>
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">\u0420\u045C\u0420\xB0\u0420\xB7\u0420\u0406\u0420\xB0\u0420\u0405\u0420\u0451\u0420\xB5 \u0420\u0405\u0420\xB0\u0420\u0406\u0421\u2039\u0420\u0454\u0420\xB0</span>
+          <span class="field-label">Skill Name</span>
           <input type="text" data-skill-field="new-name" placeholder="New skill" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">\u0420\u2014\u0420\u0405\u0420\xB0\u0421\u2021\u0420\xB5\u0420\u0405\u0420\u0451\u0420\xB5</span>
+          <span class="field-label">Value</span>
           <input type="number" min="0" max="10" value="0" data-skill-field="new-value" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">\u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F</span>
+          <span class="field-label">Category</span>
           <select data-skill-field="new-category" ${disabledAttr}>
-            <option value="${COMBAT_SKILL_CATEGORY}">\u0411\u043E\u0435\u0432\u043E\u0439</option>
-            <option value="${APPLIED_SKILL_CATEGORY}" selected>\u041F\u0440\u0438\u043A\u043B\u0430\u0434\u043D\u043E\u0439</option>
+            <option value="${COMBAT_SKILL_CATEGORY}">Combat</option>
+            <option value="${APPLIED_SKILL_CATEGORY}" selected>Applied</option>
           </select>
         </label>
       </div>
@@ -4923,24 +4962,23 @@ function renderOdysseySkillsBlock(data, disabledAttr) {
     false
   );
 }
-function renderOdysseyAttackBlock(token, data, tokenLocked) {
+function renderEnglishAttackBlock(token, data, tokenLocked) {
   const targetCharacters = getCharacters().filter(
     (item) => item.id !== token.id && item.visible !== false
   );
   const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft2 = getAttackDraft(token, data, targetCharacters);
-  const combatSkillEntries = getCombatSkillEntries(data.odyssey);
-  const skillOptions = buildSkillOptions(combatSkillEntries, draft2.skill);
+  const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill);
   return renderCollapsibleSection(
-    "\u0420\u0452\u0421\u201A\u0420\xB0\u0420\u0454\u0420\xB0",
+    "Attack",
     `
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">Attack skill</span>
+          <span class="field-label">Attack Skill</span>
           <select data-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
         </label>
         <label class="field-stack">
-          <span class="field-label">Target token</span>
+          <span class="field-label">Target Token</span>
           <select data-attack-field="targetTokenId" ${disabledAttr}>
             ${targetCharacters.map(
       (target) => `<option value="${target.id}" ${target.id === draft2.targetTokenId ? "selected" : ""}>${escapeHtml(
@@ -4950,7 +4988,7 @@ function renderOdysseyAttackBlock(token, data, tokenLocked) {
           </select>
         </label>
         <label class="field-stack">
-          <span class="field-label">Target body part</span>
+          <span class="field-label">Target Body Part</span>
           <select data-attack-field="targetPart" ${disabledAttr}>
             ${BODY_ORDER.map(
       (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
@@ -4958,28 +4996,28 @@ function renderOdysseyAttackBlock(token, data, tokenLocked) {
           </select>
         </label>
         <label class="field-stack">
-          <span class="field-label">Weapon damage</span>
+          <span class="field-label">Weapon Damage</span>
           <input type="number" value="${draft2.weaponDamage}" data-attack-field="weaponDamage" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">Attack bonuses</span>
+          <span class="field-label">Attack Bonus</span>
           <input type="number" value="${draft2.attackBonuses}" data-attack-field="attackBonuses" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">Attack penalties</span>
+          <span class="field-label">Attack Penalty</span>
           <input type="number" value="${draft2.attackPenalties}" data-attack-field="attackPenalties" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">Defense bonuses</span>
+          <span class="field-label">Defense Bonus</span>
           <input type="number" value="${draft2.defenseBonuses}" data-attack-field="defenseBonuses" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">Defense penalties</span>
+          <span class="field-label">Defense Penalty</span>
           <input type="number" value="${draft2.defensePenalties}" data-attack-field="defensePenalties" ${disabledAttr}>
         </label>
       </div>
-      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the chosen target token." : "Add at least two character tokens to perform an attack."}</div>
-      <div class="muted">\u0414\u043B\u044F \u043D\u0430\u0432\u044B\u043A\u0430 "${escapeHtml(MELEE_SKILL_NAME)}" \u0441\u0438\u043B\u0430 \u0432\u044B\u0448\u0435 10 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043A \u0443\u0440\u043E\u043D\u0443 \u043E\u0440\u0443\u0436\u0438\u044F.</div>
+      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the selected target token." : "Add at least two visible character tokens to perform an attack."}</div>
+      <div class="muted">For ${escapeHtml(MELEE_SKILL_NAME)} attacks, Strength above 10 adds to weapon damage automatically. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
       </div>
@@ -4987,8 +5025,8 @@ function renderOdysseyAttackBlock(token, data, tokenLocked) {
     true
   );
 }
-function renderOdysseyDiceBlock(token, data, tokenLocked) {
-  const attributeOptions = ATTRIBUTE_UI_FIELDS.filter(([key]) => key !== "Parry").map(
+function renderEnglishDiceBlock(token, data, tokenLocked) {
+  const attributeOptions = ATTRIBUTE_UI_FIELDS.map(
     ([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)} (${data.odyssey.attributes[key] ?? 0})</option>`
   ).join("");
   const skillOptions = buildGroupedSkillOptions(data.odyssey);
@@ -4998,7 +5036,7 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
     `
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">Dice sides</span>
+          <span class="field-label">Dice Sides</span>
           <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
         </label>
         <label class="field-stack">
@@ -5012,7 +5050,7 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
 
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">\u0425\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A\u0430</span>
+          <span class="field-label">Characteristic</span>
           <select data-roll-char-field="attribute" ${tokenLockedAttr}>${attributeOptions}</select>
         </label>
         <label class="field-stack">
@@ -5021,12 +5059,12 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
         </label>
       </div>
       <div class="row row-gap">
-        <button type="button" data-action="perform-roll-char" ${tokenLockedAttr}>\u0425\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A\u0430</button>
+        <button type="button" data-action="perform-roll-char" ${tokenLockedAttr}>Roll Characteristic</button>
       </div>
 
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">\u041D\u0430\u0432\u044B\u043A</span>
+          <span class="field-label">Skill</span>
           <select data-roll-skill-field="skill" ${tokenLockedAttr}>${skillOptions}</select>
         </label>
         <label class="field-stack">
@@ -5035,7 +5073,7 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
         </label>
       </div>
       <div class="row row-gap">
-        <button type="button" data-action="perform-roll-skill" ${tokenLockedAttr}>\u041D\u0430\u0432\u044B\u043A</button>
+        <button type="button" data-action="perform-roll-skill" ${tokenLockedAttr}>Roll Skill</button>
       </div>
     `,
     false
@@ -5112,7 +5150,7 @@ function renderSelectedToken() {
           <span class="chip-value">${totals.current}/${totals.max}</span>
         </div>
         <div class="stat-chip">
-          <span class="chip-label">Owner</span>
+          <span class="chip-label">Assigned Player</span>
           <span class="chip-value">${escapeHtml(odyssey.owner.playerName || odyssey.owner.playerId || "Unassigned")}</span>
         </div>
       </div>
@@ -5120,24 +5158,24 @@ function renderSelectedToken() {
       ${isEditable() ? `
             ${renderOwnerFields({ odyssey }, gmOnlyDisabled)}
             ${renderCharacteristicsBlock({ odyssey }, gmOnlyDisabled)}
-            ${renderOdysseySkillsBlock({ odyssey }, gmOnlyDisabled)}
+            ${renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled)}
           ` : ""}
-      ${renderOdysseyAttackBlock(token, { odyssey }, tokenLocked)}
-      ${renderOdysseyDiceBlock(token, { odyssey }, tokenLocked)}
+      ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
+      ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
       ${renderPrivateGmDiceBlock()}
       ${renderCollapsibleSection(
-    "Last roll summary",
+    "Last Roll",
     `<pre class="console-output">${lastRollText}</pre>`,
     false
   )}
       ${showPartBlock ? renderCollapsibleSection(
-    "Part",
+    "Body Parts",
     `
                 <div class="body-table-wrap">
                   <table class="body-table">
                     <thead>
                       <tr>
-                        <th>Part</th>
+                        <th>Body Part</th>
                         <th>Crit</th>
                         <th>Max</th>
                         <th>Armor</th>
@@ -5182,7 +5220,7 @@ function renderSelectedToken() {
     true
   ) : ""}
       ${renderCollapsibleSection(
-    "Overlay preview",
+    "Overlay Preview",
     `<pre class="console-output">${escapeHtml(formatOverlayText(data))}</pre>`,
     false
   )}
@@ -5393,7 +5431,7 @@ async function setOdysseyAttribute(attribute, value) {
   }
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
-    next.odyssey.attributes[attribute] = clamp(Number(value) || 0, 0, 99);
+    next.odyssey.attributes[attribute] = clamp(Number(value) || 0, 0, 15);
     return next;
   });
   await syncState();
@@ -5455,7 +5493,7 @@ async function autosaveDraftField(draft2) {
     }
     if (draft2.action === "set-odyssey-attribute") {
       if (!isEditable()) return next;
-      next.odyssey.attributes[draft2.attribute] = clamp(Number(draft2.value) || 0, 0, 99);
+      next.odyssey.attributes[draft2.attribute] = clamp(Number(draft2.value) || 0, 0, 15);
       return next;
     }
     if (draft2.action === "set-weapon-damage") {
@@ -5575,7 +5613,7 @@ async function performAttack() {
   const beforeSerious = targetPartState.serious ?? 0;
   const strengthBonus = skillName === MELEE_SKILL_NAME ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
-  const targetParry = skillName === MELEE_SKILL_NAME ? targetOdyssey.attributes.Parry ?? 0 : 0;
+  const targetParry = skillName === MELEE_SKILL_NAME ? targetOdyssey.skills[PARRY_SKILL_NAME] ?? 0 : 0;
   const result = resolveAttack({
     attackSkill: attackerOdyssey.skills[skillName] ?? 0,
     weaponDamage: finalWeaponDamage,
@@ -5713,7 +5751,7 @@ async function addOdysseySkill() {
     setStatus("Enter a skill name first.", "error");
     return;
   }
-  const category = name === MELEE_SKILL_NAME ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
+  const category = name === MELEE_SKILL_NAME || name === PARRY_SKILL_NAME ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
   await updateTrackerData(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
@@ -5763,7 +5801,7 @@ async function performRollChar() {
   const odyssey = getOdysseyData(token);
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
-  const summary = `\u0425\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A\u0430 ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
+  const summary = `Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
@@ -5780,7 +5818,7 @@ async function performRollChar() {
     return next;
   });
   await pushDebugEntry(
-    `${getCharacterName(token)} checks characteristic`,
+    `${getCharacterName(token)} rolls characteristic`,
     formatRollCharDebug({
       tokenName: getCharacterName(token),
       attributeLabel,
@@ -5809,7 +5847,7 @@ async function performRollSkill() {
   const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
-  const summary = `\u041D\u0430\u0432\u044B\u043A ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
+  const summary = `Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
@@ -6094,8 +6132,23 @@ lib_default.onReady(async () => {
       partyPlayers = players ?? [];
       render();
     });
+    lib_default.broadcast.onMessage(DEBUG_BROADCAST_CHANNEL, (event) => {
+      const payload = event?.data;
+      if (!payload || typeof payload !== "object") return;
+      if (payload.type !== "debug-entry") return;
+      const nextEntries = mergeDebugEntries([payload.entry], debugEntries);
+      debugEntries = nextEntries;
+      renderDebugConsole();
+      if (playerRole === "GM") {
+        void lib_default.room.setMetadata({
+          [DEBUG_LOG_KEY]: nextEntries
+        }).catch((error) => {
+          console.warn("[Body HP] Unable to persist broadcast debug entry", error);
+        });
+      }
+    });
     lib_default.room.onMetadataChange((metadata) => {
-      debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+      debugEntries = mergeDebugEntries(metadata?.[DEBUG_LOG_KEY], debugEntries);
       renderDebugConsole();
     });
   } catch (error) {

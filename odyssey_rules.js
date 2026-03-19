@@ -109,8 +109,20 @@ export function resolveAttack({
 
   if (criticalSuccess) {
     outcome = "critical-success";
-    damage = calculateDamage(accuracy.attackTotal + 20, accuracy.defenseTotal, weaponDamage, targetArmor);
-    bodyDelta = -(damage.crit || 0);
+    const baseDamage = calculateDamage(
+      accuracy.attackTotal,
+      accuracy.defenseTotal,
+      weaponDamage,
+      targetArmor,
+    );
+    damage = {
+      ...baseDamage,
+      label: "Critical hit: 2 Crit.",
+      crit: 2,
+      serious: 0,
+      minor: 0,
+    };
+    bodyDelta = -2;
   } else if (criticalFailure) {
     outcome = "critical-failure";
   } else if (hit) {

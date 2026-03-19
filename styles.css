@@ -423,6 +423,10 @@ select {
   font-size: 13px;
 }
 
+.hidden {
+  display: none !important;
+}
+
 @media (max-width: 640px) {
   html,
   body {

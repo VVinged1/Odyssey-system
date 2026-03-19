@@ -4290,8 +4290,10 @@ var ui = {
   selectionHint: document.getElementById("selectionHint"),
   selectedTokenPanel: document.getElementById("selectedTokenPanel"),
   debugConsole: document.getElementById("debugConsole"),
+  trackedSection: document.getElementById("trackedSection"),
   trackedCount: document.getElementById("trackedCount"),
   trackedList: document.getElementById("trackedList"),
+  allTokensSection: document.getElementById("allTokensSection"),
   allCount: document.getElementById("allCount"),
   allTokensList: document.getElementById("allTokensList")
 };
@@ -4303,6 +4305,7 @@ var selectionIds = [];
 var activeTokenId = null;
 var debugEntries = [];
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
+var selectionPollTimer = null;
 function sanitizeDebugEntries(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((entry) => entry && typeof entry === "object").map((entry) => ({
@@ -4407,6 +4410,25 @@ Roll debug will appear here after Attack or Roll Dice.</pre>
 async function loadSharedDebugConsole() {
   const metadata = await lib_default.room.getMetadata();
   debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+}
+function arraysEqual(left, right) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+function startSelectionPolling() {
+  if (selectionPollTimer) {
+    clearInterval(selectionPollTimer);
+  }
+  selectionPollTimer = setInterval(() => {
+    void lib_default.player.getSelection().then((selection) => selection ?? []).then((selection) => {
+      if (!arraysEqual(selectionIds, selection)) {
+        return syncState();
+      }
+      return null;
+    }).catch((error) => {
+      console.warn("[Body HP] Selection polling failed", error);
+    });
+  }, 350);
 }
 function formatAttackDebug({
   attackerName,
@@ -4735,10 +4757,14 @@ function renderAllCharacters() {
 }
 function render() {
   ui.roleBadge.textContent = playerRole === "GM" ? "GM" : "PLAYER";
+  ui.trackedSection.classList.toggle("hidden", playerRole !== "GM");
+  ui.allTokensSection.classList.toggle("hidden", playerRole !== "GM");
   renderSelectedToken();
   renderDebugConsole();
-  renderTrackedList();
-  renderAllCharacters();
+  if (playerRole === "GM") {
+    renderTrackedList();
+    renderAllCharacters();
+  }
 }
 async function syncState(showToast = false) {
   const [role, id, name, items, selection] = await Promise.all([
@@ -5351,6 +5377,7 @@ lib_default.onReady(async () => {
     bindUiEvents();
     await loadSharedDebugConsole();
     await syncState(true);
+    startSelectionPolling();
     setStatus(
       "Ready. Select a character token on the map to edit it here.",
       "info"

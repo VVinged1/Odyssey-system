@@ -35,11 +35,13 @@
       </section>
 
       <section class="panel">
-        <div class="section-head">
-          <div class="section-title">Debug Console</div>
-          <div class="muted">Last rolls and full combat tables</div>
-        </div>
-        <div id="debugConsole"></div>
+        <details class="collapsible-block" data-section-key="global:debug-console" open>
+          <summary class="collapsible-title">Debug Console</summary>
+          <div class="collapsible-body">
+            <div class="muted">Last rolls and full combat tables</div>
+            <div id="debugConsole"></div>
+          </div>
+        </details>
       </section>
 
       <section class="panel" id="trackedSection">
@@ -59,6 +61,6 @@
       </section>
     </div>
 
-    <script type="module" src="./assets/main.js?v=1.1.11-fix1"></script>
+    <script type="module" src="./assets/main.js?v=1.1.11-fix3"></script>
   </body>
 </html>

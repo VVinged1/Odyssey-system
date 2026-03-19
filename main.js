@@ -1,6 +1,9 @@
 import {
+  APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
+  COMBAT_SKILL_CATEGORY,
   DEFAULT_ODYSSEY_SKILLS,
+  MELEE_SKILL_NAME,
   OBR,
   canPlayerControlToken,
   clamp,
@@ -106,6 +109,164 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function getSkillCategory(odyssey, skillName) {
+  return odyssey?.skillCategories?.[skillName] === COMBAT_SKILL_CATEGORY
+    ? COMBAT_SKILL_CATEGORY
+    : APPLIED_SKILL_CATEGORY;
+}
+
+function getSortedSkillEntries(odyssey) {
+  return Object.entries(odyssey?.skills ?? {}).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+}
+
+function getCombatSkillEntries(odyssey) {
+  return getSortedSkillEntries(odyssey).filter(
+    ([skillName]) => getSkillCategory(odyssey, skillName) === COMBAT_SKILL_CATEGORY,
+  );
+}
+
+function getAppliedSkillEntries(odyssey) {
+  return getSortedSkillEntries(odyssey).filter(
+    ([skillName]) => getSkillCategory(odyssey, skillName) === APPLIED_SKILL_CATEGORY,
+  );
+}
+
+function buildSkillOptions(skillEntries, selectedValue = "") {
+  return skillEntries
+    .map(
+      ([key, value]) => `<option value="${escapeHtml(key)}" ${
+        key === selectedValue ? "selected" : ""
+      }>${escapeHtml(key)} (${value})</option>`,
+    )
+    .join("");
+}
+
+function buildGroupedSkillOptions(odyssey, selectedValue = "") {
+  const combatOptions = buildSkillOptions(getCombatSkillEntries(odyssey), selectedValue);
+  const appliedOptions = buildSkillOptions(getAppliedSkillEntries(odyssey), selectedValue);
+
+  return [
+    combatOptions ? `<optgroup label="Боевые">${combatOptions}</optgroup>` : "",
+    appliedOptions ? `<optgroup label="Прикладные">${appliedOptions}</optgroup>` : "",
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function getTransientFieldKey(field) {
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) {
+    return "";
+  }
+
+  if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
+  if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
+  if (field.dataset.rollCharField) return `roll-char:${field.dataset.rollCharField}`;
+  if (field.dataset.rollSkillField) return `roll-skill:${field.dataset.rollSkillField}`;
+  if (field.dataset.gmRollField) return `gm-roll:${field.dataset.gmRollField}`;
+  if (field.dataset.skillField) return `new-skill:${field.dataset.skillField}`;
+
+  if (field.dataset.action === "select-owner-player") return "owner";
+  if (field.dataset.action === "set-odyssey-skill") return `skill:${field.dataset.skill ?? ""}`;
+  if (field.dataset.action === "set-odyssey-attribute") {
+    return `attribute:${field.dataset.attribute ?? ""}`;
+  }
+  if (field.dataset.action === "set-field") {
+    return `part:${field.dataset.part ?? ""}:${field.dataset.field ?? ""}`;
+  }
+
+  return "";
+}
+
+function shouldPreserveFieldValue(fieldKey, focusedKey) {
+  return (
+    fieldKey === focusedKey ||
+    fieldKey.startsWith("attack:") ||
+    fieldKey.startsWith("roll:") ||
+    fieldKey.startsWith("roll-char:") ||
+    fieldKey.startsWith("roll-skill:") ||
+    fieldKey.startsWith("gm-roll:") ||
+    fieldKey.startsWith("new-skill:")
+  );
+}
+
+function captureSelectedPanelState() {
+  if (!activeTokenId || !ui.selectedTokenPanel.childElementCount) return null;
+
+  let focusedKey = "";
+  let selectionStart = null;
+  let selectionEnd = null;
+  const activeField = document.activeElement;
+  if (
+    (activeField instanceof HTMLInputElement || activeField instanceof HTMLSelectElement) &&
+    ui.selectedTokenPanel.contains(activeField)
+  ) {
+    focusedKey = getTransientFieldKey(activeField);
+    if (activeField instanceof HTMLInputElement && activeField.type !== "number") {
+      selectionStart = activeField.selectionStart;
+      selectionEnd = activeField.selectionEnd;
+    }
+  }
+
+  const fields = [];
+  ui.selectedTokenPanel.querySelectorAll("input, select").forEach((field) => {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) return;
+    const key = getTransientFieldKey(field);
+    if (!key || !shouldPreserveFieldValue(key, focusedKey)) return;
+    fields.push([key, field.value]);
+  });
+
+  return {
+    tokenId: activeTokenId,
+    fields,
+    focusedKey,
+    selectionStart,
+    selectionEnd,
+  };
+}
+
+function restoreSelectedPanelState(panelState) {
+  if (!panelState || panelState.tokenId !== activeTokenId) return;
+
+  const fieldValues = new Map(panelState.fields ?? []);
+  let focusedField = null;
+
+  ui.selectedTokenPanel.querySelectorAll("input, select").forEach((field) => {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) return;
+    const key = getTransientFieldKey(field);
+    if (!key || !fieldValues.has(key)) return;
+
+    const nextValue = fieldValues.get(key);
+    if (field instanceof HTMLSelectElement) {
+      const hasMatchingOption = Array.from(field.options).some(
+        (option) => option.value === nextValue,
+      );
+      if (!hasMatchingOption) return;
+    }
+
+    field.value = nextValue;
+    if (key === panelState.focusedKey) {
+      focusedField = field;
+    }
+  });
+
+  if (!focusedField) return;
+
+  focusedField.focus({ preventScroll: true });
+  if (
+    focusedField instanceof HTMLInputElement &&
+    typeof panelState.selectionStart === "number" &&
+    typeof panelState.selectionEnd === "number"
+  ) {
+    try {
+      focusedField.setSelectionRange(panelState.selectionStart, panelState.selectionEnd);
+    } catch (error) {
+      console.warn("[Body HP] Unable to restore cursor position", error);
+    }
+  }
+}
+
 function getSortedPartyPlayers() {
   return [...partyPlayers].sort((left, right) =>
     String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
@@ -161,9 +322,13 @@ function canEditTokenData(token) {
 
 async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
-  if (!token || !isCharacterToken(token)) return;
-  await updateTrackerData(tokenId, (current) => current);
+  if (!token || !isCharacterToken(token)) return false;
+  const shouldInitialize = !isTrackedCharacter(token);
+  if (shouldInitialize) {
+    await updateTrackerData(tokenId, (current) => current);
+  }
   await ensureOverlayForToken(tokenId);
+  return shouldInitialize;
 }
 
 function resolveDefaultTargetTokenId(attackerId) {
@@ -179,15 +344,18 @@ function resolveDefaultTargetTokenId(attackerId) {
 }
 
 async function pushDebugEntry(title, body, kind = "info") {
+  const entry = {
+    id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+    title,
+    body,
+    kind,
+    timestamp: new Date().toLocaleTimeString(),
+  };
+  const metadata = await OBR.room.getMetadata();
+  const currentEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
   const nextEntries = [
-    {
-      id: Date.now(),
-      title,
-      body,
-      kind,
-      timestamp: new Date().toLocaleTimeString(),
-    },
-    ...debugEntries,
+    entry,
+    ...currentEntries,
   ].slice(0, 30);
 
   debugEntries = nextEntries;
@@ -205,7 +373,7 @@ function renderDebugConsole() {
         <pre class="console-output">Name: ${escapeHtml(playerName || "Unknown")}
 Player ID: ${escapeHtml(playerId || "Unavailable")}
 
-Roll debug will appear here after Attack or Roll Dice.</pre>
+Actions from all players and the GM will appear here after rolls and attacks.</pre>
       </div>`;
     return;
   }
@@ -252,7 +420,7 @@ function startSelectionPolling() {
       .catch((error) => {
         console.warn("[Body HP] Selection polling failed", error);
       });
-  }, 350);
+  }, 200);
 }
 
 function formatAttackDebug({
@@ -364,7 +532,7 @@ function formatDiceDebug({ tokenName, result }) {
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
     `Character: ${tokenName}`,
-    `Attribute: ${attributeLabel}`,
+    `Characteristic: ${attributeLabel}`,
     `${result.result}`,
     "",
     formatTextTable(
@@ -419,11 +587,16 @@ function formatTextTable(headers, rows) {
 function getAttackDraft(token, data, targetCharacters) {
   const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
   const stored = attackFormDrafts.get(token.id) ?? {};
+  const combatSkillNames = getCombatSkillEntries(data.odyssey).map(([skillName]) => skillName);
+  const fallbackSkill =
+    combatSkillNames[0] ??
+    CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ??
+    CORE_COMBAT_SKILLS[0];
 
   return {
-    skill: CORE_COMBAT_SKILLS.includes(stored.skill)
+    skill: combatSkillNames.includes(stored.skill)
       ? stored.skill
-      : CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0],
+      : fallbackSkill,
     targetTokenId: targetCharacters.some((target) => target.id === stored.targetTokenId)
       ? stored.targetTokenId
       : resolveDefaultTargetTokenId(token.id),
@@ -1075,6 +1248,197 @@ function renderDiceBlock(token, data, tokenLocked) {
   );
 }
 
+function renderOdysseySkillRows(skillEntries, disabledAttr) {
+  return skillEntries
+    .map(
+      ([key, value]) => `
+        <div class="skill-row">
+          <div class="skill-name">${escapeHtml(key)}</div>
+          <input type="number" min="0" max="10" value="${value}" data-action="set-odyssey-skill" data-skill="${escapeHtml(key)}" ${disabledAttr}>
+          <button type="button" class="danger" data-action="remove-skill" data-skill="${escapeHtml(key)}" ${
+            CORE_COMBAT_SKILLS.includes(key) ? "disabled" : disabledAttr
+          }>${CORE_COMBAT_SKILLS.includes(key) ? "Core" : "Remove"}</button>
+        </div>`
+    )
+    .join("");
+}
+
+function renderOdysseySkillsBlock(data, disabledAttr) {
+  const combatSkillRows = renderOdysseySkillRows(
+    getCombatSkillEntries(data.odyssey),
+    disabledAttr,
+  );
+  const appliedSkillRows = renderOdysseySkillRows(
+    getAppliedSkillEntries(data.odyssey),
+    disabledAttr,
+  );
+
+  return renderCollapsibleSection(
+    "РќР°РІС‹РєРё",
+    `
+      <div class="field-label">Боевые</div>
+      <div class="list">${combatSkillRows || '<div class="empty">Нет боевых навыков.</div>'}</div>
+      <div class="field-label">Прикладные</div>
+      <div class="list">${appliedSkillRows || '<div class="empty">Нет прикладных навыков.</div>'}</div>
+      <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">РќР°Р·РІР°РЅРёРµ РЅР°РІС‹РєР°</span>
+          <input type="text" data-skill-field="new-name" placeholder="New skill" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Р—РЅР°С‡РµРЅРёРµ</span>
+          <input type="number" min="0" max="10" value="0" data-skill-field="new-value" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Категория</span>
+          <select data-skill-field="new-category" ${disabledAttr}>
+            <option value="${COMBAT_SKILL_CATEGORY}">Боевой</option>
+            <option value="${APPLIED_SKILL_CATEGORY}" selected>Прикладной</option>
+          </select>
+        </label>
+      </div>
+      <div class="row row-gap">
+        <button type="button" class="secondary" data-action="add-skill" ${disabledAttr}>Add Skill</button>
+      </div>
+    `,
+    false,
+  );
+}
+
+function renderOdysseyAttackBlock(token, data, tokenLocked) {
+  const targetCharacters = getCharacters().filter(
+    (item) => item.id !== token.id && item.visible !== false,
+  );
+  const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
+  const draft = getAttackDraft(token, data, targetCharacters);
+  const combatSkillEntries = getCombatSkillEntries(data.odyssey);
+  const skillOptions = buildSkillOptions(combatSkillEntries, draft.skill);
+
+  return renderCollapsibleSection(
+    "РђС‚Р°РєР°",
+    `
+      <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">Attack skill</span>
+          <select data-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Target token</span>
+          <select data-attack-field="targetTokenId" ${disabledAttr}>
+            ${targetCharacters
+              .map(
+                (target) =>
+                  `<option value="${target.id}" ${target.id === draft.targetTokenId ? "selected" : ""}>${escapeHtml(
+                    getCharacterName(target)
+                  )}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Target body part</span>
+          <select data-attack-field="targetPart" ${disabledAttr}>
+            ${BODY_ORDER.map(
+              (part) =>
+                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon damage</span>
+          <input type="number" value="${draft.weaponDamage}" data-attack-field="weaponDamage" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Attack bonuses</span>
+          <input type="number" value="${draft.attackBonuses}" data-attack-field="attackBonuses" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Attack penalties</span>
+          <input type="number" value="${draft.attackPenalties}" data-attack-field="attackPenalties" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Defense bonuses</span>
+          <input type="number" value="${draft.defenseBonuses}" data-attack-field="defenseBonuses" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Defense penalties</span>
+          <input type="number" value="${draft.defensePenalties}" data-attack-field="defensePenalties" ${disabledAttr}>
+        </label>
+      </div>
+      <div class="muted">${
+        targetCharacters.length
+          ? "Attack goes from the selected attacker token to the chosen target token."
+          : "Add at least two character tokens to perform an attack."
+      }</div>
+      <div class="muted">Для навыка "${escapeHtml(MELEE_SKILL_NAME)}" сила выше 10 автоматически добавляется к урону оружия.</div>
+      <div class="row row-gap">
+        <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
+      </div>
+    `,
+    true,
+  );
+}
+
+function renderOdysseyDiceBlock(token, data, tokenLocked) {
+  const attributeOptions = ATTRIBUTE_UI_FIELDS
+    .filter(([key]) => key !== "Parry")
+    .map(
+      ([key, label]) =>
+        `<option value="${escapeHtml(key)}">${escapeHtml(label)} (${data.odyssey.attributes[key] ?? 0})</option>`
+    )
+    .join("");
+  const skillOptions = buildGroupedSkillOptions(data.odyssey);
+  const tokenLockedAttr = tokenLocked ? "disabled" : "";
+
+  return renderCollapsibleSection(
+    "Dice",
+    `
+      <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">Dice sides</span>
+          <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Modifier</span>
+          <input type="number" value="0" data-roll-field="modifier">
+        </label>
+      </div>
+      <div class="row row-gap">
+        <button type="button" data-action="perform-roll-dice">Roll Dice</button>
+      </div>
+
+      <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">Характеристика</span>
+          <select data-roll-char-field="attribute" ${tokenLockedAttr}>${attributeOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Bonus / Penalty</span>
+          <input type="number" value="0" data-roll-char-field="modifier" ${tokenLockedAttr}>
+        </label>
+      </div>
+      <div class="row row-gap">
+        <button type="button" data-action="perform-roll-char" ${tokenLockedAttr}>Характеристика</button>
+      </div>
+
+      <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">Навык</span>
+          <select data-roll-skill-field="skill" ${tokenLockedAttr}>${skillOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Bonus / Penalty</span>
+          <input type="number" value="0" data-roll-skill-field="modifier" ${tokenLockedAttr}>
+        </label>
+      </div>
+      <div class="row row-gap">
+        <button type="button" data-action="perform-roll-skill" ${tokenLockedAttr}>Навык</button>
+      </div>
+    `,
+    false,
+  );
+}
+
 function renderPrivateGmDiceBlock() {
   if (!isEditable()) return "";
 
@@ -1116,6 +1480,7 @@ function renderPrivateGmDiceBlock() {
 }
 
 function renderSelectedToken() {
+  const panelState = captureSelectedPanelState();
   activeTokenId = resolveActiveTokenId();
   const token = getCharacterById(activeTokenId);
 
@@ -1171,12 +1536,12 @@ function renderSelectedToken() {
           ? `
             ${renderOwnerFields({ odyssey }, gmOnlyDisabled)}
             ${renderCharacteristicsBlock({ odyssey }, gmOnlyDisabled)}
-            ${renderSkillsBlock({ odyssey }, gmOnlyDisabled)}
+            ${renderOdysseySkillsBlock({ odyssey }, gmOnlyDisabled)}
           `
           : ""
       }
-      ${renderCombatBlock(token, { odyssey }, tokenLocked)}
-      ${renderDiceBlock(token, { odyssey }, tokenLocked)}
+      ${renderOdysseyAttackBlock(token, { odyssey }, tokenLocked)}
+      ${renderOdysseyDiceBlock(token, { odyssey }, tokenLocked)}
       ${renderPrivateGmDiceBlock()}
       ${renderCollapsibleSection(
         "Last roll summary",
@@ -1244,6 +1609,8 @@ function renderSelectedToken() {
         false,
       )}
     </div>`;
+
+  restoreSelectedPanelState(panelState);
 }
 
 function renderTrackedList() {
@@ -1341,8 +1708,13 @@ async function syncState(showToast = false) {
     sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
   );
   if (selectedCharacterId) {
-    await initializeCharacterToken(selectedCharacterId);
-    sceneItems = await OBR.scene.items.getItems();
+    activeTokenId = selectedCharacterId;
+    const initialized = await initializeCharacterToken(selectedCharacterId);
+    if (initialized) {
+      sceneItems = await OBR.scene.items.getItems();
+    }
+  } else if (activeTokenId && !sceneItems.some((item) => item.id === activeTokenId)) {
+    activeTokenId = null;
   }
 
   render();
@@ -1683,11 +2055,11 @@ async function performAttack() {
   const beforeHp = targetPartState.current ?? 0;
   const beforeMinor = targetPartState.minor ?? 0;
   const beforeSerious = targetPartState.serious ?? 0;
-  const strengthBonus = ["Hand", "Cold"].includes(skillName)
+  const strengthBonus = skillName === MELEE_SKILL_NAME
     ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0)
     : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
-  const targetParry = ["Hand", "Cold"].includes(skillName)
+  const targetParry = skillName === MELEE_SKILL_NAME
     ? targetOdyssey.attributes.Parry ?? 0
     : 0;
 
@@ -1841,10 +2213,18 @@ async function addOdysseySkill() {
     setStatus("Enter a skill name first.", "error");
     return;
   }
+  const category =
+    name === MELEE_SKILL_NAME
+      ? COMBAT_SKILL_CATEGORY
+      : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY
+        ? COMBAT_SKILL_CATEGORY
+        : APPLIED_SKILL_CATEGORY;
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey.skills[name] = value;
+    next.odyssey.skillCategories ??= {};
+    next.odyssey.skillCategories[name] = category;
     return next;
   });
   await syncState();
@@ -1870,6 +2250,7 @@ async function removeOdysseySkill(skillName) {
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     delete next.odyssey.skills[skillName];
+    delete next.odyssey.skillCategories?.[skillName];
     return next;
   });
   await syncState();
@@ -1893,7 +2274,7 @@ async function performRollChar() {
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel =
     ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
-  const summary = `Roll_Char ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
+  const summary = `Характеристика ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
@@ -1912,7 +2293,7 @@ async function performRollChar() {
   });
 
   await pushDebugEntry(
-    `${getCharacterName(token)} uses Roll_Char`,
+    `${getCharacterName(token)} checks characteristic`,
     formatRollCharDebug({
       tokenName: getCharacterName(token),
       attributeLabel,
@@ -1944,7 +2325,7 @@ async function performRollSkill() {
   const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
-  const summary = `Roll_Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
+  const summary = `Навык ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
@@ -1963,7 +2344,7 @@ async function performRollSkill() {
   });
 
   await pushDebugEntry(
-    `${getCharacterName(token)} uses Roll_Skill`,
+    `${getCharacterName(token)} checks skill`,
     formatRollSkillDebug({
       tokenName: getCharacterName(token),
       skillName,
@@ -2263,19 +2644,13 @@ OBR.onReady(async () => {
         sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
       );
       if (selectedCharacterId) {
-        void initializeCharacterToken(selectedCharacterId)
-          .then(() => OBR.scene.items.getItems())
-          .then((items) => {
-            sceneItems = items;
-            render();
-          })
-          .catch((error) => {
-            console.warn("[Body HP] Auto-init on selection failed", error);
-            render();
-          });
-        return;
+        activeTokenId = selectedCharacterId;
       }
-      render();
+
+      void syncState().catch((error) => {
+        console.warn("[Body HP] Player state sync failed", error);
+        render();
+      });
     });
 
     OBR.party.onChange((players) => {

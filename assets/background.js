@@ -3837,12 +3837,15 @@ var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
 var BODY_ORDER = ["L.Arm", "Head", "R.Arm", "L.Leg", "Torso", "R.Leg"];
 var ROLL_HISTORY_LIMIT = 12;
+var COMBAT_SKILL_CATEGORY = "combat";
+var APPLIED_SKILL_CATEGORY = "applied";
+var MELEE_SKILL_NAME = "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439";
+var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
 var DEFAULT_ODYSSEY_SKILLS = {
-  Hand: 0,
-  Cold: 0,
-  Throwing: 0,
-  Rifle: 0,
-  Turrets: 0
+  [MELEE_SKILL_NAME]: 0
+};
+var DEFAULT_ODYSSEY_SKILL_CATEGORIES = {
+  [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY
 };
 var BODY_DEFAULTS = {
   "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
@@ -3873,6 +3876,7 @@ var DEFAULT_TRACKER_DATA = {
       playerName: ""
     },
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
+    skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -3935,10 +3939,26 @@ function sanitizeOdysseyData(raw) {
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
   const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
-  for (const key of Object.keys({ ...DEFAULT_ODYSSEY_SKILLS, ...rawSkills })) {
+  const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
+  const migratedMeleeValue = Math.max(
+    Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
+    Number(rawSkills.Hand ?? 0) || 0,
+    Number(rawSkills.Cold ?? 0) || 0,
+    Number(DEFAULT_ODYSSEY_SKILLS[MELEE_SKILL_NAME] ?? 0) || 0
+  );
+  next.skills[MELEE_SKILL_NAME] = clamp(migratedMeleeValue, 0, 10);
+  next.skillCategories[MELEE_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  for (const [key, value] of Object.entries(rawSkills)) {
     const normalizedKey = String(key).trim();
     if (!normalizedKey) continue;
-    next.skills[normalizedKey] = clamp(Number(rawSkills[key] ?? DEFAULT_ODYSSEY_SKILLS[key] ?? 0) || 0, 0, 10);
+    if (normalizedKey === MELEE_SKILL_NAME || LEGACY_REMOVED_SKILLS.has(normalizedKey)) {
+      continue;
+    }
+    next.skills[normalizedKey] = clamp(Number(value) || 0, 0, 10);
+    const categoryValue = String(
+      rawSkillCategories[normalizedKey] ?? rawSkillCategories[key] ?? ""
+    ).toLowerCase();
+    next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
   }
   for (const key of Object.keys(next.attributes)) {
     const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;

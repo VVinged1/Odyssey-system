@@ -72,6 +72,8 @@ let activeTokenId = null;
 let debugEntries = [];
 let partyPlayers = [];
 let gmPrivateEntries = [];
+const collapsibleSectionState = new Map();
+const attackFormDrafts = new Map();
 const inputAutosaveTimers = new Map();
 let selectionPollTimer = null;
 
@@ -165,9 +167,14 @@ async function initializeCharacterToken(tokenId) {
 }
 
 function resolveDefaultTargetTokenId(attackerId) {
-  const otherSelected = selectionIds.find((id) => id !== attackerId);
+  const visibleTargets = getCharacters().filter(
+    (token) => token.id !== attackerId && token.visible !== false,
+  );
+  const otherSelected = selectionIds.find(
+    (id) => id !== attackerId && visibleTargets.some((token) => token.id === id),
+  );
   if (otherSelected) return otherSelected;
-  const fallback = getTrackedCharacters().find((token) => token.id !== attackerId);
+  const fallback = visibleTargets[0];
   return fallback?.id ?? "";
 }
 
@@ -271,38 +278,46 @@ function formatAttackDebug({
   afterSerious,
   critApplied,
 }) {
-  const lines = [
-    `Attacker: ${attackerName}`,
-    `Target: ${targetName}`,
-    `Target Part: ${targetPart}`,
-    "",
-    `Attack Roll: ${result.attackRoll}`,
-    `Attack Skill: ${attackSkillName} (${attackSkillValue} -> ${attackSkillValue * 10})`,
-    `Attack Bonuses: ${attackBonuses}`,
-    `Attack Penalties: ${attackPenalties}`,
-    `Attack Total: ${result.attackTotal}`,
-    "",
-    `Defense Roll: ${result.defenseRoll}`,
-    `Target Parry: ${targetParry} -> ${targetParry * 10}`,
-    `Defense Bonuses: ${defenseBonuses}`,
-    `Defense Penalties: ${defensePenalties}`,
-    `Defense Total: ${result.defenseTotal}`,
-    "",
-    `Weapon Damage: ${weaponDamage}`,
-    `Strength Bonus: ${strengthBonus}`,
-    `Target Armor: ${targetArmor}`,
-    `Final Attack: ${result.damage?.totalAttack ?? result.attackTotal}`,
-    `Final Defense: ${result.damage?.totalDefense ?? result.defenseTotal}`,
-    `Outcome: ${result.outcome}`,
-    `Damage Diff: ${result.damage?.damageDiff ?? 0}`,
-    `Damage Label: ${result.damage?.label ?? "No damage"}`,
-    `Applied Min/Sir/Crit: ${result.damage?.minor ?? 0}/${result.damage?.serious ?? 0}/${result.damage?.crit ?? 0}`,
-    `Converted Crit: ${critApplied}`,
-    `HP Change: ${beforeHp} -> ${afterHp}`,
-    `Minor State: ${beforeMinor} -> ${afterMinor}`,
-    `Serious State: ${beforeSerious} -> ${afterSerious}`,
-  ];
-  return lines.join("\n");
+  const accuracyTable = formatTextTable(
+    ["Side", "Attacking", "Defending"],
+    [
+      [
+        "Accuracy",
+        `${result.attackRoll} + ${attackSkillValue * 10} + ${attackBonuses} - ${attackPenalties} = ${result.attackTotal}`,
+        `${result.defenseRoll} + ${targetParry * 10} + ${defenseBonuses} - ${defensePenalties} = ${result.defenseTotal}`,
+      ],
+      [
+        "Damage",
+        `${result.attackTotal} + ${weaponDamage}`,
+        `${result.defenseTotal} + ${targetArmor}`,
+      ],
+      [
+        "Result",
+        `${result.damage?.totalAttack ?? result.attackTotal}`,
+        `${result.damage?.totalDefense ?? result.defenseTotal}`,
+      ],
+    ],
+  );
+
+  const damageTable = formatTextTable(
+    ["Parameter", "Value"],
+    [
+      ["Attacker", attackerName],
+      ["Target", `${targetName} -> ${targetPart}`],
+      ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
+      ["Strength Bonus", strengthBonus],
+      ["Outcome", result.outcome],
+      ["Damage Diff", result.damage?.damageDiff ?? 0],
+      ["Damage Label", result.damage?.label ?? "No damage"],
+      ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
+      ["Converted Crit", critApplied],
+      ["Crit State", `${beforeHp} -> ${afterHp}`],
+      ["Minor State", `${beforeMinor} -> ${afterMinor}`],
+      ["Serious State", `${beforeSerious} -> ${afterSerious}`],
+    ],
+  );
+
+  return `${accuracyTable}\n\n${damageTable}`;
 }
 
 function projectPartDamage(part, damage) {
@@ -335,44 +350,109 @@ function projectPartDamage(part, damage) {
 }
 
 function formatDiceDebug({ tokenName, result }) {
-  return [
-    `Actor: ${tokenName}`,
-    `Dice: d${result.sides}`,
-    `Raw Roll: ${result.roll}`,
-    `Modifier: ${result.modifier}`,
-    `Total: ${result.total}`,
-  ].join("\n");
+  return formatTextTable(
+    ["Parameter", "Value"],
+    [
+      ["Actor", tokenName],
+      ["Roll", `${result.roll} (1-${result.sides})`],
+      ["Modifier", result.modifier],
+      ["Total", result.total],
+    ],
+  );
 }
 
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
-    `Actor: ${tokenName}`,
+    `Character: ${tokenName}`,
     `Attribute: ${attributeLabel}`,
-    `Roll: ${result.roll}`,
-    `Base Attribute: ${result.baseAttribute}`,
-    `Modifier: ${result.modifier}`,
-    `Final Attribute: ${result.finalAttribute}`,
-    `Outcome: ${result.result}`,
+    `${result.result}`,
+    "",
+    formatTextTable(
+      ["Roll", "Base Attribute", "Modifier", "Final Attribute"],
+      [[result.roll, result.baseAttribute, result.modifier, result.finalAttribute]],
+    ),
   ].join("\n");
 }
 
 function formatRollSkillDebug({ tokenName, skillName, result }) {
   return [
-    `Actor: ${tokenName}`,
+    `Character: ${tokenName}`,
     `Skill: ${skillName}`,
-    `First Roll: ${result.rollPrimary}`,
-    `Skill Bonus: ${result.baseSkill * 10}`,
-    `Modifier: ${result.modifier}`,
-    `First Total: ${result.totalPrimary}`,
-    `Second Roll: ${result.rollSecondary}`,
-    `Second Total: ${result.totalSecondary}`,
-    `Outcome: ${result.result}`,
+    `${result.result}`,
+    "",
+    formatTextTable(
+      ["Parameter", "Value"],
+      [
+        ["First Roll", `${result.rollPrimary} + ${result.baseSkill * 10} + ${result.modifier} = ${result.totalPrimary}`],
+        ["Second Roll", `${result.rollSecondary} = ${result.totalSecondary}`],
+      ],
+    ),
   ].join("\n");
 }
 
-function renderCollapsibleSection(title, content, open = false) {
+function formatTextTable(headers, rows) {
+  const normalizedHeaders = headers.map((cell) => String(cell ?? ""));
+  const normalizedRows = rows.map((row) => row.map((cell) => String(cell ?? "")));
+  const widths = normalizedHeaders.map((header, columnIndex) =>
+    Math.max(
+      header.length,
+      ...normalizedRows.map((row) => (row[columnIndex] ?? "").length),
+    ),
+  );
+
+  const renderBorder = (left, middle, right, fill) =>
+    `${left}${widths.map((width) => fill.repeat(width + 2)).join(middle)}${right}`;
+  const renderRow = (row) =>
+    `│ ${row
+      .map((cell, columnIndex) => String(cell ?? "").padEnd(widths[columnIndex], " "))
+      .join(" │ ")} │`;
+
+  return [
+    renderBorder("╒", "╤", "╕", "═"),
+    renderRow(normalizedHeaders),
+    renderBorder("╞", "╪", "╡", "═"),
+    ...normalizedRows.map(renderRow),
+    renderBorder("╘", "╧", "╛", "═"),
+  ].join("\n");
+}
+
+function getAttackDraft(token, data, targetCharacters) {
+  const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
+  const stored = attackFormDrafts.get(token.id) ?? {};
+
+  return {
+    skill: CORE_COMBAT_SKILLS.includes(stored.skill)
+      ? stored.skill
+      : CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0],
+    targetTokenId: targetCharacters.some((target) => target.id === stored.targetTokenId)
+      ? stored.targetTokenId
+      : resolveDefaultTargetTokenId(token.id),
+    targetPart: BODY_ORDER.includes(stored.targetPart) ? stored.targetPart : "Torso",
+    weaponDamage: stored.weaponDamage ?? String(defaultWeapon.damage),
+    attackBonuses: stored.attackBonuses ?? "0",
+    attackPenalties: stored.attackPenalties ?? "0",
+    defenseBonuses: stored.defenseBonuses ?? "0",
+    defensePenalties: stored.defensePenalties ?? "0",
+  };
+}
+
+function saveAttackDraftValue(tokenId, field, value) {
+  if (!tokenId || !field) return;
+  const current = attackFormDrafts.get(tokenId) ?? {};
+  attackFormDrafts.set(tokenId, {
+    ...current,
+    [field]: value,
+  });
+}
+
+function renderCollapsibleSection(title, content, open = false, sectionKey = "") {
+  const scopedSectionKey = `${activeTokenId ?? "global"}:${sectionKey || title}`;
+  const resolvedOpen = collapsibleSectionState.has(scopedSectionKey)
+    ? collapsibleSectionState.get(scopedSectionKey)
+    : open;
+
   return `
-    <details class="collapsible-block" ${open ? "open" : ""}>
+    <details class="collapsible-block" data-section-key="${escapeHtml(scopedSectionKey)}" ${resolvedOpen ? "open" : ""}>
       <summary class="collapsible-title">${escapeHtml(title)}</summary>
       <div class="collapsible-body">${content}</div>
     </details>
@@ -528,7 +608,7 @@ function legacyRenderCombatBlock(token, data, tokenLocked) {
             ${targetCharacters
               .map(
                 (target) =>
-                  `<option value="${target.id}" ${target.id === defaultTargetId ? "selected" : ""}>${escapeHtml(
+                  `<option value="${target.id}" ${target.id === draft.targetTokenId ? "selected" : ""}>${escapeHtml(
                     getCharacterName(target)
                   )}</option>`
               )
@@ -538,28 +618,31 @@ function legacyRenderCombatBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target body part</span>
           <select data-attack-field="targetPart">
-            ${BODY_ORDER.map((part) => `<option value="${part}">${part}</option>`).join("")}
+            ${BODY_ORDER.map(
+              (part) =>
+                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
+            ).join("")}
           </select>
         </label>
         <label class="field-stack">
           <span class="field-label">Weapon damage</span>
-          <input type="number" value="${defaultWeapon.damage}" data-attack-field="weaponDamage" ${disabledAttr}>
+          <input type="number" value="${draft.weaponDamage}" data-attack-field="weaponDamage" ${disabledAttr}>
         </label>
         <label class="field-stack">
           <span class="field-label">Attack bonuses</span>
-          <input type="number" value="0" data-attack-field="attackBonuses" ${disabledAttr}>
+          <input type="number" value="${draft.attackBonuses}" data-attack-field="attackBonuses" ${disabledAttr}>
         </label>
         <label class="field-stack">
           <span class="field-label">Attack penalties</span>
-          <input type="number" value="0" data-attack-field="attackPenalties" ${disabledAttr}>
+          <input type="number" value="${draft.attackPenalties}" data-attack-field="attackPenalties" ${disabledAttr}>
         </label>
         <label class="field-stack">
           <span class="field-label">Defense bonuses</span>
-          <input type="number" value="0" data-attack-field="defenseBonuses" ${disabledAttr}>
+          <input type="number" value="${draft.defenseBonuses}" data-attack-field="defenseBonuses" ${disabledAttr}>
         </label>
         <label class="field-stack">
           <span class="field-label">Defense penalties</span>
-          <input type="number" value="0" data-attack-field="defensePenalties" ${disabledAttr}>
+          <input type="number" value="${draft.defensePenalties}" data-attack-field="defensePenalties" ${disabledAttr}>
         </label>
       </div>
       <div class="muted">${
@@ -852,14 +935,17 @@ function renderSkillsBlock(data, disabledAttr) {
 }
 
 function renderCombatBlock(token, data, tokenLocked) {
-  const targetCharacters = getCharacters().filter((item) => item.id !== token.id);
-  const defaultTargetId = resolveDefaultTargetTokenId(token.id);
+  const targetCharacters = getCharacters().filter(
+    (item) => item.id !== token.id && item.visible !== false,
+  );
   const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
+  const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = CORE_COMBAT_SKILLS.map(
     (key) =>
-      `<option value="${escapeHtml(key)}">${escapeHtml(key)} (${data.odyssey.skills[key] ?? 0})</option>`
+      `<option value="${escapeHtml(key)}" ${
+        draft.skill === key ? "selected" : ""
+      }>${escapeHtml(key)} (${data.odyssey.skills[key] ?? 0})</option>`
   ).join("");
-  const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
 
   return renderCollapsibleSection(
     "Атака",
@@ -1045,6 +1131,7 @@ function renderSelectedToken() {
   const tokenLocked = !canUseToken(token);
   const bodyFieldDisabled = !canEditTokenData(token) ? "disabled" : "";
   const gmOnlyDisabled = !isEditable() ? "disabled" : "";
+  const showPartBlock = isEditable() || canUseToken(token);
   const lastRollText = data.lastRoll
     ? escapeHtml(data.lastRoll.summary || "Last roll recorded")
     : "No rolls synced yet";
@@ -1093,57 +1180,61 @@ function renderSelectedToken() {
         `<pre class="console-output">${lastRollText}</pre>`,
         false,
       )}
-      ${renderCollapsibleSection(
-        "Part",
-        `
-          <div class="body-table-wrap">
-            <table class="body-table">
-              <thead>
-                <tr>
-                  <th>Part</th>
-                  <th>Crit</th>
-                  <th>Max</th>
-                  <th>Armor</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${BODY_ORDER.map((partName) => {
-                  const part = data.body[partName];
-                  return `
-                    <tr>
-                      <td class="part-name">${escapeHtml(partName)}</td>
-                      <td>
-                        <div class="inline-stepper">
-                          <button type="button" data-action="change-part" data-part="${escapeHtml(
-                            partName
-                          )}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button>
-                          <input type="number" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
-                            partName
-                          )}" data-field="current" ${bodyFieldDisabled}>
-                          <button type="button" data-action="change-part" data-part="${escapeHtml(
-                            partName
-                          )}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button>
-                        </div>
-                      </td>
-                      <td>
-                        <input class="compact-input" type="number" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
-                          partName
-                        )}" data-field="max" ${bodyFieldDisabled}>
-                      </td>
-                      <td>
-                        <input class="compact-input" type="number" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
-                          partName
-                        )}" data-field="armor" ${bodyFieldDisabled}>
-                      </td>
-                    </tr>
-                  `;
-                }).join("")}
-              </tbody>
-            </table>
-          </div>
-        `,
-        true,
-      )}
+      ${
+        showPartBlock
+          ? renderCollapsibleSection(
+              "Part",
+              `
+                <div class="body-table-wrap">
+                  <table class="body-table">
+                    <thead>
+                      <tr>
+                        <th>Part</th>
+                        <th>Crit</th>
+                        <th>Max</th>
+                        <th>Armor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${BODY_ORDER.map((partName) => {
+                        const part = data.body[partName];
+                        return `
+                          <tr>
+                            <td class="part-name">${escapeHtml(partName)}</td>
+                            <td>
+                              <div class="inline-stepper">
+                                <button type="button" data-action="change-part" data-part="${escapeHtml(
+                                  partName
+                                )}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button>
+                                <input type="number" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
+                                  partName
+                                )}" data-field="current" ${bodyFieldDisabled}>
+                                <button type="button" data-action="change-part" data-part="${escapeHtml(
+                                  partName
+                                )}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button>
+                              </div>
+                            </td>
+                            <td>
+                              <input class="compact-input" type="number" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
+                                partName
+                              )}" data-field="max" ${bodyFieldDisabled}>
+                            </td>
+                            <td>
+                              <input class="compact-input" type="number" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
+                                partName
+                              )}" data-field="armor" ${bodyFieldDisabled}>
+                            </td>
+                          </tr>
+                        `;
+                      }).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              `,
+              true,
+            )
+          : ""
+      }
       ${renderCollapsibleSection(
         "Overlay preview",
         `<pre class="console-output">${escapeHtml(formatOverlayText(data))}</pre>`,
@@ -1556,6 +1647,10 @@ async function performAttack() {
     setStatus("Choose a valid target token.", "error");
     return;
   }
+  if (target.visible === false) {
+    setStatus("Hidden tokens cannot be targeted.", "error");
+    return;
+  }
   if (target.id === attacker.id) {
     setStatus("Attacker and target must be different tokens.", "error");
     return;
@@ -1572,6 +1667,14 @@ async function performAttack() {
   const attackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
+  saveAttackDraftValue(attacker.id, "skill", skillName);
+  saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
+  saveAttackDraftValue(attacker.id, "targetPart", targetPart);
+  saveAttackDraftValue(attacker.id, "weaponDamage", getActionFieldValue('[data-attack-field="weaponDamage"]'));
+  saveAttackDraftValue(attacker.id, "attackBonuses", getActionFieldValue('[data-attack-field="attackBonuses"]'));
+  saveAttackDraftValue(attacker.id, "attackPenalties", getActionFieldValue('[data-attack-field="attackPenalties"]'));
+  saveAttackDraftValue(attacker.id, "defenseBonuses", getActionFieldValue('[data-attack-field="defenseBonuses"]'));
+  saveAttackDraftValue(attacker.id, "defensePenalties", getActionFieldValue('[data-attack-field="defensePenalties"]'));
   const targetArmor = targetData.body[targetPart]?.armor ?? 0;
   const targetPartState = targetData.body[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
   const beforeHp = targetPartState.current ?? 0;
@@ -1913,6 +2016,17 @@ function bindUiEvents() {
       });
   });
 
+  document.addEventListener(
+    "toggle",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLDetailsElement)) return;
+      if (!target.dataset.sectionKey) return;
+      collapsibleSectionState.set(target.dataset.sectionKey, target.open);
+    },
+    true,
+  );
+
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -1997,6 +2111,10 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
 
+    if (target.dataset.attackField && activeTokenId) {
+      saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
+    }
+
     if (target.dataset.action === "select-owner-player") {
       void setOwnerPlayer(target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save owner.", "error");
@@ -2053,6 +2171,10 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
+
+    if (target.dataset.attackField) {
+      saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
+    }
 
     if (target.dataset.action === "set-odyssey-skill") {
       const skill = target.dataset.skill;

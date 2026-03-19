@@ -1324,8 +1324,8 @@ function leaveScope(scope) {
 function enterScope(immer2) {
   return currentScope = createScope(currentScope, immer2);
 }
-function revokeDraft(draft) {
-  const state = draft[DRAFT_STATE];
+function revokeDraft(draft2) {
+  const state = draft2[DRAFT_STATE];
   if (state.type_ === 0 || state.type_ === 1)
     state.revoke_();
   else
@@ -1600,9 +1600,9 @@ arrayTraps.set = function(state, prop, value) {
     die(14);
   return objectTraps.set.call(this, state[0], prop, value, state[0]);
 };
-function peek(draft, prop) {
-  const state = draft[DRAFT_STATE];
-  const source = state ? latest(state) : draft;
+function peek(draft2, prop) {
+  const state = draft2[DRAFT_STATE];
+  const source = state ? latest(state) : draft2;
   return source[prop];
 }
 function readPropFromProto(state, source, prop) {
@@ -1652,7 +1652,7 @@ var Immer2 = class {
         recipe = base;
         const self = this;
         return function curriedProduce(base2 = defaultBase, ...args) {
-          return self.produce(base2, (draft) => recipe.call(this, draft, ...args));
+          return self.produce(base2, (draft2) => recipe.call(this, draft2, ...args));
         };
       }
       if (typeof recipe !== "function")
@@ -1695,7 +1695,7 @@ var Immer2 = class {
     };
     this.produceWithPatches = (base, recipe) => {
       if (typeof base === "function") {
-        return (state, ...args) => this.produceWithPatches(state, (draft) => base(draft, ...args));
+        return (state, ...args) => this.produceWithPatches(state, (draft2) => base(draft2, ...args));
       }
       let patches, inversePatches;
       const result = this.produce(base, recipe, (p, ip) => {
@@ -1722,8 +1722,8 @@ var Immer2 = class {
     leaveScope(scope);
     return proxy;
   }
-  finishDraft(draft, patchListener) {
-    const state = draft && draft[DRAFT_STATE];
+  finishDraft(draft2, patchListener) {
+    const state = draft2 && draft2[DRAFT_STATE];
     if (!state || !state.isManual_)
       die(9);
     const { scope_: scope } = state;
@@ -1776,15 +1776,15 @@ var Immer2 = class {
     }
     return this.produce(
       base,
-      (draft) => applyPatchesImpl(draft, patches)
+      (draft2) => applyPatchesImpl(draft2, patches)
     );
   }
 };
 function createProxy(value, parent) {
-  const draft = isMap(value) ? getPlugin("MapSet").proxyMap_(value, parent) : isSet(value) ? getPlugin("MapSet").proxySet_(value, parent) : createProxyProxy(value, parent);
+  const draft2 = isMap(value) ? getPlugin("MapSet").proxyMap_(value, parent) : isSet(value) ? getPlugin("MapSet").proxySet_(value, parent) : createProxyProxy(value, parent);
   const scope = parent ? parent.scope_ : getCurrentScope();
-  scope.drafts_.push(draft);
-  return draft;
+  scope.drafts_.push(draft2);
+  return draft2;
 }
 function current(value) {
   if (!isDraft(value))
@@ -1963,10 +1963,10 @@ function enablePatches() {
       value: baseValue
     });
   }
-  function applyPatches_(draft, patches) {
+  function applyPatches_(draft2, patches) {
     patches.forEach((patch) => {
       const { path, op } = patch;
-      let base = draft;
+      let base = draft2;
       for (let i = 0; i < path.length - 1; i++) {
         const parentType = getArchtype(base);
         let p = path[i];
@@ -2020,7 +2020,7 @@ function enablePatches() {
           die(errorOffset + 1, op);
       }
     });
-    return draft;
+    return draft2;
   }
   function deepClonePatchValue(obj) {
     if (!isDraftable(obj))
@@ -4337,6 +4337,8 @@ var activeTokenId = null;
 var debugEntries = [];
 var partyPlayers = [];
 var gmPrivateEntries = [];
+var collapsibleSectionState = /* @__PURE__ */ new Map();
+var attackFormDrafts = /* @__PURE__ */ new Map();
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
 var selectionPollTimer = null;
 function sanitizeDebugEntries(raw) {
@@ -4400,9 +4402,14 @@ async function initializeCharacterToken(tokenId) {
   await ensureOverlayForToken(tokenId);
 }
 function resolveDefaultTargetTokenId(attackerId) {
-  const otherSelected = selectionIds.find((id) => id !== attackerId);
+  const visibleTargets = getCharacters().filter(
+    (token) => token.id !== attackerId && token.visible !== false
+  );
+  const otherSelected = selectionIds.find(
+    (id) => id !== attackerId && visibleTargets.some((token) => token.id === id)
+  );
   if (otherSelected) return otherSelected;
-  const fallback = getTrackedCharacters().find((token) => token.id !== attackerId);
+  const fallback = visibleTargets[0];
   return fallback?.id ?? "";
 }
 async function pushDebugEntry(title, body, kind = "info") {
@@ -4491,38 +4498,46 @@ function formatAttackDebug({
   afterSerious,
   critApplied
 }) {
-  const lines = [
-    `Attacker: ${attackerName}`,
-    `Target: ${targetName}`,
-    `Target Part: ${targetPart}`,
-    "",
-    `Attack Roll: ${result.attackRoll}`,
-    `Attack Skill: ${attackSkillName} (${attackSkillValue} -> ${attackSkillValue * 10})`,
-    `Attack Bonuses: ${attackBonuses}`,
-    `Attack Penalties: ${attackPenalties}`,
-    `Attack Total: ${result.attackTotal}`,
-    "",
-    `Defense Roll: ${result.defenseRoll}`,
-    `Target Parry: ${targetParry} -> ${targetParry * 10}`,
-    `Defense Bonuses: ${defenseBonuses}`,
-    `Defense Penalties: ${defensePenalties}`,
-    `Defense Total: ${result.defenseTotal}`,
-    "",
-    `Weapon Damage: ${weaponDamage}`,
-    `Strength Bonus: ${strengthBonus}`,
-    `Target Armor: ${targetArmor}`,
-    `Final Attack: ${result.damage?.totalAttack ?? result.attackTotal}`,
-    `Final Defense: ${result.damage?.totalDefense ?? result.defenseTotal}`,
-    `Outcome: ${result.outcome}`,
-    `Damage Diff: ${result.damage?.damageDiff ?? 0}`,
-    `Damage Label: ${result.damage?.label ?? "No damage"}`,
-    `Applied Min/Sir/Crit: ${result.damage?.minor ?? 0}/${result.damage?.serious ?? 0}/${result.damage?.crit ?? 0}`,
-    `Converted Crit: ${critApplied}`,
-    `HP Change: ${beforeHp} -> ${afterHp}`,
-    `Minor State: ${beforeMinor} -> ${afterMinor}`,
-    `Serious State: ${beforeSerious} -> ${afterSerious}`
-  ];
-  return lines.join("\n");
+  const accuracyTable = formatTextTable(
+    ["Side", "Attacking", "Defending"],
+    [
+      [
+        "Accuracy",
+        `${result.attackRoll} + ${attackSkillValue * 10} + ${attackBonuses} - ${attackPenalties} = ${result.attackTotal}`,
+        `${result.defenseRoll} + ${targetParry * 10} + ${defenseBonuses} - ${defensePenalties} = ${result.defenseTotal}`
+      ],
+      [
+        "Damage",
+        `${result.attackTotal} + ${weaponDamage}`,
+        `${result.defenseTotal} + ${targetArmor}`
+      ],
+      [
+        "Result",
+        `${result.damage?.totalAttack ?? result.attackTotal}`,
+        `${result.damage?.totalDefense ?? result.defenseTotal}`
+      ]
+    ]
+  );
+  const damageTable = formatTextTable(
+    ["Parameter", "Value"],
+    [
+      ["Attacker", attackerName],
+      ["Target", `${targetName} -> ${targetPart}`],
+      ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
+      ["Strength Bonus", strengthBonus],
+      ["Outcome", result.outcome],
+      ["Damage Diff", result.damage?.damageDiff ?? 0],
+      ["Damage Label", result.damage?.label ?? "No damage"],
+      ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
+      ["Converted Crit", critApplied],
+      ["Crit State", `${beforeHp} -> ${afterHp}`],
+      ["Minor State", `${beforeMinor} -> ${afterMinor}`],
+      ["Serious State", `${beforeSerious} -> ${afterSerious}`]
+    ]
+  );
+  return `${accuracyTable}
+
+${damageTable}`;
 }
 function projectPartDamage(part, damage) {
   const next = {
@@ -4548,41 +4563,89 @@ function projectPartDamage(part, damage) {
   };
 }
 function formatDiceDebug({ tokenName, result }) {
-  return [
-    `Actor: ${tokenName}`,
-    `Dice: d${result.sides}`,
-    `Raw Roll: ${result.roll}`,
-    `Modifier: ${result.modifier}`,
-    `Total: ${result.total}`
-  ].join("\n");
+  return formatTextTable(
+    ["Parameter", "Value"],
+    [
+      ["Actor", tokenName],
+      ["Roll", `${result.roll} (1-${result.sides})`],
+      ["Modifier", result.modifier],
+      ["Total", result.total]
+    ]
+  );
 }
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
-    `Actor: ${tokenName}`,
+    `Character: ${tokenName}`,
     `Attribute: ${attributeLabel}`,
-    `Roll: ${result.roll}`,
-    `Base Attribute: ${result.baseAttribute}`,
-    `Modifier: ${result.modifier}`,
-    `Final Attribute: ${result.finalAttribute}`,
-    `Outcome: ${result.result}`
+    `${result.result}`,
+    "",
+    formatTextTable(
+      ["Roll", "Base Attribute", "Modifier", "Final Attribute"],
+      [[result.roll, result.baseAttribute, result.modifier, result.finalAttribute]]
+    )
   ].join("\n");
 }
 function formatRollSkillDebug({ tokenName, skillName, result }) {
   return [
-    `Actor: ${tokenName}`,
+    `Character: ${tokenName}`,
     `Skill: ${skillName}`,
-    `First Roll: ${result.rollPrimary}`,
-    `Skill Bonus: ${result.baseSkill * 10}`,
-    `Modifier: ${result.modifier}`,
-    `First Total: ${result.totalPrimary}`,
-    `Second Roll: ${result.rollSecondary}`,
-    `Second Total: ${result.totalSecondary}`,
-    `Outcome: ${result.result}`
+    `${result.result}`,
+    "",
+    formatTextTable(
+      ["Parameter", "Value"],
+      [
+        ["First Roll", `${result.rollPrimary} + ${result.baseSkill * 10} + ${result.modifier} = ${result.totalPrimary}`],
+        ["Second Roll", `${result.rollSecondary} = ${result.totalSecondary}`]
+      ]
+    )
   ].join("\n");
 }
-function renderCollapsibleSection(title, content, open = false) {
+function formatTextTable(headers, rows) {
+  const normalizedHeaders = headers.map((cell) => String(cell ?? ""));
+  const normalizedRows = rows.map((row) => row.map((cell) => String(cell ?? "")));
+  const widths = normalizedHeaders.map(
+    (header, columnIndex) => Math.max(
+      header.length,
+      ...normalizedRows.map((row) => (row[columnIndex] ?? "").length)
+    )
+  );
+  const renderBorder = (left, middle, right, fill) => `${left}${widths.map((width) => fill.repeat(width + 2)).join(middle)}${right}`;
+  const renderRow = (row) => `\u2502 ${row.map((cell, columnIndex) => String(cell ?? "").padEnd(widths[columnIndex], " ")).join(" \u2502 ")} \u2502`;
+  return [
+    renderBorder("\u2552", "\u2564", "\u2555", "\u2550"),
+    renderRow(normalizedHeaders),
+    renderBorder("\u255E", "\u256A", "\u2561", "\u2550"),
+    ...normalizedRows.map(renderRow),
+    renderBorder("\u2558", "\u2567", "\u255B", "\u2550")
+  ].join("\n");
+}
+function getAttackDraft(token, data, targetCharacters) {
+  const defaultWeapon2 = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
+  const stored = attackFormDrafts.get(token.id) ?? {};
+  return {
+    skill: CORE_COMBAT_SKILLS.includes(stored.skill) ? stored.skill : CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0],
+    targetTokenId: targetCharacters.some((target) => target.id === stored.targetTokenId) ? stored.targetTokenId : resolveDefaultTargetTokenId(token.id),
+    targetPart: BODY_ORDER.includes(stored.targetPart) ? stored.targetPart : "Torso",
+    weaponDamage: stored.weaponDamage ?? String(defaultWeapon2.damage),
+    attackBonuses: stored.attackBonuses ?? "0",
+    attackPenalties: stored.attackPenalties ?? "0",
+    defenseBonuses: stored.defenseBonuses ?? "0",
+    defensePenalties: stored.defensePenalties ?? "0"
+  };
+}
+function saveAttackDraftValue(tokenId, field, value) {
+  if (!tokenId || !field) return;
+  const current2 = attackFormDrafts.get(tokenId) ?? {};
+  attackFormDrafts.set(tokenId, {
+    ...current2,
+    [field]: value
+  });
+}
+function renderCollapsibleSection(title, content, open = false, sectionKey = "") {
+  const scopedSectionKey = `${activeTokenId ?? "global"}:${sectionKey || title}`;
+  const resolvedOpen = collapsibleSectionState.has(scopedSectionKey) ? collapsibleSectionState.get(scopedSectionKey) : open;
   return `
-    <details class="collapsible-block" ${open ? "open" : ""}>
+    <details class="collapsible-block" data-section-key="${escapeHtml(scopedSectionKey)}" ${resolvedOpen ? "open" : ""}>
       <summary class="collapsible-title">${escapeHtml(title)}</summary>
       <div class="collapsible-body">${content}</div>
     </details>
@@ -4700,13 +4763,14 @@ function renderSkillsBlock(data, disabledAttr) {
   );
 }
 function renderCombatBlock(token, data, tokenLocked) {
-  const targetCharacters = getCharacters().filter((item) => item.id !== token.id);
-  const defaultTargetId = resolveDefaultTargetTokenId(token.id);
+  const targetCharacters = getCharacters().filter(
+    (item) => item.id !== token.id && item.visible !== false
+  );
   const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
+  const draft2 = getAttackDraft(token, data, targetCharacters);
   const skillOptions = CORE_COMBAT_SKILLS.map(
-    (key) => `<option value="${escapeHtml(key)}">${escapeHtml(key)} (${data.odyssey.skills[key] ?? 0})</option>`
+    (key) => `<option value="${escapeHtml(key)}" ${draft2.skill === key ? "selected" : ""}>${escapeHtml(key)} (${data.odyssey.skills[key] ?? 0})</option>`
   ).join("");
-  const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
   return renderCollapsibleSection(
     "\u0410\u0442\u0430\u043A\u0430",
     `
@@ -4864,6 +4928,7 @@ function renderSelectedToken() {
   const tokenLocked = !canUseToken(token);
   const bodyFieldDisabled = !canEditTokenData(token) ? "disabled" : "";
   const gmOnlyDisabled = !isEditable() ? "disabled" : "";
+  const showPartBlock = isEditable() || canUseToken(token);
   const lastRollText = data.lastRoll ? escapeHtml(data.lastRoll.summary || "Last roll recorded") : "No rolls synced yet";
   ui.selectionHint.textContent = selected ? "Selected on map" : "Showing current focus";
   ui.selectedTokenPanel.innerHTML = `
@@ -4902,57 +4967,57 @@ function renderSelectedToken() {
     `<pre class="console-output">${lastRollText}</pre>`,
     false
   )}
-      ${renderCollapsibleSection(
+      ${showPartBlock ? renderCollapsibleSection(
     "Part",
     `
-          <div class="body-table-wrap">
-            <table class="body-table">
-              <thead>
-                <tr>
-                  <th>Part</th>
-                  <th>Crit</th>
-                  <th>Max</th>
-                  <th>Armor</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${BODY_ORDER.map((partName) => {
+                <div class="body-table-wrap">
+                  <table class="body-table">
+                    <thead>
+                      <tr>
+                        <th>Part</th>
+                        <th>Crit</th>
+                        <th>Max</th>
+                        <th>Armor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${BODY_ORDER.map((partName) => {
       const part = data.body[partName];
       return `
-                    <tr>
-                      <td class="part-name">${escapeHtml(partName)}</td>
-                      <td>
-                        <div class="inline-stepper">
-                          <button type="button" data-action="change-part" data-part="${escapeHtml(
+                          <tr>
+                            <td class="part-name">${escapeHtml(partName)}</td>
+                            <td>
+                              <div class="inline-stepper">
+                                <button type="button" data-action="change-part" data-part="${escapeHtml(
         partName
       )}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button>
-                          <input type="number" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
+                                <input type="number" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="current" ${bodyFieldDisabled}>
-                          <button type="button" data-action="change-part" data-part="${escapeHtml(
+                                <button type="button" data-action="change-part" data-part="${escapeHtml(
         partName
       )}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button>
-                        </div>
-                      </td>
-                      <td>
-                        <input class="compact-input" type="number" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
+                              </div>
+                            </td>
+                            <td>
+                              <input class="compact-input" type="number" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="max" ${bodyFieldDisabled}>
-                      </td>
-                      <td>
-                        <input class="compact-input" type="number" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
+                            </td>
+                            <td>
+                              <input class="compact-input" type="number" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="armor" ${bodyFieldDisabled}>
-                      </td>
-                    </tr>
-                  `;
+                            </td>
+                          </tr>
+                        `;
     }).join("")}
-              </tbody>
-            </table>
-          </div>
-        `,
+                    </tbody>
+                  </table>
+                </div>
+              `,
     true
-  )}
+  ) : ""}
       ${renderCollapsibleSection(
     "Overlay preview",
     `<pre class="console-output">${escapeHtml(formatOverlayText(data))}</pre>`,
@@ -5208,68 +5273,68 @@ async function setWeaponName(index, value) {
   });
   await syncState();
 }
-async function autosaveDraftField(draft) {
-  const token = getCharacterById(draft.tokenId);
+async function autosaveDraftField(draft2) {
+  const token = getCharacterById(draft2.tokenId);
   if (!token) return;
   await updateTrackerData(token.id, (current2) => {
     var _a, _b;
     const next = structuredClone(current2);
-    if (draft.action === "set-odyssey-skill") {
+    if (draft2.action === "set-odyssey-skill") {
       if (!isEditable()) return next;
-      next.odyssey.skills[draft.skill] = clamp(Number(draft.value) || 0, 0, 10);
+      next.odyssey.skills[draft2.skill] = clamp(Number(draft2.value) || 0, 0, 10);
       return next;
     }
-    if (draft.action === "set-odyssey-attribute") {
+    if (draft2.action === "set-odyssey-attribute") {
       if (!isEditable()) return next;
-      next.odyssey.attributes[draft.attribute] = clamp(Number(draft.value) || 0, 0, 99);
+      next.odyssey.attributes[draft2.attribute] = clamp(Number(draft2.value) || 0, 0, 99);
       return next;
     }
-    if (draft.action === "set-weapon-damage") {
+    if (draft2.action === "set-weapon-damage") {
       (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
-      if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
-        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0 };
+      if (!next.odyssey.weapons.melee[draft2.weaponIndex]) {
+        next.odyssey.weapons.melee[draft2.weaponIndex] = { name: "Default", damage: 0 };
       }
-      next.odyssey.weapons.melee[draft.weaponIndex].damage = clamp(Number(draft.value) || 0, -99, 99);
+      next.odyssey.weapons.melee[draft2.weaponIndex].damage = clamp(Number(draft2.value) || 0, -99, 99);
       return next;
     }
-    if (draft.action === "set-weapon-name") {
+    if (draft2.action === "set-weapon-name") {
       (_b = next.odyssey.weapons).melee ?? (_b.melee = []);
-      if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
-        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0 };
+      if (!next.odyssey.weapons.melee[draft2.weaponIndex]) {
+        next.odyssey.weapons.melee[draft2.weaponIndex] = { name: "Default", damage: 0 };
       }
-      next.odyssey.weapons.melee[draft.weaponIndex].name = String(draft.value || "").trim() || "Default";
+      next.odyssey.weapons.melee[draft2.weaponIndex].name = String(draft2.value || "").trim() || "Default";
       return next;
     }
-    if (draft.action === "set-field") {
+    if (draft2.action === "set-field") {
       if (!canEditTokenData(token)) return next;
-      const part = next.body[draft.partName];
+      const part = next.body[draft2.partName];
       if (!part) return next;
-      const numericValue = clamp(Number(draft.value) || 0, 0, 99);
-      if (draft.field === "current") {
+      const numericValue = clamp(Number(draft2.value) || 0, 0, 99);
+      if (draft2.field === "current") {
         part.current = clamp(numericValue, 0, part.max);
-      } else if (draft.field === "max") {
+      } else if (draft2.field === "max") {
         part.max = numericValue;
         part.current = clamp(part.current, 0, part.max);
-      } else if (draft.field === "armor") {
+      } else if (draft2.field === "armor") {
         part.armor = numericValue;
       }
       return next;
     }
     return next;
   });
-  if (draft.action === "set-field") {
+  if (draft2.action === "set-field") {
     await ensureOverlayForToken(token.id);
   }
 }
-function queueInputAutosave(draft) {
+function queueInputAutosave(draft2) {
   const key = [
-    draft.tokenId,
-    draft.action,
-    draft.field ?? "",
-    draft.skill ?? "",
-    draft.attribute ?? "",
-    draft.weaponIndex ?? "",
-    draft.partName ?? ""
+    draft2.tokenId,
+    draft2.action,
+    draft2.field ?? "",
+    draft2.skill ?? "",
+    draft2.attribute ?? "",
+    draft2.weaponIndex ?? "",
+    draft2.partName ?? ""
   ].join("|");
   const existing = inputAutosaveTimers.get(key);
   if (existing) {
@@ -5277,7 +5342,7 @@ function queueInputAutosave(draft) {
   }
   const timeoutId = setTimeout(() => {
     inputAutosaveTimers.delete(key);
-    void autosaveDraftField(draft).catch((error) => {
+    void autosaveDraftField(draft2).catch((error) => {
       console.warn("[Body HP] Autosave failed", error);
     });
   }, 250);
@@ -5307,6 +5372,10 @@ async function performAttack() {
     setStatus("Choose a valid target token.", "error");
     return;
   }
+  if (target.visible === false) {
+    setStatus("Hidden tokens cannot be targeted.", "error");
+    return;
+  }
   if (target.id === attacker.id) {
     setStatus("Attacker and target must be different tokens.", "error");
     return;
@@ -5322,6 +5391,14 @@ async function performAttack() {
   const attackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
+  saveAttackDraftValue(attacker.id, "skill", skillName);
+  saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
+  saveAttackDraftValue(attacker.id, "targetPart", targetPart);
+  saveAttackDraftValue(attacker.id, "weaponDamage", getActionFieldValue('[data-attack-field="weaponDamage"]'));
+  saveAttackDraftValue(attacker.id, "attackBonuses", getActionFieldValue('[data-attack-field="attackBonuses"]'));
+  saveAttackDraftValue(attacker.id, "attackPenalties", getActionFieldValue('[data-attack-field="attackPenalties"]'));
+  saveAttackDraftValue(attacker.id, "defenseBonuses", getActionFieldValue('[data-attack-field="defenseBonuses"]'));
+  saveAttackDraftValue(attacker.id, "defensePenalties", getActionFieldValue('[data-attack-field="defensePenalties"]'));
   const targetArmor = targetData.body[targetPart]?.armor ?? 0;
   const targetPartState = targetData.body[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
   const beforeHp = targetPartState.current ?? 0;
@@ -5621,6 +5698,16 @@ function bindUiEvents() {
       setStatus(error?.message ?? "Overlay rebuild failed.", "error");
     });
   });
+  document.addEventListener(
+    "toggle",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLDetailsElement)) return;
+      if (!target.dataset.sectionKey) return;
+      collapsibleSectionState.set(target.dataset.sectionKey, target.open);
+    },
+    true
+  );
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -5691,6 +5778,9 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.attackField && activeTokenId) {
+      saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
+    }
     if (target.dataset.action === "select-owner-player") {
       void setOwnerPlayer(target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save owner.", "error");
@@ -5739,6 +5829,9 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
+    if (target.dataset.attackField) {
+      saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
+    }
     if (target.dataset.action === "set-odyssey-skill") {
       const skill = target.dataset.skill;
       if (!skill) return;

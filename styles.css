@@ -309,6 +309,12 @@ select:disabled {
   font-weight: 700;
 }
 
+.debug-entry .console-output {
+  white-space: pre;
+  overflow-x: auto;
+  display: block;
+}
+
 .console-output {
   margin: 0;
   white-space: pre-wrap;

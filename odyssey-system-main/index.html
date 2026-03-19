@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Body HP Tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <h1>Body HP Tracker</h1>
+          <p class="sub">
+            Select a character token on the map, then edit its body HP here.
+          </p>
+        </div>
+        <div id="roleBadge" class="role-badge">...</div>
+      </header>
+
+      <section class="panel actions-panel">
+        <div class="row row-gap">
+          <button id="refreshBtn" type="button">Refresh</button>
+          <button id="syncBtn" type="button">Rebuild Overlays</button>
+        </div>
+        <p id="statusBox" class="status info">Loading extension...</p>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div class="section-title">Selected Character</div>
+          <div id="selectionHint" class="muted">Nothing selected</div>
+        </div>
+        <div id="selectedTokenPanel"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div class="section-title">Tracked Characters</div>
+          <div id="trackedCount" class="muted">0</div>
+        </div>
+        <div id="trackedList" class="list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div class="section-title">All Character Tokens</div>
+          <div id="allCount" class="muted">0</div>
+        </div>
+        <div id="allTokensList" class="list"></div>
+      </section>
+    </div>
+
+    <script type="module" src="./assets/main.js?v=1.1.0"></script>
+  </body>
+</html>

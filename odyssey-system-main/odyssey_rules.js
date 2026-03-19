@@ -1,0 +1,145 @@
+import { BODY_ORDER, clamp } from "./shared.js";
+
+export function rollPercent() {
+  return Math.floor(Math.random() * 100) + 1;
+}
+
+export function rollDice(sides, modifier = 0) {
+  const safeSides = clamp(Number(sides) || 0, 2, 1000);
+  const roll = Math.floor(Math.random() * safeSides) + 1;
+  return {
+    roll,
+    sides: safeSides,
+    modifier: Number(modifier) || 0,
+    total: roll + (Number(modifier) || 0),
+  };
+}
+
+export function calculateAccuracy(
+  attackSkill,
+  attackBonuses = 0,
+  attackPenalties = 0,
+  defenseBonuses = 0,
+  defensePenalties = 0,
+  parry = 0,
+) {
+  const attackRoll = rollPercent();
+  const defenseRoll = rollPercent();
+
+  const attackTotal =
+    attackRoll +
+    clamp(Number(attackSkill) || 0, 0, 10) * 10 +
+    (Number(attackBonuses) || 0) -
+    (Number(attackPenalties) || 0);
+
+  const defenseTotal =
+    defenseRoll +
+    (Number(defenseBonuses) || 0) -
+    (Number(defensePenalties) || 0) +
+    clamp(Number(parry) || 0, 0, 10) * 10;
+
+  return {
+    attackRoll,
+    defenseRoll,
+    attackTotal,
+    defenseTotal,
+  };
+}
+
+export function calculateDamage(attackResult, defenseResult, weaponDamage = 0, armor = 0) {
+  const totalAttack = (Number(attackResult) || 0) + (Number(weaponDamage) || 0);
+  const totalDefense = (Number(defenseResult) || 0) + (Number(armor) || 0);
+  const damageDiff = totalAttack - totalDefense;
+
+  let label = "Critical damage.";
+  if (damageDiff <= 5) {
+    label = "Minor damage.";
+  } else if (damageDiff <= 30) {
+    label = "Serious hit.";
+  } else if (damageDiff >= 90) {
+    label = "3 Critical damage";
+  } else if (damageDiff >= 60) {
+    label = "2 Critical damage";
+  }
+
+  return {
+    totalAttack,
+    totalDefense,
+    damageDiff,
+    label,
+  };
+}
+
+export function resolveAttack({
+  attackSkill = 0,
+  weaponDamage = 0,
+  defenseBonuses = 0,
+  defensePenalties = 0,
+  attackBonuses = 0,
+  attackPenalties = 0,
+  parry = 0,
+  targetPart = "Torso",
+  targetArmor = 0,
+}) {
+  const part = BODY_ORDER.includes(targetPart) ? targetPart : "Torso";
+  const accuracy = calculateAccuracy(
+    attackSkill,
+    attackBonuses,
+    attackPenalties,
+    defenseBonuses,
+    defensePenalties,
+    parry,
+  );
+
+  const criticalSuccess = accuracy.attackRoll >= 95;
+  const criticalFailure = accuracy.attackRoll <= 5;
+  const hit = criticalSuccess || (!criticalFailure && accuracy.attackTotal > accuracy.defenseTotal);
+
+  let outcome = "failure";
+  let damage = null;
+  let bodyDelta = 0;
+
+  if (criticalSuccess) {
+    outcome = "critical-success";
+    damage = calculateDamage(accuracy.attackTotal + 20, accuracy.defenseTotal, weaponDamage, targetArmor);
+    bodyDelta = -Math.max(1, Math.ceil(Math.max(damage.damageDiff, 1) / 30));
+  } else if (criticalFailure) {
+    outcome = "critical-failure";
+  } else if (hit) {
+    outcome = "success";
+    damage = calculateDamage(accuracy.attackTotal, accuracy.defenseTotal, weaponDamage, targetArmor);
+    bodyDelta = -Math.max(1, Math.ceil(Math.max(damage.damageDiff, 1) / 30));
+  }
+
+  return {
+    ...accuracy,
+    targetPart: part,
+    targetArmor: Number(targetArmor) || 0,
+    weaponDamage: Number(weaponDamage) || 0,
+    outcome,
+    hit,
+    damage,
+    bodyDelta,
+    summary: buildAttackSummary({
+      part,
+      outcome,
+      damage,
+      attackRoll: accuracy.attackRoll,
+      attackTotal: accuracy.attackTotal,
+      defenseTotal: accuracy.defenseTotal,
+    }),
+  };
+}
+
+function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, defenseTotal }) {
+  if (outcome === "critical-success") {
+    return `Critical success to ${part}. Roll ${attackRoll}; ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
+  }
+  if (outcome === "critical-failure") {
+    return `Critical failure. Roll ${attackRoll}.`;
+  }
+  if (outcome === "success") {
+    return `Hit ${part}. ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
+  }
+  return `Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
+}

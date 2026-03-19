@@ -955,7 +955,9 @@ async function performAttack() {
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
   const targetArmor = targetData.body[targetPart]?.armor ?? 0;
   const beforeHp = targetData.body[targetPart]?.current ?? 0;
-  const targetParry = targetOdyssey.attributes.Parry ?? 0;
+  const targetParry = ["Hand", "Cold"].includes(skillName)
+    ? targetOdyssey.attributes.Parry ?? 0
+    : 0;
 
   const result = resolveAttack({
     attackSkill: attackerOdyssey.skills[skillName] ?? 0,

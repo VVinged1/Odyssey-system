@@ -71,6 +71,11 @@ export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function numberOrFallback(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 export function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
   if (!raw || typeof raw !== "object") return next;
@@ -93,13 +98,13 @@ export function sanitizeTrackerData(raw) {
   for (const partName of BODY_ORDER) {
     const source = raw.body?.[partName] ?? {};
     const part = next.body[partName];
-    part.max = clamp(Number(source.max ?? part.max) || part.max, 0, 99);
+    part.max = clamp(numberOrFallback(source.max, part.max), 0, 99);
     part.current = clamp(
-      Number(source.current ?? part.current) || part.current,
+      numberOrFallback(source.current, part.current),
       0,
       part.max,
     );
-    part.armor = clamp(Number(source.armor ?? part.armor) || part.armor, 0, 99);
+    part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 99);
   }
 
   return next;

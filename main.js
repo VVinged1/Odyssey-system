@@ -130,6 +130,10 @@ function getSkillCategory(odyssey, skillName) {
     : APPLIED_SKILL_CATEGORY;
 }
 
+function getSkillStrengthBonusFlag(odyssey, skillName) {
+  return Boolean(odyssey?.skillStrengthBonuses?.[skillName]);
+}
+
 function getSortedSkillEntries(odyssey) {
   return Object.entries(odyssey?.skills ?? {}).sort(([left], [right]) =>
     left.localeCompare(right),
@@ -190,6 +194,9 @@ function getTransientFieldKey(field) {
 
   if (field.dataset.action === "select-owner-player") return "owner";
   if (field.dataset.action === "set-odyssey-skill") return `skill:${field.dataset.skill ?? ""}`;
+  if (field.dataset.action === "set-skill-strength-bonus") {
+    return `skill-strength:${field.dataset.skill ?? ""}`;
+  }
   if (field.dataset.action === "set-odyssey-attribute") {
     return `attribute:${field.dataset.attribute ?? ""}`;
   }
@@ -235,7 +242,12 @@ function captureSelectedPanelState() {
     if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) return;
     const key = getTransientFieldKey(field);
     if (!key || !shouldPreserveFieldValue(key, focusedKey)) return;
-    fields.push([key, field.value]);
+    fields.push([
+      key,
+      field instanceof HTMLInputElement && field.type === "checkbox"
+        ? { kind: "checkbox", checked: field.checked }
+        : { kind: "value", value: field.value },
+    ]);
   });
 
   return {
@@ -259,14 +271,29 @@ function restoreSelectedPanelState(panelState) {
     if (!key || !fieldValues.has(key)) return;
 
     const nextValue = fieldValues.get(key);
-    if (field instanceof HTMLSelectElement) {
-      const hasMatchingOption = Array.from(field.options).some(
-        (option) => option.value === nextValue,
-      );
-      if (!hasMatchingOption) return;
+    if (
+      field instanceof HTMLInputElement &&
+      field.type === "checkbox" &&
+      nextValue &&
+      typeof nextValue === "object" &&
+      nextValue.kind === "checkbox"
+    ) {
+      field.checked = Boolean(nextValue.checked);
+    } else {
+      const normalizedValue =
+        nextValue && typeof nextValue === "object" && nextValue.kind === "value"
+          ? nextValue.value
+          : typeof nextValue === "string"
+            ? nextValue
+            : "";
+      if (field instanceof HTMLSelectElement) {
+        const hasMatchingOption = Array.from(field.options).some(
+          (option) => option.value === normalizedValue,
+        );
+        if (!hasMatchingOption) return;
+      }
+      field.value = normalizedValue;
     }
-
-    field.value = nextValue;
     if (key === panelState.focusedKey) {
       focusedField = field;
     }
@@ -1272,13 +1299,19 @@ function renderDiceBlock(token, data, tokenLocked) {
   );
 }
 
-function renderOdysseySkillRows(skillEntries, disabledAttr) {
+function renderOdysseySkillRows(odyssey, skillEntries, disabledAttr) {
   return skillEntries
     .map(
       ([key, value]) => `
         <div class="skill-row">
           <div class="skill-name">${escapeHtml(key)}</div>
           <input type="number" min="0" max="10" value="${value}" data-action="set-odyssey-skill" data-skill="${escapeHtml(key)}" ${disabledAttr}>
+          <label class="skill-toggle">
+            <input type="checkbox" data-action="set-skill-strength-bonus" data-skill="${escapeHtml(key)}" ${disabledAttr} ${
+              getSkillStrengthBonusFlag(odyssey, key) ? "checked" : ""
+            }>
+            <span>STR Bonus</span>
+          </label>
           <button type="button" class="danger" data-action="remove-skill" data-skill="${escapeHtml(key)}" ${
             CORE_COMBAT_SKILLS.includes(key) ? "disabled" : disabledAttr
           }>${CORE_COMBAT_SKILLS.includes(key) ? "Core" : "Remove"}</button>
@@ -1289,10 +1322,12 @@ function renderOdysseySkillRows(skillEntries, disabledAttr) {
 
 function renderOdysseySkillsBlock(data, disabledAttr) {
   const combatSkillRows = renderOdysseySkillRows(
+    data.odyssey,
     getCombatSkillEntries(data.odyssey),
     disabledAttr,
   );
   const appliedSkillRows = renderOdysseySkillRows(
+    data.odyssey,
     getAppliedSkillEntries(data.odyssey),
     disabledAttr,
   );
@@ -1465,10 +1500,12 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
 
 function renderEnglishSkillsBlock(data, disabledAttr) {
   const combatSkillRows = renderOdysseySkillRows(
+    data.odyssey,
     getCombatSkillEntries(data.odyssey),
     disabledAttr,
   );
   const appliedSkillRows = renderOdysseySkillRows(
+    data.odyssey,
     getAppliedSkillEntries(data.odyssey),
     disabledAttr,
   );
@@ -1495,6 +1532,13 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
             <option value="${COMBAT_SKILL_CATEGORY}">Combat</option>
             <option value="${APPLIED_SKILL_CATEGORY}" selected>Applied</option>
           </select>
+        </label>
+        <label class="field-stack checkbox-stack">
+          <span class="field-label">Add Strength Bonus?</span>
+          <label class="skill-toggle">
+            <input type="checkbox" data-skill-field="new-strength-bonus" ${disabledAttr}>
+            <span>Enable for attack damage</span>
+          </label>
         </label>
       </div>
       <div class="row row-gap">
@@ -1569,7 +1613,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           ? "Attack goes from the selected attacker token to the selected target token."
           : "Add at least two visible character tokens to perform an attack."
       }</div>
-      <div class="muted">For ${escapeHtml(MELEE_SKILL_NAME)} attacks, Strength above 10 adds to weapon damage automatically. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense.</div>
+      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
       </div>
@@ -2041,6 +2085,26 @@ async function setOdysseySkill(skill, value) {
   await syncState();
 }
 
+async function setOdysseySkillStrengthBonus(skill, enabled) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!isEditable()) {
+    setStatus("Only the GM can edit Odyssey skills.", "error");
+    return;
+  }
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    next.odyssey.skillStrengthBonuses ??= {};
+    next.odyssey.skillStrengthBonuses[skill] = Boolean(enabled);
+    return next;
+  });
+  await syncState();
+}
+
 async function setOdysseyAttribute(attribute, value) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
@@ -2253,7 +2317,7 @@ async function performAttack() {
   const beforeHp = targetPartState.current ?? 0;
   const beforeMinor = targetPartState.minor ?? 0;
   const beforeSerious = targetPartState.serious ?? 0;
-  const strengthBonus = skillName === MELEE_SKILL_NAME
+  const strengthBonus = getSkillStrengthBonusFlag(attackerOdyssey, skillName)
     ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0)
     : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
@@ -2407,6 +2471,11 @@ async function addOdysseySkill() {
 
   const name = getActionFieldValue('[data-skill-field="new-name"]').trim();
   const value = clamp(Number(getActionFieldValue('[data-skill-field="new-value"]')) || 0, 0, 10);
+  const strengthBonusField = ui.selectedTokenPanel.querySelector(
+    '[data-skill-field="new-strength-bonus"]',
+  );
+  const addStrengthBonus =
+    strengthBonusField instanceof HTMLInputElement ? strengthBonusField.checked : false;
   if (!name) {
     setStatus("Enter a skill name first.", "error");
     return;
@@ -2422,7 +2491,14 @@ async function addOdysseySkill() {
     const next = structuredClone(current);
     next.odyssey.skills[name] = value;
     next.odyssey.skillCategories ??= {};
+    next.odyssey.skillStrengthBonuses ??= {};
     next.odyssey.skillCategories[name] = category;
+    next.odyssey.skillStrengthBonuses[name] =
+      name === MELEE_SKILL_NAME
+        ? true
+        : name === PARRY_SKILL_NAME
+          ? false
+          : Boolean(addStrengthBonus);
     return next;
   });
   await syncState();
@@ -2449,6 +2525,7 @@ async function removeOdysseySkill(skillName) {
     const next = structuredClone(current);
     delete next.odyssey.skills[skillName];
     delete next.odyssey.skillCategories?.[skillName];
+    delete next.odyssey.skillStrengthBonuses?.[skillName];
     return next;
   });
   await syncState();
@@ -2709,6 +2786,15 @@ function bindUiEvents() {
       if (!skill) return;
       void setOdysseySkill(skill, target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save skill.", "error");
+      });
+      return;
+    }
+
+    if (target.dataset.action === "set-skill-strength-bonus") {
+      const skill = target.dataset.skill;
+      if (!skill || !(target instanceof HTMLInputElement)) return;
+      void setOdysseySkillStrengthBonus(skill, target.checked).catch((error) => {
+        setStatus(error?.message ?? "Unable to save strength bonus flag.", "error");
       });
       return;
     }

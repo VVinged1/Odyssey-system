@@ -3481,159 +3481,12 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/LabelBuilder.js
-var LabelBuilder = class extends GenericItemBuilder {
+// node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
+var PathBuilder = class extends GenericItemBuilder {
   constructor(player) {
     super(player);
-    this._text = {
-      richText: [
-        {
-          type: "paragraph",
-          children: [{ text: "" }]
-        }
-      ],
-      plainText: "",
-      style: {
-        padding: 8,
-        fontFamily: "Roboto",
-        fontSize: 16,
-        fontWeight: 400,
-        textAlign: "CENTER",
-        textAlignVertical: "MIDDLE",
-        fillColor: "white",
-        fillOpacity: 1,
-        strokeColor: "white",
-        strokeOpacity: 1,
-        strokeWidth: 0,
-        lineHeight: 1.5
-      },
-      type: "PLAIN",
-      width: "AUTO",
-      height: "AUTO"
-    };
-    this._style = {
-      backgroundColor: "#3D4051",
-      backgroundOpacity: 1,
-      cornerRadius: 8,
-      pointerDirection: "DOWN",
-      pointerWidth: 4,
-      pointerHeight: 4
-    };
-    this._item.layer = "TEXT";
-    this._item.name = "Label";
-  }
-  text(text) {
-    this._text = text;
-    return this.self();
-  }
-  width(width) {
-    this._text.width = width;
-    return this.self();
-  }
-  height(height) {
-    this._text.height = height;
-    return this.self();
-  }
-  plainText(plainText) {
-    this._text.plainText = plainText;
-    return this.self();
-  }
-  padding(padding) {
-    this._text.style.padding = padding;
-    return this.self();
-  }
-  fontFamily(fontFamily) {
-    this._text.style.fontFamily = fontFamily;
-    return this.self();
-  }
-  fontSize(fontSize) {
-    this._text.style.fontSize = fontSize;
-    return this.self();
-  }
-  fontWeight(fontWeight) {
-    this._text.style.fontWeight = fontWeight;
-    return this.self();
-  }
-  textAlign(textAlign) {
-    this._text.style.textAlign = textAlign;
-    return this.self();
-  }
-  textAlignVertical(textAlignVertical) {
-    this._text.style.textAlignVertical = textAlignVertical;
-    return this.self();
-  }
-  fillColor(fillColor) {
-    this._text.style.fillColor = fillColor;
-    return this.self();
-  }
-  fillOpacity(fillOpacity) {
-    this._text.style.fillOpacity = fillOpacity;
-    return this.self();
-  }
-  strokeColor(strokeColor) {
-    this._text.style.strokeColor = strokeColor;
-    return this.self();
-  }
-  strokeOpacity(strokeOpacity) {
-    this._text.style.strokeOpacity = strokeOpacity;
-    return this.self();
-  }
-  strokeWidth(strokeWidth) {
-    this._text.style.strokeWidth = strokeWidth;
-    return this.self();
-  }
-  lineHeight(lineHeight) {
-    this._text.style.lineHeight = lineHeight;
-    return this.self();
-  }
-  style(style) {
-    this._style = style;
-    return this.self();
-  }
-  backgroundColor(backgroundColor) {
-    this._style.backgroundColor = backgroundColor;
-    return this.self();
-  }
-  backgroundOpacity(backgroundOpacity) {
-    this._style.backgroundOpacity = backgroundOpacity;
-    return this.self();
-  }
-  cornerRadius(cornerRadius) {
-    this._style.cornerRadius = cornerRadius;
-    return this.self();
-  }
-  pointerWidth(pointerWidth) {
-    this._style.pointerWidth = pointerWidth;
-    return this.self();
-  }
-  pointerHeight(pointerHeight) {
-    this._style.pointerHeight = pointerHeight;
-    return this.self();
-  }
-  pointerDirection(pointerDirection) {
-    this._style.pointerDirection = pointerDirection;
-    return this.self();
-  }
-  maxViewScale(maxViewScale) {
-    this._style.maxViewScale = maxViewScale;
-    return this.self();
-  }
-  minViewScale(minViewScale) {
-    this._style.minViewScale = minViewScale;
-    return this.self();
-  }
-  build() {
-    return Object.assign(Object.assign({}, this._item), { type: "LABEL", text: this._text, style: this._style });
-  }
-};
-
-// node_modules/@owlbear-rodeo/sdk/lib/builders/ShapeBuilder.js
-var ShapeBuilder = class extends GenericItemBuilder {
-  constructor(player) {
-    super(player);
-    this._width = 0;
-    this._height = 0;
-    this._shapeType = "RECTANGLE";
+    this._commands = [];
+    this._fillRule = "nonzero";
     this._style = {
       fillColor: "black",
       fillOpacity: 1,
@@ -3642,19 +3495,15 @@ var ShapeBuilder = class extends GenericItemBuilder {
       strokeWidth: 5,
       strokeDash: []
     };
+    this._item.name = "Path";
     this._item.layer = "DRAWING";
-    this._item.name = "Shape";
   }
-  width(width) {
-    this._width = width;
+  commands(commands) {
+    this._commands = commands;
     return this.self();
   }
-  height(height) {
-    this._height = height;
-    return this.self();
-  }
-  shapeType(shapeType) {
-    this._shapeType = shapeType;
+  fillRule(fillRule) {
+    this._fillRule = fillRule;
     return this.self();
   }
   style(style) {
@@ -3686,7 +3535,7 @@ var ShapeBuilder = class extends GenericItemBuilder {
     return this.self();
   }
   build() {
-    return Object.assign(Object.assign({}, this._item), { type: "SHAPE", width: this._width, height: this._height, shapeType: this._shapeType, style: this._style });
+    return Object.assign(Object.assign({}, this._item), { type: "PATH", commands: this._commands, fillRule: this._fillRule, style: this._style });
   }
 };
 
@@ -3823,11 +3672,8 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildLabel() {
-  return new LabelBuilder(playerApi);
-}
-function buildShape() {
-  return new ShapeBuilder(playerApi);
+function buildPath() {
+  return new PathBuilder(playerApi);
 }
 var lib_default = OBR;
 
@@ -3843,6 +3689,21 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
+var VISUAL_VERSION = 3;
+var RING_COLORS = {
+  full: "#73FF5A",
+  half: "#FFAF22",
+  kaputt: "#FF460D",
+  base: "#000000",
+  border: "#050505"
+};
+var OUTER_SEGMENTS = [
+  { part: "Head", angle: -90, span: 30 },
+  { part: "R.Arm", angle: -18, span: 30 },
+  { part: "R.Leg", angle: 54, span: 30 },
+  { part: "L.Leg", angle: 126, span: 30 },
+  { part: "L.Arm", angle: 198, span: 30 }
+];
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -3850,6 +3711,10 @@ var DEFAULT_ODYSSEY_SKILLS = {
 var DEFAULT_ODYSSEY_SKILL_CATEGORIES = {
   [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
   [PARRY_SKILL_NAME]: COMBAT_SKILL_CATEGORY
+};
+var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
+  [MELEE_SKILL_NAME]: true,
+  [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
   Head: { current: 1, max: 1, armor: 0, minor: 0, serious: 0 },
@@ -3881,6 +3746,7 @@ var DEFAULT_TRACKER_DATA = {
     },
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
+    skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -3943,6 +3809,7 @@ function sanitizeOdysseyData(raw) {
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
   const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
   const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
+  const rawSkillStrengthBonuses = raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object" ? raw.skillStrengthBonuses : {};
   const migratedMeleeValue = Math.max(
     Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
     ...Array.from(LEGACY_MELEE_SKILL_NAMES).map((skillName) => Number(rawSkills[skillName] ?? 0) || 0),
@@ -3955,8 +3822,10 @@ function sanitizeOdysseyData(raw) {
   );
   next.skills[MELEE_SKILL_NAME] = clamp(migratedMeleeValue, 0, 10);
   next.skillCategories[MELEE_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  next.skillStrengthBonuses[MELEE_SKILL_NAME] = true;
   next.skills[PARRY_SKILL_NAME] = clamp(migratedParryValue, 0, 10);
   next.skillCategories[PARRY_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  next.skillStrengthBonuses[PARRY_SKILL_NAME] = false;
   for (const [key, value] of Object.entries(rawSkills)) {
     const normalizedKey = String(key).trim();
     if (!normalizedKey) continue;
@@ -3968,6 +3837,9 @@ function sanitizeOdysseyData(raw) {
       rawSkillCategories[normalizedKey] ?? rawSkillCategories[key] ?? ""
     ).toLowerCase();
     next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
+    next.skillStrengthBonuses[normalizedKey] = Boolean(
+      rawSkillStrengthBonuses[normalizedKey] ?? rawSkillStrengthBonuses[key] ?? false
+    );
   }
   for (const key of Object.keys(next.attributes)) {
     const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;
@@ -4026,13 +3898,6 @@ function getCharacterName(item) {
   if (byName) return byName;
   return `Character ${item.id.slice(0, 6)}`;
 }
-function formatOverlayText(data) {
-  const body = data.body;
-  return [
-    `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
-    `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
-  ].join("\n");
-}
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
@@ -4056,18 +3921,18 @@ async function getTokenMetrics(token) {
   } catch (error) {
     console.warn("[Body HP] Unable to read token bounds, using fallback size", error);
   }
-  let gridDpi = 0;
+  let gridDpi = 150;
   try {
-    gridDpi = await lib_default.scene.grid.getDpi();
+    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
   } catch (error) {
-    console.warn("[Body HP] Unable to read grid dpi, using size fallback", error);
+    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
   }
   const scaleFactor = Math.max(
     Math.abs(token.scale?.x ?? 1),
     Math.abs(token.scale?.y ?? 1),
     1
   );
-  const markerSize = Math.max(
+  const visibleDiameter = Math.max(
     width,
     height,
     effectiveSize.width,
@@ -4075,55 +3940,81 @@ async function getTokenMetrics(token) {
     gridDpi * scaleFactor,
     56
   );
+  const tokenRadius = visibleDiameter / 2;
+  const tokenGap = 0;
+  const torsoThickness = Math.max(5, visibleDiameter * 0.035);
+  const torsoInnerRadius = tokenRadius + tokenGap;
+  const torsoOuterRadius = torsoInnerRadius + torsoThickness;
+  const ringGap = 0;
+  const outerThickness = Math.max(8, visibleDiameter * 0.08);
+  const outerInnerRadius = torsoOuterRadius + ringGap;
+  const outerRadius = outerInnerRadius + outerThickness;
   return {
     center,
-    width,
-    height,
-    markerSize
+    visibleDiameter,
+    outerRadius,
+    outerInnerRadius,
+    torsoOuterRadius,
+    torsoInnerRadius
   };
 }
-function getWorldPosition(token, center, offsetX, offsetY) {
-  const radians = (token.rotation ?? 0) * Math.PI / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
+function polar(radius, angle) {
+  const radians = angle * Math.PI / 180;
   return {
-    x: center.x + offsetX * cos - offsetY * sin,
-    y: center.y + offsetX * sin + offsetY * cos
+    x: radius * Math.cos(radians),
+    y: radius * Math.sin(radians)
   };
 }
-function buildOverlayCard(token, data, metrics) {
-  const width = Math.max(360, Math.round(metrics.width * 2.55));
-  const height = data.lastRoll ? 96 : 72;
-  const offsetX = metrics.width / 2 + width / 2 + 18;
-  return buildLabel().name(`Body HP: ${getCharacterName(token)}`).plainText(formatOverlayText(data)).width(width).height(height).padding(10).fontSize(13).fontWeight(600).lineHeight(1.18).textAlign("LEFT").textAlignVertical("MIDDLE").fillColor("#f8fafc").backgroundColor("#020617").backgroundOpacity(0.58).strokeColor("#cbd5e1").strokeOpacity(0.45).strokeWidth(1).cornerRadius(12).pointerDirection("LEFT").pointerWidth(10).pointerHeight(12).position(getWorldPosition(token, metrics.center, offsetX, 0)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).metadata({ [OVERLAY_KEY]: token.id, kind: "body-card" }).build();
-}
-function buildBodyFigure(token, data, metrics) {
-  const parts = [];
-  const spacing = 14;
-  const positions = {
-    Head: [0, -spacing * 2],
-    Torso: [0, 0],
-    "L.Arm": [-spacing, 0],
-    "R.Arm": [spacing, 0],
-    "L.Leg": [-spacing / 2, spacing * 2],
-    "R.Leg": [spacing / 2, spacing * 2]
-  };
-  for (const partName of BODY_ORDER) {
-    const part = data.body[partName];
-    const [x, y] = positions[partName];
-    const hpRatio = part.max > 0 ? part.current / part.max : 0;
-    let color = "#22c55e";
-    if (hpRatio < 0.5) color = "#f59e0b";
-    if (hpRatio < 0.25) color = "#ef4444";
-    parts.push(
-      buildShape().shapeType("RECTANGLE").width(10).height(10).position(getWorldPosition(token, metrics.center, x, y)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(color).fillOpacity(0.95).strokeColor("#111").strokeWidth(1).metadata({
-        [OVERLAY_KEY]: token.id,
-        kind: "body-part",
-        part: partName
-      }).build()
-    );
+function arcPoints(radius, startAngle, endAngle, segments = 18) {
+  const points = [];
+  for (let index = 0; index <= segments; index += 1) {
+    const ratio = index / segments;
+    const angle = startAngle + (endAngle - startAngle) * ratio;
+    points.push(polar(radius, angle));
   }
-  return parts;
+  return points;
+}
+function buildAnnulusCommands(radiusOuter, radiusInner) {
+  const outer = arcPoints(radiusOuter, -180, 180, 36);
+  const inner = arcPoints(radiusInner, -180, 180, 36);
+  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
+  for (const point of outer.slice(1)) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+  commands.push([Command.CLOSE]);
+  commands.push([Command.MOVE, inner[0].x, inner[0].y]);
+  for (const point of inner) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+  commands.push([Command.CLOSE]);
+  return commands;
+}
+function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
+  const startAngle = centerAngle - spanAngle / 2;
+  const endAngle = centerAngle + spanAngle / 2;
+  const outer = arcPoints(radiusOuter, startAngle, endAngle, 10);
+  const inner = arcPoints(radiusInner, endAngle, startAngle, 10);
+  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
+  for (const point of outer.slice(1)) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+  for (const point of inner) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+  commands.push([Command.CLOSE]);
+  return commands;
+}
+function getPartColor(part) {
+  if (part.max <= 0 || part.current <= 0) return RING_COLORS.kaputt;
+  if (part.current < part.max) return RING_COLORS.half;
+  return RING_COLORS.full;
+}
+function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
+  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+    [OVERLAY_KEY]: token.id,
+    kind,
+    visualVersion: VISUAL_VERSION
+  }).build();
 }
 function applyBodyEffects(body, bodyEffects) {
   if (!bodyEffects || typeof bodyEffects !== "object") return;
@@ -4202,10 +4093,47 @@ function applyRollEventToData(current2, event) {
   return next;
 }
 function buildOverlayItems(token, data, metrics) {
-  return [
-    buildOverlayCard(token, data, metrics),
-    ...buildBodyFigure(token, data, metrics)
-  ];
+  const items = [];
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "outer-base",
+      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
+      RING_COLORS.base,
+      0,
+      "evenodd"
+    )
+  );
+  for (const segment of OUTER_SEGMENTS) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        `segment-${segment.part}`,
+        buildSectorCommands(
+          metrics.outerRadius,
+          metrics.outerInnerRadius,
+          segment.angle,
+          segment.span
+        ),
+        getPartColor(data.body[segment.part]),
+        1
+      )
+    );
+  }
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "torso-ring",
+      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
+      getPartColor(data.body.Torso),
+      2,
+      "evenodd"
+    )
+  );
+  return items;
 }
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {

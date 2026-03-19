@@ -1,4 +1,4 @@
-import OBR, { buildLabel, buildShape, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
 
 export { OBR };
 
@@ -13,6 +13,21 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
+const VISUAL_VERSION = 3;
+const RING_COLORS = {
+  full: "#73FF5A",
+  half: "#FFAF22",
+  kaputt: "#FF460D",
+  base: "#000000",
+  border: "#050505",
+};
+const OUTER_SEGMENTS = [
+  { part: "Head", angle: -90, span: 30 },
+  { part: "R.Arm", angle: -18, span: 30 },
+  { part: "R.Leg", angle: 54, span: 30 },
+  { part: "L.Leg", angle: 126, span: 30 },
+  { part: "L.Arm", angle: 198, span: 30 },
+];
 export const DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0,
@@ -20,6 +35,10 @@ export const DEFAULT_ODYSSEY_SKILLS = {
 export const DEFAULT_ODYSSEY_SKILL_CATEGORIES = {
   [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
   [PARRY_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
+};
+export const DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
+  [MELEE_SKILL_NAME]: true,
+  [PARRY_SKILL_NAME]: false,
 };
 
 export const BODY_DEFAULTS = {
@@ -53,6 +72,7 @@ export const DEFAULT_TRACKER_DATA = {
     },
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
+    skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -132,6 +152,10 @@ export function sanitizeOdysseyData(raw) {
     raw.skillCategories && typeof raw.skillCategories === "object"
       ? raw.skillCategories
       : {};
+  const rawSkillStrengthBonuses =
+    raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object"
+      ? raw.skillStrengthBonuses
+      : {};
 
   const migratedMeleeValue = Math.max(
     Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
@@ -146,8 +170,10 @@ export function sanitizeOdysseyData(raw) {
 
   next.skills[MELEE_SKILL_NAME] = clamp(migratedMeleeValue, 0, 10);
   next.skillCategories[MELEE_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  next.skillStrengthBonuses[MELEE_SKILL_NAME] = true;
   next.skills[PARRY_SKILL_NAME] = clamp(migratedParryValue, 0, 10);
   next.skillCategories[PARRY_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
+  next.skillStrengthBonuses[PARRY_SKILL_NAME] = false;
 
   for (const [key, value] of Object.entries(rawSkills)) {
     const normalizedKey = String(key).trim();
@@ -169,6 +195,9 @@ export function sanitizeOdysseyData(raw) {
       categoryValue === COMBAT_SKILL_CATEGORY
         ? COMBAT_SKILL_CATEGORY
         : APPLIED_SKILL_CATEGORY;
+    next.skillStrengthBonuses[normalizedKey] = Boolean(
+      rawSkillStrengthBonuses[normalizedKey] ?? rawSkillStrengthBonuses[key] ?? false,
+    );
   }
 
   for (const key of Object.keys(next.attributes)) {
@@ -324,11 +353,11 @@ async function getTokenMetrics(token) {
     console.warn("[Body HP] Unable to read token bounds, using fallback size", error);
   }
 
-  let gridDpi = 0;
+  let gridDpi = 150;
   try {
-    gridDpi = await OBR.scene.grid.getDpi();
+    gridDpi = (await OBR.scene.grid.getDpi()) || gridDpi;
   } catch (error) {
-    console.warn("[Body HP] Unable to read grid dpi, using size fallback", error);
+    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
   }
 
   const scaleFactor = Math.max(
@@ -336,7 +365,7 @@ async function getTokenMetrics(token) {
     Math.abs(token.scale?.y ?? 1),
     1,
   );
-  const markerSize = Math.max(
+  const visibleDiameter = Math.max(
     width,
     height,
     effectiveSize.width,
@@ -344,106 +373,113 @@ async function getTokenMetrics(token) {
     gridDpi * scaleFactor,
     56,
   );
+  const tokenRadius = visibleDiameter / 2;
+  const tokenGap = 0;
+  const torsoThickness = Math.max(5, visibleDiameter * 0.035);
+  const torsoInnerRadius = tokenRadius + tokenGap;
+  const torsoOuterRadius = torsoInnerRadius + torsoThickness;
+  const ringGap = 0;
+  const outerThickness = Math.max(8, visibleDiameter * 0.08);
+  const outerInnerRadius = torsoOuterRadius + ringGap;
+  const outerRadius = outerInnerRadius + outerThickness;
 
   return {
     center,
-    width,
-    height,
-    markerSize,
+    visibleDiameter,
+    outerRadius,
+    outerInnerRadius,
+    torsoOuterRadius,
+    torsoInnerRadius,
   };
 }
 
-function getWorldPosition(token, center, offsetX, offsetY) {
-  const radians = ((token.rotation ?? 0) * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
+function polar(radius, angle) {
+  const radians = (angle * Math.PI) / 180;
   return {
-    x: center.x + offsetX * cos - offsetY * sin,
-    y: center.y + offsetX * sin + offsetY * cos,
+    x: radius * Math.cos(radians),
+    y: radius * Math.sin(radians),
   };
 }
 
-function buildOverlayCard(token, data, metrics) {
-  const width = Math.max(360, Math.round(metrics.width * 2.55));
-  const height = data.lastRoll ? 96 : 72;
-  const offsetX = metrics.width / 2 + width / 2 + 18;
+function arcPoints(radius, startAngle, endAngle, segments = 18) {
+  const points = [];
+  for (let index = 0; index <= segments; index += 1) {
+    const ratio = index / segments;
+    const angle = startAngle + (endAngle - startAngle) * ratio;
+    points.push(polar(radius, angle));
+  }
+  return points;
+}
 
-  return buildLabel()
-    .name(`Body HP: ${getCharacterName(token)}`)
-    .plainText(formatOverlayText(data))
-    .width(width)
-    .height(height)
-    .padding(10)
-    .fontSize(13)
-    .fontWeight(600)
-    .lineHeight(1.18)
-    .textAlign("LEFT")
-    .textAlignVertical("MIDDLE")
-    .fillColor("#f8fafc")
-    .backgroundColor("#020617")
-    .backgroundOpacity(0.58)
-    .strokeColor("#cbd5e1")
-    .strokeOpacity(0.45)
-    .strokeWidth(1)
-    .cornerRadius(12)
-    .pointerDirection("LEFT")
-    .pointerWidth(10)
-    .pointerHeight(12)
-    .position(getWorldPosition(token, metrics.center, offsetX, 0))
+function buildAnnulusCommands(radiusOuter, radiusInner) {
+  const outer = arcPoints(radiusOuter, -180, 180, 36);
+  const inner = arcPoints(radiusInner, -180, 180, 36);
+  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
+
+  for (const point of outer.slice(1)) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+
+  commands.push([Command.CLOSE]);
+  commands.push([Command.MOVE, inner[0].x, inner[0].y]);
+
+  for (const point of inner) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+
+  commands.push([Command.CLOSE]);
+  return commands;
+}
+
+function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
+  const startAngle = centerAngle - spanAngle / 2;
+  const endAngle = centerAngle + spanAngle / 2;
+  const outer = arcPoints(radiusOuter, startAngle, endAngle, 10);
+  const inner = arcPoints(radiusInner, endAngle, startAngle, 10);
+  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
+
+  for (const point of outer.slice(1)) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+
+  for (const point of inner) {
+    commands.push([Command.LINE, point.x, point.y]);
+  }
+
+  commands.push([Command.CLOSE]);
+  return commands;
+}
+
+function getPartColor(part) {
+  if (part.max <= 0 || part.current <= 0) return RING_COLORS.kaputt;
+  if (part.current < part.max) return RING_COLORS.half;
+  return RING_COLORS.full;
+}
+
+function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
+  return buildPath()
+    .name(`${kind}: ${getCharacterName(token)}`)
+    .commands(commands)
+    .fillRule(fillRule)
+    .fillColor(fillColor)
+    .fillOpacity(1)
+    .strokeColor(RING_COLORS.border)
+    .strokeOpacity(1)
+    .strokeWidth(0.75)
+    .position(metrics.center)
+    .rotation(0)
+    .zIndex(Date.now() + zIndex)
     .attachedTo(token.id)
+    .disableAttachmentBehavior(["ROTATION"])
     .layer("ATTACHMENT")
     .locked(true)
     .disableHit(true)
-    .metadata({ [OVERLAY_KEY]: token.id, kind: "body-card" })
+    .metadata({
+      [OVERLAY_KEY]: token.id,
+      kind,
+      visualVersion: VISUAL_VERSION,
+    })
     .build();
-}
-
-export function buildBodyFigure(token, data, metrics) {
-  const parts = [];
-  const spacing = 14;
-
-  const positions = {
-    Head: [0, -spacing * 2],
-    Torso: [0, 0],
-    "L.Arm": [-spacing, 0],
-    "R.Arm": [spacing, 0],
-    "L.Leg": [-spacing / 2, spacing * 2],
-    "R.Leg": [spacing / 2, spacing * 2],
-  };
-
-  for (const partName of BODY_ORDER) {
-    const part = data.body[partName];
-    const [x, y] = positions[partName];
-    const hpRatio = part.max > 0 ? part.current / part.max : 0;
-
-    let color = "#22c55e";
-    if (hpRatio < 0.5) color = "#f59e0b";
-    if (hpRatio < 0.25) color = "#ef4444";
-
-    parts.push(
-      buildShape()
-        .shapeType("RECTANGLE")
-        .width(10)
-        .height(10)
-        .position(getWorldPosition(token, metrics.center, x, y))
-        .attachedTo(token.id)
-        .layer("ATTACHMENT")
-        .locked(true)
-        .disableHit(true)
-        .fillColor(color)
-        .fillOpacity(0.95)
-        .strokeColor("#111")
-        .strokeWidth(1)
-        .metadata({
-          [OVERLAY_KEY]: token.id,
-          kind: "body-part",
-          part: partName,
-        })
-        .build(),
-    );
-  }
-
-  return parts;
 }
 
 function applyBodyEffects(body, bodyEffects) {
@@ -542,10 +578,51 @@ export function applyRollEventToData(current, event) {
 }
 
 export function buildOverlayItems(token, data, metrics) {
-  return [
-    buildOverlayCard(token, data, metrics),
-    ...buildBodyFigure(token, data, metrics),
-  ];
+  const items = [];
+
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "outer-base",
+      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
+      RING_COLORS.base,
+      0,
+      "evenodd",
+    ),
+  );
+
+  for (const segment of OUTER_SEGMENTS) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        `segment-${segment.part}`,
+        buildSectorCommands(
+          metrics.outerRadius,
+          metrics.outerInnerRadius,
+          segment.angle,
+          segment.span,
+        ),
+        getPartColor(data.body[segment.part]),
+        1,
+      ),
+    );
+  }
+
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "torso-ring",
+      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
+      getPartColor(data.body.Torso),
+      2,
+      "evenodd",
+    ),
+  );
+
+  return items;
 }
 
 export async function updateTrackerData(tokenId, updater) {

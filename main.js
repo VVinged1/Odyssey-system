@@ -43,6 +43,7 @@ let sceneItems = [];
 let selectionIds = [];
 let activeTokenId = null;
 let debugEntries = [];
+let partyPlayers = [];
 const inputAutosaveTimers = new Map();
 let selectionPollTimer = null;
 
@@ -73,6 +74,12 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function getSortedPartyPlayers() {
+  return [...partyPlayers].sort((left, right) =>
+    String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
+  );
 }
 
 function getCharacters() {
@@ -269,6 +276,16 @@ function formatDiceDebug({ tokenName, result }) {
 }
 
 function renderOwnerFields(data, disabledAttr) {
+  const playerOptions = [
+    `<option value="">Unassigned</option>`,
+    ...getSortedPartyPlayers().map(
+      (player) => `
+        <option value="${escapeHtml(player.id)}" ${
+          data.odyssey.owner.playerId === player.id ? "selected" : ""
+        }>${escapeHtml(player.name || player.id)}</option>`
+    ),
+  ].join("");
+
   return `
     <div class="preview-box">
       <div class="field-label">Odyssey ownership</div>
@@ -279,16 +296,9 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
       </div>
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">Owner Player ID</span>
-          <input type="text" value="${escapeHtml(data.odyssey.owner.playerId)}" data-action="set-owner" data-field="playerId" ${disabledAttr}>
+          <span class="field-label">Assigned Player</span>
+          <select data-action="select-owner-player" ${disabledAttr}>${playerOptions}</select>
         </label>
-        <label class="field-stack">
-          <span class="field-label">Owner Name</span>
-          <input type="text" value="${escapeHtml(data.odyssey.owner.playerName)}" data-action="set-owner" data-field="playerName" ${disabledAttr}>
-        </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" class="secondary" data-action="assign-owner-to-me" ${disabledAttr}>Assign To Current Viewer</button>
       </div>
     </div>
   `;
@@ -599,17 +609,19 @@ function render() {
 }
 
 async function syncState(showToast = false) {
-  const [role, id, name, items, selection] = await Promise.all([
+  const [role, id, name, items, selection, players] = await Promise.all([
     OBR.player.getRole(),
     OBR.player.getId(),
     OBR.player.getName(),
     OBR.scene.items.getItems(),
     OBR.player.getSelection(),
+    OBR.party.getPlayers(),
   ]);
 
   playerRole = role;
   playerId = id;
   playerName = name;
+  partyPlayers = players ?? [];
   sceneItems = items;
   selectionIds = selection ?? [];
 
@@ -702,7 +714,7 @@ async function setBodyField(partName, field, value) {
   await syncState();
 }
 
-async function setOwnerField(field, value) {
+async function setOwnerPlayer(ownerPlayerId) {
   if (!isEditable()) {
     setStatus("Only the GM can assign token owners.", "error");
     return;
@@ -714,11 +726,14 @@ async function setOwnerField(field, value) {
     return;
   }
 
+  const selectedPlayer = getSortedPartyPlayers().find((player) => player.id === ownerPlayerId);
+
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey ??= structuredClone(getTrackerData(token).odyssey);
     next.odyssey.owner ??= { playerId: "", playerName: "" };
-    next.odyssey.owner[field] = String(value || "").trim();
+    next.odyssey.owner.playerId = selectedPlayer?.id ?? "";
+    next.odyssey.owner.playerName = selectedPlayer?.name ?? "";
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -812,18 +827,6 @@ async function setWeaponName(index, value) {
 async function autosaveDraftField(draft) {
   const token = getCharacterById(draft.tokenId);
   if (!token) return;
-
-  if (draft.action === "set-owner") {
-    if (!isEditable()) return;
-    await updateTrackerData(token.id, (current) => {
-      const next = structuredClone(current);
-      next.odyssey ??= structuredClone(getTrackerData(token).odyssey);
-      next.odyssey.owner ??= { playerId: "", playerName: "" };
-      next.odyssey.owner[draft.field] = String(draft.value || "").trim();
-      return next;
-    });
-    return;
-  }
 
   if (!canEditTokenData(token)) return;
 
@@ -1117,15 +1120,6 @@ function bindUiEvents() {
       });
     }
 
-    if (action === "assign-owner-to-me") {
-      void Promise.all([
-        setOwnerField("playerId", playerId),
-        setOwnerField("playerName", playerName),
-      ]).catch((error) => {
-        setStatus(error?.message ?? "Unable to assign current viewer.", "error");
-      });
-    }
-
     if (action === "focus-token" && activeTokenId) {
       void selectCharacter(activeTokenId).catch((error) => {
         setStatus(error?.message ?? "Unable to focus token.", "error");
@@ -1155,10 +1149,8 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
 
-    if (target.dataset.action === "set-owner") {
-      const field = target.dataset.field;
-      if (!field) return;
-      void setOwnerField(field, target.value).catch((error) => {
+    if (target.dataset.action === "select-owner-player") {
+      void setOwnerPlayer(target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save owner.", "error");
       });
       return;
@@ -1213,18 +1205,6 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
-
-    if (target.dataset.action === "set-owner") {
-      const field = target.dataset.field;
-      if (!field) return;
-      queueInputAutosave({
-        tokenId: activeTokenId,
-        action: "set-owner",
-        field,
-        value: target.value,
-      });
-      return;
-    }
 
     if (target.dataset.action === "set-odyssey-skill") {
       const skill = target.dataset.skill;
@@ -1322,6 +1302,11 @@ OBR.onReady(async () => {
           });
         return;
       }
+      render();
+    });
+
+    OBR.party.onChange((players) => {
+      partyPlayers = players ?? [];
       render();
     });
 

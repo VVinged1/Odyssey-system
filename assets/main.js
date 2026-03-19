@@ -4304,6 +4304,7 @@ var sceneItems = [];
 var selectionIds = [];
 var activeTokenId = null;
 var debugEntries = [];
+var partyPlayers = [];
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
 var selectionPollTimer = null;
 function sanitizeDebugEntries(raw) {
@@ -4323,6 +4324,11 @@ function setStatus(message, kind = "info") {
 }
 function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+function getSortedPartyPlayers() {
+  return [...partyPlayers].sort(
+    (left, right) => String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
+  );
 }
 function getCharacters() {
   return sortCharacters(sceneItems.filter(isCharacterToken));
@@ -4484,6 +4490,13 @@ function formatDiceDebug({ tokenName, result }) {
   ].join("\n");
 }
 function renderOwnerFields(data, disabledAttr) {
+  const playerOptions = [
+    `<option value="">Unassigned</option>`,
+    ...getSortedPartyPlayers().map(
+      (player) => `
+        <option value="${escapeHtml(player.id)}" ${data.odyssey.owner.playerId === player.id ? "selected" : ""}>${escapeHtml(player.name || player.id)}</option>`
+    )
+  ].join("");
   return `
     <div class="preview-box">
       <div class="field-label">Odyssey ownership</div>
@@ -4494,16 +4507,9 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
       </div>
       <div class="form-grid">
         <label class="field-stack">
-          <span class="field-label">Owner Player ID</span>
-          <input type="text" value="${escapeHtml(data.odyssey.owner.playerId)}" data-action="set-owner" data-field="playerId" ${disabledAttr}>
+          <span class="field-label">Assigned Player</span>
+          <select data-action="select-owner-player" ${disabledAttr}>${playerOptions}</select>
         </label>
-        <label class="field-stack">
-          <span class="field-label">Owner Name</span>
-          <input type="text" value="${escapeHtml(data.odyssey.owner.playerName)}" data-action="set-owner" data-field="playerName" ${disabledAttr}>
-        </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" class="secondary" data-action="assign-owner-to-me" ${disabledAttr}>Assign To Current Viewer</button>
       </div>
     </div>
   `;
@@ -4767,16 +4773,18 @@ function render() {
   }
 }
 async function syncState(showToast = false) {
-  const [role, id, name, items, selection] = await Promise.all([
+  const [role, id, name, items, selection, players] = await Promise.all([
     lib_default.player.getRole(),
     lib_default.player.getId(),
     lib_default.player.getName(),
     lib_default.scene.items.getItems(),
-    lib_default.player.getSelection()
+    lib_default.player.getSelection(),
+    lib_default.party.getPlayers()
   ]);
   playerRole = role;
   playerId = id;
   playerName = name;
+  partyPlayers = players ?? [];
   sceneItems = items;
   selectionIds = selection ?? [];
   const selectedCharacterId = selectionIds.find(
@@ -4856,7 +4864,7 @@ async function setBodyField(partName, field, value) {
   await ensureOverlayForToken(token.id);
   await syncState();
 }
-async function setOwnerField(field, value) {
+async function setOwnerPlayer(ownerPlayerId) {
   if (!isEditable()) {
     setStatus("Only the GM can assign token owners.", "error");
     return;
@@ -4866,12 +4874,14 @@ async function setOwnerField(field, value) {
     setStatus("Select a character first.", "error");
     return;
   }
+  const selectedPlayer = getSortedPartyPlayers().find((player) => player.id === ownerPlayerId);
   await updateTrackerData(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
     (_a = next.odyssey).owner ?? (_a.owner = { playerId: "", playerName: "" });
-    next.odyssey.owner[field] = String(value || "").trim();
+    next.odyssey.owner.playerId = selectedPlayer?.id ?? "";
+    next.odyssey.owner.playerName = selectedPlayer?.name ?? "";
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -4958,18 +4968,6 @@ async function setWeaponName(index, value) {
 async function autosaveDraftField(draft) {
   const token = getCharacterById(draft.tokenId);
   if (!token) return;
-  if (draft.action === "set-owner") {
-    if (!isEditable()) return;
-    await updateTrackerData(token.id, (current2) => {
-      var _a;
-      const next = structuredClone(current2);
-      next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
-      (_a = next.odyssey).owner ?? (_a.owner = { playerId: "", playerName: "" });
-      next.odyssey.owner[draft.field] = String(draft.value || "").trim();
-      return next;
-    });
-    return;
-  }
   if (!canEditTokenData(token)) return;
   await updateTrackerData(token.id, (current2) => {
     var _a, _b;
@@ -5225,14 +5223,6 @@ function bindUiEvents() {
         setStatus(error?.message ?? "Unable to select token.", "error");
       });
     }
-    if (action === "assign-owner-to-me") {
-      void Promise.all([
-        setOwnerField("playerId", playerId),
-        setOwnerField("playerName", playerName)
-      ]).catch((error) => {
-        setStatus(error?.message ?? "Unable to assign current viewer.", "error");
-      });
-    }
     if (action === "focus-token" && activeTokenId) {
       void selectCharacter(activeTokenId).catch((error) => {
         setStatus(error?.message ?? "Unable to focus token.", "error");
@@ -5257,10 +5247,8 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
-    if (target.dataset.action === "set-owner") {
-      const field2 = target.dataset.field;
-      if (!field2) return;
-      void setOwnerField(field2, target.value).catch((error) => {
+    if (target.dataset.action === "select-owner-player") {
+      void setOwnerPlayer(target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save owner.", "error");
       });
       return;
@@ -5307,17 +5295,6 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
-    if (target.dataset.action === "set-owner") {
-      const field = target.dataset.field;
-      if (!field) return;
-      queueInputAutosave({
-        tokenId: activeTokenId,
-        action: "set-owner",
-        field,
-        value: target.value
-      });
-      return;
-    }
     if (target.dataset.action === "set-odyssey-skill") {
       const skill = target.dataset.skill;
       if (!skill) return;
@@ -5404,6 +5381,10 @@ lib_default.onReady(async () => {
         });
         return;
       }
+      render();
+    });
+    lib_default.party.onChange((players) => {
+      partyPlayers = players ?? [];
       render();
     });
     lib_default.room.onMetadataChange((metadata) => {

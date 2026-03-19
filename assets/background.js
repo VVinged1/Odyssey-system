@@ -4185,23 +4185,6 @@ async function ensureOverlayForToken(tokenId, items) {
     buildOverlayItems(token, getTrackerData(token), metrics)
   );
 }
-async function setTrackedState(tokenId, enabled) {
-  if (enabled) {
-    await updateTrackerData(tokenId, (current2) => ({
-      ...current2,
-      enabled: true
-    }));
-    await ensureOverlayForToken(tokenId);
-    return;
-  }
-  await lib_default.scene.items.updateItems([tokenId], (items) => {
-    const token = items[0];
-    if (!token) return;
-    token.metadata ?? (token.metadata = {});
-    delete token.metadata[META_KEY];
-  });
-  await removeOverlaysForToken(tokenId);
-}
 async function applyRemoteRollEvent(event) {
   if (!event?.token_id) return false;
   const sceneItems = await lib_default.scene.items.getItems();
@@ -4327,13 +4310,10 @@ function extractTrackedTokens(items) {
 }
 
 // background.js
-var EXTENSION_MENU_ID = "com.codex.body-hp/context-menu";
 var currentRole = "PLAYER";
 var lastBridgeEventId = 0;
 var bridgePollTimer = null;
 var pushStateTimer = null;
-var ADD_ICON_URL = new URL("./add.svg", import.meta.url).href;
-var REMOVE_ICON_URL = new URL("./remove.svg", import.meta.url).href;
 async function updateBadge() {
   try {
     const items = await lib_default.scene.items.getItems();
@@ -4342,25 +4322,6 @@ async function updateBadge() {
   } catch (error) {
     console.warn("[Body HP] Unable to update badge", error);
   }
-}
-async function toggleTracking(items) {
-  const characters = items.filter(isCharacterToken);
-  if (!characters.length) return;
-  const tracked = characters.filter(isTrackedCharacter);
-  const untracked = characters.filter((item) => !isTrackedCharacter(item));
-  const shouldEnable = untracked.length > 0;
-  const targets = shouldEnable ? untracked : tracked;
-  for (const character of targets) {
-    await setTrackedState(character.id, shouldEnable);
-  }
-  console.log(
-    `[Body HP] ${shouldEnable ? "Tracking" : "Untracking"}: ${targets.map(getCharacterName).join(", ")}`
-  );
-  if (currentRole === "GM") {
-    const sceneItems = await lib_default.scene.items.getItems();
-    await pushTokenSnapshots(extractTrackedTokens(sceneItems));
-  }
-  await updateBadge();
 }
 function scheduleTokenSync(delayMs = 800) {
   if (pushStateTimer) {
@@ -4409,42 +4370,9 @@ async function restartBridgePolling() {
     }, 5e3);
   }
 }
-async function setupContextMenu() {
-  await lib_default.contextMenu.create({
-    id: EXTENSION_MENU_ID,
-    icons: [
-      {
-        icon: ADD_ICON_URL,
-        label: "Track Body HP",
-        filter: {
-          roles: ["GM"],
-          every: [{ key: "layer", value: "CHARACTER" }],
-          some: [{ key: ["metadata", META_KEY, "enabled"], value: true, operator: "!=" }]
-        }
-      },
-      {
-        icon: REMOVE_ICON_URL,
-        label: "Remove Body HP",
-        filter: {
-          roles: ["GM"],
-          every: [
-            { key: "layer", value: "CHARACTER" },
-            { key: ["metadata", META_KEY, "enabled"], value: true }
-          ]
-        }
-      }
-    ],
-    onClick(context) {
-      return toggleTracking(context.items).catch((error) => {
-        console.error("[Body HP] Context menu failed", error);
-      });
-    }
-  });
-}
 lib_default.onReady(async () => {
   try {
     currentRole = await lib_default.player.getRole();
-    await setupContextMenu();
     await updateBadge();
     if (currentRole === "GM") {
       await syncTrackedOverlays();

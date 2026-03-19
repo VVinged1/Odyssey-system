@@ -1,11 +1,7 @@
 import {
   OBR,
-  META_KEY,
   applyRemoteRollEvent,
-  getCharacterName,
-  isCharacterToken,
   isTrackedCharacter,
-  setTrackedState,
   syncTrackedOverlays,
 } from "./shared.js";
 import {
@@ -16,13 +12,10 @@ import {
   pushTokenSnapshots,
 } from "./bridge.js";
 
-const EXTENSION_MENU_ID = "com.codex.body-hp/context-menu";
 let currentRole = "PLAYER";
 let lastBridgeEventId = 0;
 let bridgePollTimer = null;
 let pushStateTimer = null;
-const ADD_ICON_URL = new URL("./add.svg", import.meta.url).href;
-const REMOVE_ICON_URL = new URL("./remove.svg", import.meta.url).href;
 
 async function updateBadge() {
   try {
@@ -32,33 +25,6 @@ async function updateBadge() {
   } catch (error) {
     console.warn("[Body HP] Unable to update badge", error);
   }
-}
-
-async function toggleTracking(items) {
-  const characters = items.filter(isCharacterToken);
-  if (!characters.length) return;
-
-  const tracked = characters.filter(isTrackedCharacter);
-  const untracked = characters.filter((item) => !isTrackedCharacter(item));
-  const shouldEnable = untracked.length > 0;
-  const targets = shouldEnable ? untracked : tracked;
-
-  for (const character of targets) {
-    await setTrackedState(character.id, shouldEnable);
-  }
-
-  console.log(
-    `[Body HP] ${shouldEnable ? "Tracking" : "Untracking"}: ${targets
-      .map(getCharacterName)
-      .join(", ")}`
-  );
-
-  if (currentRole === "GM") {
-    const sceneItems = await OBR.scene.items.getItems();
-    await pushTokenSnapshots(extractTrackedTokens(sceneItems));
-  }
-
-  await updateBadge();
 }
 
 function scheduleTokenSync(delayMs = 800) {
@@ -120,44 +86,9 @@ async function restartBridgePolling() {
   }
 }
 
-async function setupContextMenu() {
-  await OBR.contextMenu.create({
-    id: EXTENSION_MENU_ID,
-    icons: [
-      {
-        icon: ADD_ICON_URL,
-        label: "Track Body HP",
-        filter: {
-          roles: ["GM"],
-          every: [{ key: "layer", value: "CHARACTER" }],
-          some: [{ key: ["metadata", META_KEY, "enabled"], value: true, operator: "!=" }],
-        },
-      },
-      {
-        icon: REMOVE_ICON_URL,
-        label: "Remove Body HP",
-        filter: {
-          roles: ["GM"],
-          every: [
-            { key: "layer", value: "CHARACTER" },
-            { key: ["metadata", META_KEY, "enabled"], value: true },
-          ],
-        },
-      },
-    ],
-    onClick(context) {
-      return toggleTracking(context.items).catch((error) => {
-        console.error("[Body HP] Context menu failed", error);
-      });
-    },
-  });
-}
-
 OBR.onReady(async () => {
   try {
     currentRole = await OBR.player.getRole();
-
-    await setupContextMenu();
     await updateBadge();
 
     if (currentRole === "GM") {

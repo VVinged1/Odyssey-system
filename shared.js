@@ -216,7 +216,7 @@ export function getOdysseyData(item) {
 }
 
 export function canPlayerControlToken(playerRole, playerId, token) {
-  if (!token || !isTrackedCharacter(token)) return false;
+  if (!token || !isCharacterToken(token)) return false;
   if (playerRole === "GM") return true;
   const odyssey = getOdysseyData(token);
   return Boolean(playerId) && odyssey.owner.playerId === playerId;

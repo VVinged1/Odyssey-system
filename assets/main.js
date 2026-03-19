@@ -4002,7 +4002,7 @@ function getOdysseyData(item) {
   return sanitizeOdysseyData(getTrackerData(item).odyssey);
 }
 function canPlayerControlToken(playerRole2, playerId2, token) {
-  if (!token || !isTrackedCharacter(token)) return false;
+  if (!token || !isCharacterToken(token)) return false;
   if (playerRole2 === "GM") return true;
   const odyssey = getOdysseyData(token);
   return Boolean(playerId2) && odyssey.owner.playerId === playerId2;
@@ -4148,23 +4148,6 @@ async function ensureOverlayForToken(tokenId, items) {
     buildOverlayItems(token, getTrackerData(token), metrics)
   );
 }
-async function setTrackedState(tokenId, enabled) {
-  if (enabled) {
-    await updateTrackerData(tokenId, (current2) => ({
-      ...current2,
-      enabled: true
-    }));
-    await ensureOverlayForToken(tokenId);
-    return;
-  }
-  await lib_default.scene.items.updateItems([tokenId], (items) => {
-    const token = items[0];
-    if (!token) return;
-    token.metadata ?? (token.metadata = {});
-    delete token.metadata[META_KEY];
-  });
-  await removeOverlaysForToken(tokenId);
-}
 async function syncTrackedOverlays() {
   const items = await lib_default.scene.items.getItems();
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -4298,6 +4281,7 @@ function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, de
 }
 
 // main.js
+var DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 var ui = {
   roleBadge: document.getElementById("roleBadge"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -4318,6 +4302,17 @@ var sceneItems = [];
 var selectionIds = [];
 var activeTokenId = null;
 var debugEntries = [];
+var inputAutosaveTimers = /* @__PURE__ */ new Map();
+function sanitizeDebugEntries(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry) => entry && typeof entry === "object").map((entry) => ({
+    id: Number(entry.id) || Date.now(),
+    title: String(entry.title ?? "Debug"),
+    body: String(entry.body ?? ""),
+    kind: String(entry.kind ?? "info"),
+    timestamp: String(entry.timestamp ?? "")
+  })).slice(0, 30);
+}
 function setStatus(message, kind = "info") {
   ui.statusBox.textContent = message;
   ui.statusBox.className = `status ${kind}`;
@@ -4354,14 +4349,23 @@ function isEditable() {
 function canUseToken(token) {
   return canPlayerControlToken(playerRole, playerId, token);
 }
+function canEditTokenData(token) {
+  return canUseToken(token);
+}
+async function initializeCharacterToken(tokenId) {
+  const token = getCharacterById(tokenId);
+  if (!token || !isCharacterToken(token)) return;
+  await updateTrackerData(tokenId, (current2) => current2);
+  await ensureOverlayForToken(tokenId);
+}
 function resolveDefaultTargetTokenId(attackerId) {
   const otherSelected = selectionIds.find((id) => id !== attackerId);
   if (otherSelected) return otherSelected;
   const fallback = getTrackedCharacters().find((token) => token.id !== attackerId);
   return fallback?.id ?? "";
 }
-function pushDebugEntry(title, body, kind = "info") {
-  debugEntries = [
+async function pushDebugEntry(title, body, kind = "info") {
+  const nextEntries = [
     {
       id: Date.now(),
       title,
@@ -4370,7 +4374,12 @@ function pushDebugEntry(title, body, kind = "info") {
       timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString()
     },
     ...debugEntries
-  ].slice(0, 12);
+  ].slice(0, 30);
+  debugEntries = nextEntries;
+  renderDebugConsole();
+  await lib_default.room.setMetadata({
+    [DEBUG_LOG_KEY]: nextEntries
+  });
 }
 function renderDebugConsole() {
   if (!debugEntries.length) {
@@ -4394,6 +4403,10 @@ Roll debug will appear here after Attack or Roll Dice.</pre>
           <pre class="console-output">${escapeHtml(entry.body)}</pre>
         </div>`
   ).join("");
+}
+async function loadSharedDebugConsole() {
+  const metadata = await lib_default.room.getMetadata();
+  debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
 }
 function formatAttackDebug({
   attackerName,
@@ -4504,7 +4517,7 @@ function renderOdysseyStats(token, data, disabledAttr) {
   `;
 }
 function renderOdysseyActions(token, data, tokenLocked) {
-  const targetCharacters = getTrackedCharacters().filter((item) => item.id !== token.id);
+  const targetCharacters = getCharacters().filter((item) => item.id !== token.id);
   const defaultTargetId = resolveDefaultTargetTokenId(token.id);
   const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const skillOptions = Object.entries(data.odyssey.skills).map(([key, value]) => `<option value="${escapeHtml(key)}">${escapeHtml(key)} (${value})</option>`).join("");
@@ -4554,7 +4567,7 @@ function renderOdysseyActions(token, data, tokenLocked) {
           <input type="number" value="0" data-attack-field="defensePenalties" ${disabledAttr}>
         </label>
       </div>
-      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the chosen target token." : "Track at least two tokens to perform an attack."}</div>
+      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the chosen target token." : "Add at least two character tokens to perform an attack."}</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
       </div>
@@ -4590,19 +4603,17 @@ function renderSelectedToken() {
   const tokenLocked = !canUseToken(token);
   const lastRollText = data.lastRoll ? escapeHtml(data.lastRoll.summary || "Last roll recorded") : "No rolls synced yet";
   ui.selectionHint.textContent = selected ? "Selected on map" : "Showing current focus";
-  const toggleButton = isEditable() ? `<button type="button" data-action="toggle-tracking" class="${tracked ? "danger" : "success"}">${tracked ? "Remove Tracking" : "Track Character"}</button>` : "";
-  const fieldDisabled = !tracked || !isEditable() ? "disabled" : "";
-  const odysseyOwnerDisabled = !tracked || !isEditable() ? "disabled" : "";
+  const fieldDisabled = !canEditTokenData(token) ? "disabled" : "";
+  const odysseyOwnerDisabled = !isEditable() ? "disabled" : "";
   ui.selectedTokenPanel.innerHTML = `
     <div class="selected-card">
       <div class="selected-head">
         <div>
           <div class="token-name">${escapeHtml(getCharacterName(token))}</div>
-          <div class="token-meta">${escapeHtml(token.id.slice(0, 8))} - ${tracked ? "Tracked" : "Not tracked"} - ${tokenLocked ? "Read only" : "Controllable"}</div>
+          <div class="token-meta">${escapeHtml(token.id.slice(0, 8))} - ${tracked ? "Initialized" : "Auto-init on selection"} - ${tokenLocked ? "Read only" : "Controllable"}</div>
         </div>
         <div class="row row-gap">
           <button type="button" data-action="focus-token" class="secondary">Select On Map</button>
-          ${toggleButton}
         </div>
       </div>
 
@@ -4618,25 +4629,10 @@ function renderSelectedToken() {
       </div>
 
       ${renderOwnerFields({ odyssey }, odysseyOwnerDisabled)}
-      ${renderOdysseyStats(token, { odyssey }, odysseyOwnerDisabled)}
-      ${renderOdysseyActions(token, { odyssey }, !tracked || tokenLocked)}
+      ${renderOdysseyStats(token, { odyssey }, fieldDisabled)}
+      ${renderOdysseyActions(token, { odyssey }, tokenLocked)}
 
       <div class="preview-box">
-        <div class="field-label">Token links</div>
-        <div class="form-grid">
-          <label class="field-stack">
-            <span class="field-label">Player ID</span>
-            <input class="compact-input" type="text" value="${escapeHtml(
-    data.identity.playerId
-  )}" data-action="set-identity" data-field="playerId" ${fieldDisabled}>
-          </label>
-          <label class="field-stack">
-            <span class="field-label">Character ID</span>
-            <input class="compact-input" type="text" value="${escapeHtml(
-    data.identity.characterId
-  )}" data-action="set-identity" data-field="characterId" ${fieldDisabled}>
-          </label>
-        </div>
         <div class="field-label">Last roll summary</div>
         <pre class="console-output">${lastRollText}</pre>
       </div>
@@ -4697,7 +4693,7 @@ function renderTrackedList() {
   const trackedCharacters = getTrackedCharacters();
   ui.trackedCount.textContent = String(trackedCharacters.length);
   if (!trackedCharacters.length) {
-    ui.trackedList.innerHTML = '<div class="empty">No tracked characters yet. A GM can track them from this panel or from the token context menu.</div>';
+    ui.trackedList.innerHTML = '<div class="empty">No initialized characters yet. Click a token on the map to initialize it automatically.</div>';
     return;
   }
   ui.trackedList.innerHTML = trackedCharacters.map((token) => {
@@ -4732,7 +4728,7 @@ function renderAllCharacters() {
           </div>
           <div class="row row-gap">
             <button type="button" class="secondary" data-action="select-character" data-token-id="${token.id}">Select</button>
-            ${isEditable() ? `<button type="button" class="${tracked ? "danger" : "success"}" data-action="toggle-track-specific" data-token-id="${token.id}">${tracked ? "Untrack" : "Track"}</button>` : `<span class="pill ${tracked ? "hp" : "armor"}">${tracked ? "Tracked" : "Viewer"}</span>`}
+            <span class="pill ${tracked ? "hp" : "armor"}">${tracked ? "Initialized" : "Ready"}</span>
           </div>
         </div>`;
   }).join("");
@@ -4757,6 +4753,13 @@ async function syncState(showToast = false) {
   playerName = name;
   sceneItems = items;
   selectionIds = selection ?? [];
+  const selectedCharacterId = selectionIds.find(
+    (selectionId) => sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
+  );
+  if (selectedCharacterId) {
+    await initializeCharacterToken(selectedCharacterId);
+    sceneItems = await lib_default.scene.items.getItems();
+  }
   render();
   if (showToast) {
     setStatus(
@@ -4768,32 +4771,18 @@ async function syncState(showToast = false) {
 async function selectCharacter(tokenId) {
   activeTokenId = tokenId;
   await lib_default.player.select([tokenId], true);
+  await initializeCharacterToken(tokenId);
+  sceneItems = await lib_default.scene.items.getItems();
   render();
 }
-async function toggleTracking(tokenId) {
-  if (!isEditable()) {
-    setStatus("Only the GM can change tracked characters.", "error");
-    return;
-  }
-  const token = getCharacterById(tokenId);
-  if (!token) return;
-  const enableTracking = !isTrackedCharacter(token);
-  await setTrackedState(tokenId, enableTracking);
-  activeTokenId = tokenId;
-  await syncState();
-  setStatus(
-    enableTracking ? `Tracking enabled for ${getCharacterName(token)}.` : `Tracking removed for ${getCharacterName(token)}.`,
-    "success"
-  );
-}
 async function changeBodyField(partName, field, delta) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit body values.", "error");
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4814,13 +4803,13 @@ async function changeBodyField(partName, field, delta) {
   await syncState();
 }
 async function setBodyField(partName, field, value) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit body values.", "error");
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4841,33 +4830,14 @@ async function setBodyField(partName, field, value) {
   await ensureOverlayForToken(token.id);
   await syncState();
 }
-async function setIdentityField(field, value) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit bridge identity.", "error");
-    return;
-  }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
-    return;
-  }
-  await updateTrackerData(token.id, (current2) => {
-    const next = structuredClone(current2);
-    next.identity ?? (next.identity = { playerId: "", characterId: "" });
-    next.identity[field] = String(value || "").trim();
-    return next;
-  });
-  await ensureOverlayForToken(token.id);
-  await syncState();
-}
 async function setOwnerField(field, value) {
   if (!isEditable()) {
     setStatus("Only the GM can assign token owners.", "error");
     return;
   }
   const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4882,13 +4852,13 @@ async function setOwnerField(field, value) {
   await syncState();
 }
 async function setOdysseySkill(skill, value) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit Odyssey skills.", "error");
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4899,13 +4869,13 @@ async function setOdysseySkill(skill, value) {
   await syncState();
 }
 async function setOdysseyAttribute(attribute, value) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit Odyssey attributes.", "error");
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4916,13 +4886,13 @@ async function setOdysseyAttribute(attribute, value) {
   await syncState();
 }
 async function setWeaponDamage(index, value) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit weapon damage.", "error");
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4938,13 +4908,13 @@ async function setWeaponDamage(index, value) {
   await syncState();
 }
 async function setWeaponName(index, value) {
-  if (!isEditable()) {
-    setStatus("Only the GM can edit weapon names.", "error");
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
-  const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
   await updateTrackerData(token.id, (current2) => {
@@ -4959,6 +4929,91 @@ async function setWeaponName(index, value) {
   });
   await syncState();
 }
+async function autosaveDraftField(draft) {
+  const token = getCharacterById(draft.tokenId);
+  if (!token) return;
+  if (draft.action === "set-owner") {
+    if (!isEditable()) return;
+    await updateTrackerData(token.id, (current2) => {
+      var _a;
+      const next = structuredClone(current2);
+      next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
+      (_a = next.odyssey).owner ?? (_a.owner = { playerId: "", playerName: "" });
+      next.odyssey.owner[draft.field] = String(draft.value || "").trim();
+      return next;
+    });
+    return;
+  }
+  if (!canEditTokenData(token)) return;
+  await updateTrackerData(token.id, (current2) => {
+    var _a, _b;
+    const next = structuredClone(current2);
+    if (draft.action === "set-odyssey-skill") {
+      next.odyssey.skills[draft.skill] = clamp(Number(draft.value) || 0, 0, 10);
+      return next;
+    }
+    if (draft.action === "set-odyssey-attribute") {
+      next.odyssey.attributes[draft.attribute] = clamp(Number(draft.value) || 0, 0, 10);
+      return next;
+    }
+    if (draft.action === "set-weapon-damage") {
+      (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
+      if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
+        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0 };
+      }
+      next.odyssey.weapons.melee[draft.weaponIndex].damage = clamp(Number(draft.value) || 0, -99, 99);
+      return next;
+    }
+    if (draft.action === "set-weapon-name") {
+      (_b = next.odyssey.weapons).melee ?? (_b.melee = []);
+      if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
+        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0 };
+      }
+      next.odyssey.weapons.melee[draft.weaponIndex].name = String(draft.value || "").trim() || "Default";
+      return next;
+    }
+    if (draft.action === "set-field") {
+      const part = next.body[draft.partName];
+      if (!part) return next;
+      const numericValue = clamp(Number(draft.value) || 0, 0, 99);
+      if (draft.field === "current") {
+        part.current = clamp(numericValue, 0, part.max);
+      } else if (draft.field === "max") {
+        part.max = numericValue;
+        part.current = clamp(part.current, 0, part.max);
+      } else if (draft.field === "armor") {
+        part.armor = numericValue;
+      }
+      return next;
+    }
+    return next;
+  });
+  if (draft.action === "set-field") {
+    await ensureOverlayForToken(token.id);
+  }
+}
+function queueInputAutosave(draft) {
+  const key = [
+    draft.tokenId,
+    draft.action,
+    draft.field ?? "",
+    draft.skill ?? "",
+    draft.attribute ?? "",
+    draft.weaponIndex ?? "",
+    draft.partName ?? ""
+  ].join("|");
+  const existing = inputAutosaveTimers.get(key);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  const timeoutId = setTimeout(() => {
+    inputAutosaveTimers.delete(key);
+    void autosaveDraftField(draft).catch((error) => {
+      console.warn("[Body HP] Autosave failed", error);
+    });
+  }, 250);
+  inputAutosaveTimers.set(key, timeoutId);
+}
 function getActionFieldValue(selector) {
   const tokenPanel = ui.selectedTokenPanel;
   const field = tokenPanel.querySelector(selector);
@@ -4969,7 +5024,7 @@ function getActionFieldValue(selector) {
 }
 async function performAttack() {
   const attacker = getCharacterById(activeTokenId);
-  if (!attacker || !isTrackedCharacter(attacker)) {
+  if (!attacker) {
     setStatus("Select an attacker token first.", "error");
     return;
   }
@@ -4979,7 +5034,7 @@ async function performAttack() {
   }
   const targetTokenId = getActionFieldValue('[data-attack-field="targetTokenId"]') || resolveDefaultTargetTokenId(attacker.id);
   const target = getCharacterById(targetTokenId);
-  if (!target || !isTrackedCharacter(target)) {
+  if (!target) {
     setStatus("Choose a valid target token.", "error");
     return;
   }
@@ -5052,7 +5107,7 @@ async function performAttack() {
   });
   await ensureOverlayForToken(attacker.id);
   await ensureOverlayForToken(target.id);
-  pushDebugEntry(
+  await pushDebugEntry(
     `${getCharacterName(attacker)} attacks ${getCharacterName(target)}`,
     formatAttackDebug({
       attackerName: getCharacterName(attacker),
@@ -5078,8 +5133,8 @@ async function performAttack() {
 }
 async function performRollDice() {
   const token = getCharacterById(activeTokenId);
-  if (!token || !isTrackedCharacter(token)) {
-    setStatus("Select a tracked character first.", "error");
+  if (!token) {
+    setStatus("Select a character first.", "error");
     return;
   }
   if (!canUseToken(token)) {
@@ -5105,7 +5160,7 @@ async function performRollDice() {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  pushDebugEntry(`${getCharacterName(token)} rolls dice`, formatDiceDebug({
+  await pushDebugEntry(`${getCharacterName(token)} rolls dice`, formatDiceDebug({
     tokenName: getCharacterName(token),
     result
   }), "success");
@@ -5142,16 +5197,6 @@ function bindUiEvents() {
     if (action === "select-character" && tokenId) {
       void selectCharacter(tokenId).catch((error) => {
         setStatus(error?.message ?? "Unable to select token.", "error");
-      });
-    }
-    if (action === "toggle-track-specific" && tokenId) {
-      void toggleTracking(tokenId).catch((error) => {
-        setStatus(error?.message ?? "Unable to toggle tracking.", "error");
-      });
-    }
-    if (action === "toggle-tracking" && activeTokenId) {
-      void toggleTracking(activeTokenId).catch((error) => {
-        setStatus(error?.message ?? "Unable to toggle tracking.", "error");
       });
     }
     if (action === "assign-owner-to-me") {
@@ -5224,14 +5269,6 @@ function bindUiEvents() {
       });
       return;
     }
-    if (target.dataset.action === "set-identity") {
-      const field2 = target.dataset.field;
-      if (!field2) return;
-      void setIdentityField(field2, target.value).catch((error) => {
-        setStatus(error?.message ?? "Unable to save identity.", "error");
-      });
-      return;
-    }
     if (target.dataset.action !== "set-field") return;
     const partName = target.dataset.part;
     const field = target.dataset.field;
@@ -5240,10 +5277,79 @@ function bindUiEvents() {
       setStatus(error?.message ?? "Unable to save field.", "error");
     });
   });
+  document.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!activeTokenId) return;
+    if (target.dataset.action === "set-owner") {
+      const field = target.dataset.field;
+      if (!field) return;
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-owner",
+        field,
+        value: target.value
+      });
+      return;
+    }
+    if (target.dataset.action === "set-odyssey-skill") {
+      const skill = target.dataset.skill;
+      if (!skill) return;
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-odyssey-skill",
+        skill,
+        value: target.value
+      });
+      return;
+    }
+    if (target.dataset.action === "set-odyssey-attribute") {
+      const attribute = target.dataset.attribute;
+      if (!attribute) return;
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-odyssey-attribute",
+        attribute,
+        value: target.value
+      });
+      return;
+    }
+    if (target.dataset.action === "set-weapon-damage") {
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-weapon-damage",
+        weaponIndex: Number(target.dataset.weaponIndex ?? 0),
+        value: target.value
+      });
+      return;
+    }
+    if (target.dataset.action === "set-weapon-name") {
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-weapon-name",
+        weaponIndex: Number(target.dataset.weaponIndex ?? 0),
+        value: target.value
+      });
+      return;
+    }
+    if (target.dataset.action === "set-field") {
+      const partName = target.dataset.part;
+      const field = target.dataset.field;
+      if (!partName || !field) return;
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-field",
+        partName,
+        field,
+        value: target.value
+      });
+    }
+  });
 }
 lib_default.onReady(async () => {
   try {
     bindUiEvents();
+    await loadSharedDebugConsole();
     await syncState(true);
     setStatus(
       "Ready. Select a character token on the map to edit it here.",
@@ -5258,7 +5364,24 @@ lib_default.onReady(async () => {
       playerId = player.id ?? playerId;
       playerName = player.name ?? playerName;
       selectionIds = player.selection ?? [];
+      const selectedCharacterId = selectionIds.find(
+        (selectionId) => sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
+      );
+      if (selectedCharacterId) {
+        void initializeCharacterToken(selectedCharacterId).then(() => lib_default.scene.items.getItems()).then((items) => {
+          sceneItems = items;
+          render();
+        }).catch((error) => {
+          console.warn("[Body HP] Auto-init on selection failed", error);
+          render();
+        });
+        return;
+      }
       render();
+    });
+    lib_default.room.onMetadataChange((metadata) => {
+      debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+      renderDebugConsole();
     });
   } catch (error) {
     setStatus(error?.message ?? "Extension failed to initialize.", "error");

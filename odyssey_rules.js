@@ -51,15 +51,20 @@ export function calculateDamage(attackResult, defenseResult, weaponDamage = 0, a
   const totalDefense = (Number(defenseResult) || 0) + (Number(armor) || 0);
   const damageDiff = totalAttack - totalDefense;
 
-  let label = "Critical damage.";
-  if (damageDiff <= 5) {
-    label = "Minor damage.";
-  } else if (damageDiff <= 30) {
+  let label = "No damage.";
+  let crit = 0;
+  let serious = 0;
+  let minor = 0;
+
+  if (damageDiff >= 31) {
+    label = "Critical damage.";
+    crit = 1;
+  } else if (damageDiff >= 6) {
     label = "Serious hit.";
-  } else if (damageDiff >= 90) {
-    label = "3 Critical damage";
-  } else if (damageDiff >= 60) {
-    label = "2 Critical damage";
+    serious = 1;
+  } else if (damageDiff > 0) {
+    label = "Minor damage.";
+    minor = 1;
   }
 
   return {
@@ -67,6 +72,9 @@ export function calculateDamage(attackResult, defenseResult, weaponDamage = 0, a
     totalDefense,
     damageDiff,
     label,
+    crit,
+    serious,
+    minor,
   };
 }
 
@@ -102,13 +110,13 @@ export function resolveAttack({
   if (criticalSuccess) {
     outcome = "critical-success";
     damage = calculateDamage(accuracy.attackTotal + 20, accuracy.defenseTotal, weaponDamage, targetArmor);
-    bodyDelta = -Math.max(1, Math.ceil(Math.max(damage.damageDiff, 1) / 30));
+    bodyDelta = -(damage.crit || 0);
   } else if (criticalFailure) {
     outcome = "critical-failure";
   } else if (hit) {
     outcome = "success";
     damage = calculateDamage(accuracy.attackTotal, accuracy.defenseTotal, weaponDamage, targetArmor);
-    bodyDelta = -Math.max(1, Math.ceil(Math.max(damage.damageDiff, 1) / 30));
+    bodyDelta = -(damage.crit || 0);
   }
 
   return {

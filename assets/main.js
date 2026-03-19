@@ -3481,12 +3481,159 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
-var PathBuilder = class extends GenericItemBuilder {
+// node_modules/@owlbear-rodeo/sdk/lib/builders/LabelBuilder.js
+var LabelBuilder = class extends GenericItemBuilder {
   constructor(player) {
     super(player);
-    this._commands = [];
-    this._fillRule = "nonzero";
+    this._text = {
+      richText: [
+        {
+          type: "paragraph",
+          children: [{ text: "" }]
+        }
+      ],
+      plainText: "",
+      style: {
+        padding: 8,
+        fontFamily: "Roboto",
+        fontSize: 16,
+        fontWeight: 400,
+        textAlign: "CENTER",
+        textAlignVertical: "MIDDLE",
+        fillColor: "white",
+        fillOpacity: 1,
+        strokeColor: "white",
+        strokeOpacity: 1,
+        strokeWidth: 0,
+        lineHeight: 1.5
+      },
+      type: "PLAIN",
+      width: "AUTO",
+      height: "AUTO"
+    };
+    this._style = {
+      backgroundColor: "#3D4051",
+      backgroundOpacity: 1,
+      cornerRadius: 8,
+      pointerDirection: "DOWN",
+      pointerWidth: 4,
+      pointerHeight: 4
+    };
+    this._item.layer = "TEXT";
+    this._item.name = "Label";
+  }
+  text(text) {
+    this._text = text;
+    return this.self();
+  }
+  width(width) {
+    this._text.width = width;
+    return this.self();
+  }
+  height(height) {
+    this._text.height = height;
+    return this.self();
+  }
+  plainText(plainText) {
+    this._text.plainText = plainText;
+    return this.self();
+  }
+  padding(padding) {
+    this._text.style.padding = padding;
+    return this.self();
+  }
+  fontFamily(fontFamily) {
+    this._text.style.fontFamily = fontFamily;
+    return this.self();
+  }
+  fontSize(fontSize) {
+    this._text.style.fontSize = fontSize;
+    return this.self();
+  }
+  fontWeight(fontWeight) {
+    this._text.style.fontWeight = fontWeight;
+    return this.self();
+  }
+  textAlign(textAlign) {
+    this._text.style.textAlign = textAlign;
+    return this.self();
+  }
+  textAlignVertical(textAlignVertical) {
+    this._text.style.textAlignVertical = textAlignVertical;
+    return this.self();
+  }
+  fillColor(fillColor) {
+    this._text.style.fillColor = fillColor;
+    return this.self();
+  }
+  fillOpacity(fillOpacity) {
+    this._text.style.fillOpacity = fillOpacity;
+    return this.self();
+  }
+  strokeColor(strokeColor) {
+    this._text.style.strokeColor = strokeColor;
+    return this.self();
+  }
+  strokeOpacity(strokeOpacity) {
+    this._text.style.strokeOpacity = strokeOpacity;
+    return this.self();
+  }
+  strokeWidth(strokeWidth) {
+    this._text.style.strokeWidth = strokeWidth;
+    return this.self();
+  }
+  lineHeight(lineHeight) {
+    this._text.style.lineHeight = lineHeight;
+    return this.self();
+  }
+  style(style) {
+    this._style = style;
+    return this.self();
+  }
+  backgroundColor(backgroundColor) {
+    this._style.backgroundColor = backgroundColor;
+    return this.self();
+  }
+  backgroundOpacity(backgroundOpacity) {
+    this._style.backgroundOpacity = backgroundOpacity;
+    return this.self();
+  }
+  cornerRadius(cornerRadius) {
+    this._style.cornerRadius = cornerRadius;
+    return this.self();
+  }
+  pointerWidth(pointerWidth) {
+    this._style.pointerWidth = pointerWidth;
+    return this.self();
+  }
+  pointerHeight(pointerHeight) {
+    this._style.pointerHeight = pointerHeight;
+    return this.self();
+  }
+  pointerDirection(pointerDirection) {
+    this._style.pointerDirection = pointerDirection;
+    return this.self();
+  }
+  maxViewScale(maxViewScale) {
+    this._style.maxViewScale = maxViewScale;
+    return this.self();
+  }
+  minViewScale(minViewScale) {
+    this._style.minViewScale = minViewScale;
+    return this.self();
+  }
+  build() {
+    return Object.assign(Object.assign({}, this._item), { type: "LABEL", text: this._text, style: this._style });
+  }
+};
+
+// node_modules/@owlbear-rodeo/sdk/lib/builders/ShapeBuilder.js
+var ShapeBuilder = class extends GenericItemBuilder {
+  constructor(player) {
+    super(player);
+    this._width = 0;
+    this._height = 0;
+    this._shapeType = "RECTANGLE";
     this._style = {
       fillColor: "black",
       fillOpacity: 1,
@@ -3495,15 +3642,19 @@ var PathBuilder = class extends GenericItemBuilder {
       strokeWidth: 5,
       strokeDash: []
     };
-    this._item.name = "Path";
     this._item.layer = "DRAWING";
+    this._item.name = "Shape";
   }
-  commands(commands) {
-    this._commands = commands;
+  width(width) {
+    this._width = width;
     return this.self();
   }
-  fillRule(fillRule) {
-    this._fillRule = fillRule;
+  height(height) {
+    this._height = height;
+    return this.self();
+  }
+  shapeType(shapeType) {
+    this._shapeType = shapeType;
     return this.self();
   }
   style(style) {
@@ -3535,7 +3686,7 @@ var PathBuilder = class extends GenericItemBuilder {
     return this.self();
   }
   build() {
-    return Object.assign(Object.assign({}, this._item), { type: "PATH", commands: this._commands, fillRule: this._fillRule, style: this._style });
+    return Object.assign(Object.assign({}, this._item), { type: "SHAPE", width: this._width, height: this._height, shapeType: this._shapeType, style: this._style });
   }
 };
 
@@ -3672,8 +3823,11 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildPath() {
-  return new PathBuilder(playerApi);
+function buildLabel() {
+  return new LabelBuilder(playerApi);
+}
+function buildShape() {
+  return new ShapeBuilder(playerApi);
 }
 var lib_default = OBR;
 
@@ -3683,21 +3837,6 @@ var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
 var BODY_ORDER = ["L.Arm", "Head", "R.Arm", "L.Leg", "Torso", "R.Leg"];
 var ROLL_HISTORY_LIMIT = 12;
-var VISUAL_VERSION = 3;
-var RING_COLORS = {
-  full: "#73FF5A",
-  half: "#FFAF22",
-  kaputt: "#FF460D",
-  base: "#000000",
-  border: "#050505"
-};
-var OUTER_SEGMENTS = [
-  { part: "Head", angle: -90, span: 30 },
-  { part: "R.Arm", angle: -18, span: 30 },
-  { part: "R.Leg", angle: 54, span: 30 },
-  { part: "L.Leg", angle: 126, span: 30 },
-  { part: "L.Arm", angle: 198, span: 30 }
-];
 var DEFAULT_ODYSSEY_SKILLS = {
   Hand: 0,
   Cold: 0,
@@ -3715,7 +3854,6 @@ var BODY_DEFAULTS = {
 };
 var DEFAULT_TRACKER_DATA = {
   enabled: true,
-  visualVersion: VISUAL_VERSION,
   minor: 0,
   serious: 0,
   body: structuredClone(BODY_DEFAULTS),
@@ -3767,7 +3905,6 @@ function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
   if (!raw || typeof raw !== "object") return next;
   next.enabled = raw.enabled !== false;
-  next.visualVersion = VISUAL_VERSION;
   next.minor = clamp(Number(raw.minor ?? 0) || 0, 0, 4);
   next.serious = clamp(Number(raw.serious ?? 0) || 0, 0, 2);
   next.identity.playerId = String(raw.identity?.playerId ?? "").trim();
@@ -3919,18 +4056,18 @@ async function getTokenMetrics(token) {
   } catch (error) {
     console.warn("[Body HP] Unable to read token bounds, using fallback size", error);
   }
-  let gridDpi = 150;
+  let gridDpi = 0;
   try {
-    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
+    gridDpi = await lib_default.scene.grid.getDpi();
   } catch (error) {
-    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
+    console.warn("[Body HP] Unable to read grid dpi, using size fallback", error);
   }
   const scaleFactor = Math.max(
     Math.abs(token.scale?.x ?? 1),
     Math.abs(token.scale?.y ?? 1),
     1
   );
-  const visibleDiameter = Math.max(
+  const markerSize = Math.max(
     width,
     height,
     effectiveSize.width,
@@ -3938,127 +4075,61 @@ async function getTokenMetrics(token) {
     gridDpi * scaleFactor,
     56
   );
-  const tokenRadius = visibleDiameter / 2;
-  const tokenGap = 0;
-  const torsoThickness = Math.max(5, visibleDiameter * 0.035);
-  const torsoInnerRadius = tokenRadius + tokenGap;
-  const torsoOuterRadius = torsoInnerRadius + torsoThickness;
-  const ringGap = 0;
-  const outerThickness = Math.max(8, visibleDiameter * 0.08);
-  const outerInnerRadius = torsoOuterRadius + ringGap;
-  const outerRadius = outerInnerRadius + outerThickness;
   return {
     center,
-    visibleDiameter,
-    outerRadius,
-    outerInnerRadius,
-    torsoOuterRadius,
-    torsoInnerRadius
+    width,
+    height,
+    markerSize
   };
 }
-function polar(radius, angle) {
-  const radians = angle * Math.PI / 180;
+function getWorldPosition(token, center, offsetX, offsetY) {
+  const radians = (token.rotation ?? 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
   return {
-    x: radius * Math.cos(radians),
-    y: radius * Math.sin(radians)
+    x: center.x + offsetX * cos - offsetY * sin,
+    y: center.y + offsetX * sin + offsetY * cos
   };
 }
-function arcPoints(radius, startAngle, endAngle, segments = 18) {
-  const points = [];
-  for (let index = 0; index <= segments; index += 1) {
-    const ratio = index / segments;
-    const angle = startAngle + (endAngle - startAngle) * ratio;
-    points.push(polar(radius, angle));
-  }
-  return points;
-}
-function buildAnnulusCommands(radiusOuter, radiusInner) {
-  const outer = arcPoints(radiusOuter, -180, 180, 36);
-  const inner = arcPoints(radiusInner, -180, 180, 36);
-  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
-  for (const point of outer.slice(1)) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  commands.push([Command.CLOSE]);
-  commands.push([Command.MOVE, inner[0].x, inner[0].y]);
-  for (const point of inner) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  commands.push([Command.CLOSE]);
-  return commands;
-}
-function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
-  const startAngle = centerAngle - spanAngle / 2;
-  const endAngle = centerAngle + spanAngle / 2;
-  const outer = arcPoints(radiusOuter, startAngle, endAngle, 10);
-  const inner = arcPoints(radiusInner, endAngle, startAngle, 10);
-  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
-  for (const point of outer.slice(1)) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  for (const point of inner) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  commands.push([Command.CLOSE]);
-  return commands;
-}
-function getPartColor(part) {
-  if (part.max <= 0 || part.current <= 0) return RING_COLORS.kaputt;
-  if (part.current < part.max) return RING_COLORS.half;
-  return RING_COLORS.full;
-}
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind,
-    visualVersion: VISUAL_VERSION
-  }).build();
+function buildOverlayCard(token, data, metrics) {
+  const width = Math.max(360, Math.round(metrics.width * 2.55));
+  const height = data.lastRoll ? 96 : 72;
+  const offsetX = metrics.width / 2 + width / 2 + 18;
+  return buildLabel().name(`Body HP: ${getCharacterName(token)}`).plainText(formatOverlayText(data)).width(width).height(height).padding(10).fontSize(13).fontWeight(600).lineHeight(1.18).textAlign("LEFT").textAlignVertical("MIDDLE").fillColor("#f8fafc").backgroundColor("#020617").backgroundOpacity(0.58).strokeColor("#cbd5e1").strokeOpacity(0.45).strokeWidth(1).cornerRadius(12).pointerDirection("LEFT").pointerWidth(10).pointerHeight(12).position(getWorldPosition(token, metrics.center, offsetX, 0)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).metadata({ [OVERLAY_KEY]: token.id, kind: "body-card" }).build();
 }
 function buildBodyFigure(token, data, metrics) {
-  const items = [];
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd"
-    )
-  );
-  for (const segment of OUTER_SEGMENTS) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `segment-${segment.part}`,
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span
-        ),
-        getPartColor(data.body[segment.part]),
-        1
-      )
+  const parts = [];
+  const spacing = 14;
+  const positions = {
+    Head: [0, -spacing * 2],
+    Torso: [0, 0],
+    "L.Arm": [-spacing, 0],
+    "R.Arm": [spacing, 0],
+    "L.Leg": [-spacing / 2, spacing * 2],
+    "R.Leg": [spacing / 2, spacing * 2]
+  };
+  for (const partName of BODY_ORDER) {
+    const part = data.body[partName];
+    const [x, y] = positions[partName];
+    const hpRatio = part.max > 0 ? part.current / part.max : 0;
+    let color = "#22c55e";
+    if (hpRatio < 0.5) color = "#f59e0b";
+    if (hpRatio < 0.25) color = "#ef4444";
+    parts.push(
+      buildShape().shapeType("RECTANGLE").width(10).height(10).position(getWorldPosition(token, metrics.center, x, y)).attachedTo(token.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(color).fillOpacity(0.95).strokeColor("#111").strokeWidth(1).metadata({
+        [OVERLAY_KEY]: token.id,
+        kind: "body-part",
+        part: partName
+      }).build()
     );
   }
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd"
-    )
-  );
-  return items;
+  return parts;
 }
 function buildOverlayItems(token, data, metrics) {
-  return buildBodyFigure(token, data, metrics);
+  return [
+    buildOverlayCard(token, data, metrics),
+    ...buildBodyFigure(token, data, metrics)
+  ];
 }
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {

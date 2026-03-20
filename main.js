@@ -1,4 +1,4 @@
-import { buildShape } from "@owlbear-rodeo/sdk";
+import { Command, buildPath } from "@owlbear-rodeo/sdk";
 import {
   APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
@@ -712,6 +712,26 @@ function saveAttackDraftValue(tokenId, field, value) {
   });
 }
 
+function buildCircleCommands(radius, segments = 28) {
+  const safeRadius = Math.max(radius, 8);
+  const commands = [];
+
+  for (let index = 0; index <= segments; index += 1) {
+    const angle = (Math.PI * 2 * index) / segments - Math.PI / 2;
+    const x = Math.cos(angle) * safeRadius;
+    const y = Math.sin(angle) * safeRadius;
+
+    if (index === 0) {
+      commands.push([Command.MOVE, x, y]);
+    } else {
+      commands.push([Command.LINE, x, y]);
+    }
+  }
+
+  commands.push([Command.CLOSE]);
+  return commands;
+}
+
 function isLocalTargetHighlight(item) {
   return Boolean(item?.metadata?.[TARGET_HIGHLIGHT_KEY]);
 }
@@ -745,20 +765,17 @@ async function buildTargetHighlightItem(targetToken) {
     (targetToken.height || 140) * Math.abs(targetToken.scale?.y ?? 1),
     56,
   );
-  const diameter = Math.max(24, Math.min(width, height) - 4);
+  const diameter = Math.max(24, Math.min(width, height));
+  const radius = diameter / 2;
   const center = bounds?.center ?? targetToken.position;
-  const position = {
-    x: center.x - diameter / 2,
-    y: center.y - diameter / 2,
-  };
 
-  return buildShape()
+  return buildPath()
     .name(`Attack Target: ${getCharacterName(targetToken)}`)
-    .shapeType("CIRCLE")
-    .width(diameter)
-    .height(diameter)
-    .position(position)
+    .commands(buildCircleCommands(radius))
+    .position(center)
     .rotation(0)
+    .attachedTo(targetToken.id)
+    .disableAttachmentBehavior(["ROTATION"])
     .layer("ATTACHMENT")
     .locked(true)
     .disableHit(true)
@@ -890,7 +907,10 @@ async function ensureTargetPickerTool() {
       if (!targetPickState.active) return false;
 
       const attacker = getCharacterById(targetPickState.attackerTokenId);
-      const target = event.target;
+      const clickedTargetId = event.target?.id ?? "";
+      const liveItems = clickedTargetId ? await OBR.scene.items.getItems() : [];
+      const target =
+        (clickedTargetId ? liveItems.find((item) => item.id === clickedTargetId) : null) ?? event.target;
 
       if (!attacker || !isCharacterToken(attacker)) {
         await stopTargetPick("Select an attacker token first.", "error");
@@ -913,7 +933,12 @@ async function ensureTargetPickerTool() {
       }
 
       saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
+      activeTokenId = attacker.id;
       render();
+      const targetField = ui.selectedTokenPanel.querySelector('[data-attack-field="targetTokenId"]');
+      if (targetField instanceof HTMLSelectElement) {
+        targetField.value = target.id;
+      }
       await syncTargetHighlight();
       await stopTargetPick(`Target set to ${getCharacterName(target)}.`, "success");
       return false;

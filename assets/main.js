@@ -3481,69 +3481,6 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/ShapeBuilder.js
-var ShapeBuilder = class extends GenericItemBuilder {
-  constructor(player) {
-    super(player);
-    this._width = 0;
-    this._height = 0;
-    this._shapeType = "RECTANGLE";
-    this._style = {
-      fillColor: "black",
-      fillOpacity: 1,
-      strokeColor: "white",
-      strokeOpacity: 1,
-      strokeWidth: 5,
-      strokeDash: []
-    };
-    this._item.layer = "DRAWING";
-    this._item.name = "Shape";
-  }
-  width(width) {
-    this._width = width;
-    return this.self();
-  }
-  height(height) {
-    this._height = height;
-    return this.self();
-  }
-  shapeType(shapeType) {
-    this._shapeType = shapeType;
-    return this.self();
-  }
-  style(style) {
-    this._style = style;
-    return this.self();
-  }
-  fillColor(fillColor) {
-    this._style.fillColor = fillColor;
-    return this.self();
-  }
-  fillOpacity(fillOpacity) {
-    this._style.fillOpacity = fillOpacity;
-    return this.self();
-  }
-  strokeColor(strokeColor) {
-    this._style.strokeColor = strokeColor;
-    return this.self();
-  }
-  strokeOpacity(strokeOpacity) {
-    this._style.strokeOpacity = strokeOpacity;
-    return this.self();
-  }
-  strokeWidth(strokeWidth) {
-    this._style.strokeWidth = strokeWidth;
-    return this.self();
-  }
-  strokeDash(strokeDash) {
-    this._style.strokeDash = strokeDash;
-    return this.self();
-  }
-  build() {
-    return Object.assign(Object.assign({}, this._item), { type: "SHAPE", width: this._width, height: this._height, shapeType: this._shapeType, style: this._style });
-  }
-};
-
 // node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
 var PathBuilder = class extends GenericItemBuilder {
   constructor(player) {
@@ -3735,9 +3672,6 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildShape() {
-  return new ShapeBuilder(playerApi);
-}
 function buildPath() {
   return new PathBuilder(playerApi);
 }
@@ -4879,6 +4813,22 @@ function saveAttackDraftValue(tokenId, field, value) {
     [field]: value
   });
 }
+function buildCircleCommands(radius, segments = 28) {
+  const safeRadius = Math.max(radius, 8);
+  const commands = [];
+  for (let index = 0; index <= segments; index += 1) {
+    const angle = Math.PI * 2 * index / segments - Math.PI / 2;
+    const x = Math.cos(angle) * safeRadius;
+    const y = Math.sin(angle) * safeRadius;
+    if (index === 0) {
+      commands.push([Command.MOVE, x, y]);
+    } else {
+      commands.push([Command.LINE, x, y]);
+    }
+  }
+  commands.push([Command.CLOSE]);
+  return commands;
+}
 function isLocalTargetHighlight(item) {
   return Boolean(item?.metadata?.[TARGET_HIGHLIGHT_KEY]);
 }
@@ -4906,13 +4856,10 @@ async function buildTargetHighlightItem(targetToken) {
     (targetToken.height || 140) * Math.abs(targetToken.scale?.y ?? 1),
     56
   );
-  const diameter = Math.max(24, Math.min(width, height) - 4);
+  const diameter = Math.max(24, Math.min(width, height));
+  const radius = diameter / 2;
   const center = bounds?.center ?? targetToken.position;
-  const position = {
-    x: center.x - diameter / 2,
-    y: center.y - diameter / 2
-  };
-  return buildShape().name(`Attack Target: ${getCharacterName(targetToken)}`).shapeType("CIRCLE").width(diameter).height(diameter).position(position).rotation(0).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(getCurrentPlayerColor()).fillOpacity(0.22).strokeColor(getCurrentPlayerColor()).strokeOpacity(0).strokeWidth(0).metadata({
+  return buildPath().name(`Attack Target: ${getCharacterName(targetToken)}`).commands(buildCircleCommands(radius)).position(center).rotation(0).attachedTo(targetToken.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(getCurrentPlayerColor()).fillOpacity(0.22).strokeColor(getCurrentPlayerColor()).strokeOpacity(0).strokeWidth(0).metadata({
     [TARGET_HIGHLIGHT_KEY]: {
       playerId,
       playerName,
@@ -5009,7 +4956,9 @@ async function ensureTargetPickerTool() {
     onToolClick: async (_context, event) => {
       if (!targetPickState.active) return false;
       const attacker = getCharacterById(targetPickState.attackerTokenId);
-      const target = event.target;
+      const clickedTargetId = event.target?.id ?? "";
+      const liveItems = clickedTargetId ? await lib_default.scene.items.getItems() : [];
+      const target = (clickedTargetId ? liveItems.find((item) => item.id === clickedTargetId) : null) ?? event.target;
       if (!attacker || !isCharacterToken(attacker)) {
         await stopTargetPick("Select an attacker token first.", "error");
         return false;
@@ -5027,7 +4976,12 @@ async function ensureTargetPickerTool() {
         return false;
       }
       saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
+      activeTokenId = attacker.id;
       render();
+      const targetField = ui.selectedTokenPanel.querySelector('[data-attack-field="targetTokenId"]');
+      if (targetField instanceof HTMLSelectElement) {
+        targetField.value = target.id;
+      }
       await syncTargetHighlight();
       await stopTargetPick(`Target set to ${getCharacterName(target)}.`, "success");
       return false;

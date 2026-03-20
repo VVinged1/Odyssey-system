@@ -4897,8 +4897,9 @@ async function buildTargetHighlightItem(targetToken, highlightEntry) {
     (targetToken.height || 140) * Math.abs(targetToken.scale?.y ?? 1),
     56
   ) + 22;
+  const size = Math.max(width, height);
   const position = bounds?.center ?? targetToken.position;
-  return buildShape().name(`Attack Target: ${getCharacterName(targetToken)}`).shapeType("ELLIPSE").width(width).height(height).position(position).rotation(0).attachedTo(targetToken.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(highlightEntry.color).fillOpacity(0.08).strokeColor(highlightEntry.color).strokeOpacity(1).strokeWidth(4).metadata({
+  return buildShape().name(`Attack Target: ${getCharacterName(targetToken)}`).shapeType("CIRCLE").width(size).height(size).position(position).rotation(0).attachedTo(targetToken.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(highlightEntry.color).fillOpacity(0.08).strokeColor(highlightEntry.color).strokeOpacity(1).strokeWidth(4).metadata({
     [TARGET_HIGHLIGHT_KEY]: {
       playerId: highlightEntry.playerId,
       playerName: highlightEntry.playerName,

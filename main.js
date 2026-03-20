@@ -752,13 +752,14 @@ async function buildTargetHighlightItem(targetToken, highlightEntry) {
       (targetToken.height || 140) * Math.abs(targetToken.scale?.y ?? 1),
       56,
     ) + 22;
+  const size = Math.max(width, height);
   const position = bounds?.center ?? targetToken.position;
 
   return buildShape()
     .name(`Attack Target: ${getCharacterName(targetToken)}`)
-    .shapeType("ELLIPSE")
-    .width(width)
-    .height(height)
+    .shapeType("CIRCLE")
+    .width(size)
+    .height(size)
     .position(position)
     .rotation(0)
     .attachedTo(targetToken.id)

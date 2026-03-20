@@ -31,6 +31,7 @@ const TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 const TARGET_PICK_MODE_ID = "pick-target";
 const TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
 const ATTACK_TARGET_CONTEXT_MENU_ID = "com.codex.body-hp/set-attack-target";
+const SHOW_EMBEDDED_PUBLIC_LOG = false;
 const EXTENSION_ICON_URL = new URL("./icon.svg", window.location.href).href;
 const TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
@@ -1529,11 +1530,15 @@ function legacyRenderSelectedToken() {
       ${renderCombatBlock(token, { odyssey }, tokenLocked)}
       ${renderDiceBlock(token, { odyssey }, tokenLocked)}
       ${renderPrivateGmDiceBlock()}
-      ${renderCollapsibleSection(
-        "Last roll summary",
-        `<pre class="console-output">${lastRollText}</pre>`,
-        false,
-      )}
+      ${
+        SHOW_EMBEDDED_PUBLIC_LOG
+          ? renderCollapsibleSection(
+              "Last roll summary",
+              `<pre class="console-output">${lastRollText}</pre>`,
+              false,
+            )
+          : ""
+      }
       ${renderCollapsibleSection(
         "Part",
         `
@@ -2344,11 +2349,15 @@ function renderSelectedToken() {
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
       ${renderPrivateGmDiceBlock()}
-      ${renderCollapsibleSection(
-        "Last Roll",
-        `<pre class="console-output">${lastRollText}</pre>`,
-        false,
-      )}
+      ${
+        SHOW_EMBEDDED_PUBLIC_LOG
+          ? renderCollapsibleSection(
+              "Last Roll",
+              `<pre class="console-output">${lastRollText}</pre>`,
+              false,
+            )
+          : ""
+      }
       ${
         showPartBlock
           ? renderCollapsibleSection(

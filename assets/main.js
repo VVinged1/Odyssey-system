@@ -4300,6 +4300,7 @@ var TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 var TARGET_PICK_MODE_ID = "pick-target";
 var TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
 var ATTACK_TARGET_CONTEXT_MENU_ID = "com.codex.body-hp/set-attack-target";
+var SHOW_EMBEDDED_PUBLIC_LOG = false;
 var EXTENSION_ICON_URL = new URL("./icon.svg", window.location.href).href;
 var TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
@@ -5576,11 +5577,11 @@ function renderSelectedToken() {
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
       ${renderPrivateGmDiceBlock()}
-      ${renderCollapsibleSection(
+      ${SHOW_EMBEDDED_PUBLIC_LOG ? renderCollapsibleSection(
     "Last Roll",
     `<pre class="console-output">${lastRollText}</pre>`,
     false
-  )}
+  ) : ""}
       ${showPartBlock ? renderCollapsibleSection(
     "Body Parts",
     `

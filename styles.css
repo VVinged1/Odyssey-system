@@ -67,6 +67,10 @@ h1 {
   max-width: 360px;
 }
 
+.panel-note {
+  margin: 10px 0 0;
+}
+
 .panel {
   background: rgba(16, 26, 49, 0.94);
   border: 1px solid var(--line);

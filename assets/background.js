@@ -3745,7 +3745,8 @@ var DEFAULT_TRACKER_DATA = {
       playerName: ""
     },
     attackDraft: {
-      targetTokenId: ""
+      targetTokenId: "",
+      targetTokenName: ""
     },
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
@@ -3811,6 +3812,7 @@ function sanitizeOdysseyData(raw) {
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
   next.attackDraft.targetTokenId = String(raw.attackDraft?.targetTokenId ?? "").trim();
+  next.attackDraft.targetTokenName = String(raw.attackDraft?.targetTokenName ?? "").trim();
   const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
   const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
   const rawSkillStrengthBonuses = raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object" ? raw.skillStrengthBonuses : {};

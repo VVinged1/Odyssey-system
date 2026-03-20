@@ -3745,7 +3745,8 @@ var DEFAULT_TRACKER_DATA = {
       playerName: ""
     },
     attackDraft: {
-      targetTokenId: ""
+      targetTokenId: "",
+      targetTokenName: ""
     },
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
@@ -3811,6 +3812,7 @@ function sanitizeOdysseyData(raw) {
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
   next.attackDraft.targetTokenId = String(raw.attackDraft?.targetTokenId ?? "").trim();
+  next.attackDraft.targetTokenName = String(raw.attackDraft?.targetTokenName ?? "").trim();
   const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
   const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
   const rawSkillStrengthBonuses = raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object" ? raw.skillStrengthBonuses : {};
@@ -4456,7 +4458,7 @@ function captureSelectedPanelState() {
   const activeField = document.activeElement;
   if ((activeField instanceof HTMLInputElement || activeField instanceof HTMLSelectElement) && ui.selectedTokenPanel.contains(activeField)) {
     focusedKey = getTransientFieldKey(activeField);
-    if (activeField instanceof HTMLInputElement && activeField.type !== "number") {
+    if (activeField instanceof HTMLInputElement && typeof activeField.selectionStart === "number" && typeof activeField.selectionEnd === "number") {
       selectionStart = activeField.selectionStart;
       selectionEnd = activeField.selectionEnd;
     }
@@ -4850,7 +4852,7 @@ function getAttackDraft(token, data, targetCharacters) {
   const persistedTargetTokenId = String(data.odyssey?.attackDraft?.targetTokenId ?? "").trim();
   const combatSkillNames = getAttackSkillEntries(data.odyssey).map(([skillName]) => skillName);
   const fallbackSkill = combatSkillNames[0] ?? CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0];
-  const draftTargetTokenId = Object.prototype.hasOwnProperty.call(stored, "targetTokenId") ? String(stored.targetTokenId ?? "").trim() : persistedTargetTokenId;
+  const draftTargetTokenId = persistedTargetTokenId || String(stored.targetTokenId ?? "").trim();
   const targetTokenId = draftTargetTokenId === "" ? "" : targetCharacters.some((target) => target.id === draftTargetTokenId) ? draftTargetTokenId : resolveDefaultTargetTokenId(token.id);
   return {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
@@ -4874,19 +4876,26 @@ function saveAttackDraftValue(tokenId, field, value) {
     [field]: value
   });
 }
-async function persistAttackTargetTokenId(tokenId, targetTokenId) {
+async function persistAttackTargetToken(tokenId, targetTokenId) {
   if (!tokenId) return;
   const token = getCharacterById(tokenId);
   if (!token) return;
   const normalizedTargetTokenId = String(targetTokenId ?? "").trim();
-  const currentTargetTokenId = String(getOdysseyData(token).attackDraft?.targetTokenId ?? "").trim();
-  if (currentTargetTokenId === normalizedTargetTokenId) return;
+  const targetToken = normalizedTargetTokenId ? getCharacterById(normalizedTargetTokenId) : null;
+  const normalizedTargetTokenName = targetToken ? getCharacterName(targetToken) : "";
+  const currentAttackDraft = getOdysseyData(token).attackDraft ?? {};
+  const currentTargetTokenId = String(currentAttackDraft.targetTokenId ?? "").trim();
+  const currentTargetTokenName = String(currentAttackDraft.targetTokenName ?? "").trim();
+  if (currentTargetTokenId === normalizedTargetTokenId && currentTargetTokenName === normalizedTargetTokenName) {
+    return;
+  }
   await updateTrackerData(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
-    (_a = next.odyssey).attackDraft ?? (_a.attackDraft = { targetTokenId: "" });
+    (_a = next.odyssey).attackDraft ?? (_a.attackDraft = { targetTokenId: "", targetTokenName: "" });
     next.odyssey.attackDraft.targetTokenId = normalizedTargetTokenId;
+    next.odyssey.attackDraft.targetTokenName = normalizedTargetTokenName;
     return next;
   });
 }
@@ -5053,7 +5062,7 @@ async function ensureTargetPickerTool() {
         return false;
       }
       saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
-      await persistAttackTargetTokenId(attacker.id, target.id);
+      await persistAttackTargetToken(attacker.id, target.id);
       activeTokenId = attacker.id;
       render();
       const targetField = ui.selectedTokenPanel.querySelector('[data-attack-field="targetTokenId"]');
@@ -5193,7 +5202,7 @@ function renderCharacteristicsBlock(data, disabledAttr) {
     ([key, label]) => `
       <label class="field-stack">
         <span class="field-label">${escapeHtml(label)}</span>
-        <input type="number" min="0" max="15" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
+        <input type="text" inputmode="numeric" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
       </label>`
   ).join("");
   return renderCollapsibleSection(
@@ -5973,7 +5982,7 @@ async function performAttack() {
   const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
   saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
-  await persistAttackTargetTokenId(attacker.id, targetTokenId);
+  await persistAttackTargetToken(attacker.id, targetTokenId);
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
   saveAttackDraftValue(attacker.id, "weaponDamage", getActionFieldValue('[data-attack-field="weaponDamage"]'));
   saveAttackDraftValue(attacker.id, "attackBonuses", getActionFieldValue('[data-attack-field="attackBonuses"]'));
@@ -6403,7 +6412,7 @@ function bindUiEvents() {
     if (target.dataset.attackField && activeTokenId) {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
       if (target.dataset.attackField === "targetTokenId") {
-        void persistAttackTargetTokenId(activeTokenId, target.value).catch((error) => {
+        void persistAttackTargetToken(activeTokenId, target.value).catch((error) => {
           console.warn("[Body HP] Unable to persist attack target", error);
         });
         void syncTargetHighlight().catch((error) => {

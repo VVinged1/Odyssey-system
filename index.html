@@ -48,22 +48,30 @@
       </section>
 
       <section class="panel" id="trackedSection">
-        <div class="section-head">
-          <div class="section-title">Tracked Characters</div>
-          <div id="trackedCount" class="muted">0</div>
-        </div>
-        <div id="trackedList" class="list"></div>
+        <details class="collapsible-block" data-section-key="global:tracked-characters" open>
+          <summary class="collapsible-title">
+            <span class="section-title">Tracked Characters</span>
+            <span id="trackedCount" class="muted">0</span>
+          </summary>
+          <div class="collapsible-body">
+            <div id="trackedList" class="list"></div>
+          </div>
+        </details>
       </section>
 
       <section class="panel" id="allTokensSection">
-        <div class="section-head">
-          <div class="section-title">All Character Tokens</div>
-          <div id="allCount" class="muted">0</div>
-        </div>
-        <div id="allTokensList" class="list"></div>
+        <details class="collapsible-block" data-section-key="global:all-character-tokens" open>
+          <summary class="collapsible-title">
+            <span class="section-title">All Character Tokens</span>
+            <span id="allCount" class="muted">0</span>
+          </summary>
+          <div class="collapsible-body">
+            <div id="allTokensList" class="list"></div>
+          </div>
+        </details>
       </section>
     </div>
 
-    <script type="module" src="./assets/main.js?v=1.2.9"></script>
+    <script type="module" src="./assets/main.js?v=1.2.10"></script>
   </body>
 </html>

@@ -391,6 +391,10 @@ function canEditTokenData(token) {
   return canUseToken(token);
 }
 
+function canViewAttackBlock(token) {
+  return canUseToken(token);
+}
+
 async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
   if (!token || !isCharacterToken(token)) return false;
@@ -854,7 +858,7 @@ async function buildTargetHighlightItem(targetToken) {
 
 async function syncTargetHighlight() {
   const attacker = getCharacterById(activeTokenId);
-  if (!attacker || !isCharacterToken(attacker)) {
+  if (!attacker || !isCharacterToken(attacker) || !canViewAttackBlock(attacker)) {
     await clearTargetHighlight();
     return;
   }
@@ -1936,6 +1940,8 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
 }
 
 function renderEnglishAttackBlock(token, data, tokenLocked) {
+  if (!canViewAttackBlock(token)) return "";
+
   const targetCharacters = getCharacters().filter(
     (item) => item.id !== token.id && item.visible !== false,
   );

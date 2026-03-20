@@ -82,6 +82,7 @@ const ui = {
 let playerRole = "PLAYER";
 let playerId = "";
 let playerName = "";
+let playerColor = "#facc15";
 let sceneItems = [];
 let selectionIds = [];
 let activeTokenId = null;
@@ -608,7 +609,9 @@ function formatDiceDebug({ tokenName, result }) {
 
 function getCurrentPlayerColor() {
   return String(
-    partyPlayers.find((player) => player?.id === playerId)?.color ?? "#facc15",
+    playerColor ||
+      partyPlayers.find((player) => player?.id === playerId)?.color ||
+      "#facc15",
   );
 }
 
@@ -756,12 +759,11 @@ async function buildTargetHighlightItem(targetToken) {
     .height(diameter)
     .position(position)
     .rotation(0)
-    .attachedTo(targetToken.id)
     .layer("ATTACHMENT")
     .locked(true)
     .disableHit(true)
     .fillColor(getCurrentPlayerColor())
-    .fillOpacity(0.18)
+    .fillOpacity(0.22)
     .strokeColor(getCurrentPlayerColor())
     .strokeOpacity(0)
     .strokeWidth(0)
@@ -885,36 +887,36 @@ async function ensureTargetPickerTool() {
     icons: [{ icon: EXTENSION_ICON_URL, label: "Pick Attack Target" }],
     cursors: [{ cursor: TARGET_PICK_CURSOR }],
     onToolClick: async (_context, event) => {
-      if (!targetPickState.active) return true;
+      if (!targetPickState.active) return false;
 
       const attacker = getCharacterById(targetPickState.attackerTokenId);
       const target = event.target;
 
       if (!attacker || !isCharacterToken(attacker)) {
         await stopTargetPick("Select an attacker token first.", "error");
-        return true;
+        return false;
       }
 
       if (!target || !isCharacterToken(target)) {
         setStatus("Click a visible character token to use it as target.", "error");
-        return true;
+        return false;
       }
 
       if (target.visible === false) {
         setStatus("Hidden tokens cannot be targeted.", "error");
-        return true;
+        return false;
       }
 
       if (target.id === attacker.id) {
         setStatus("Attacker and target must be different tokens.", "error");
-        return true;
+        return false;
       }
 
       saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
       render();
       await syncTargetHighlight();
       await stopTargetPick(`Target set to ${getCharacterName(target)}.`, "success");
-      return true;
+      return false;
     },
     onKeyDown: (_context, event) => {
       if (event.key === "Escape" && targetPickState.active) {
@@ -2251,10 +2253,11 @@ function render() {
 }
 
 async function syncState(showToast = false) {
-  const [role, id, name, items, selection, players] = await Promise.all([
+  const [role, id, name, color, items, selection, players] = await Promise.all([
     OBR.player.getRole(),
     OBR.player.getId(),
     OBR.player.getName(),
+    OBR.player.getColor(),
     OBR.scene.items.getItems(),
     OBR.player.getSelection(),
     OBR.party.getPlayers(),
@@ -2263,6 +2266,7 @@ async function syncState(showToast = false) {
   playerRole = role;
   playerId = id;
   playerName = name;
+  playerColor = color;
   partyPlayers = players ?? [];
   sceneItems = items;
   selectionIds = selection ?? [];
@@ -3269,6 +3273,7 @@ OBR.onReady(async () => {
       playerRole = player.role;
       playerId = player.id ?? playerId;
       playerName = player.name ?? playerName;
+      playerColor = player.color ?? playerColor;
       selectionIds = player.selection ?? [];
       const selectedCharacterId = selectionIds.find((selectionId) =>
         sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))

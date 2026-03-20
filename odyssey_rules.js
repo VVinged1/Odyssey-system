@@ -61,8 +61,14 @@ export function calculateDamage(attackResult, defenseResult, weaponDamage = 0, a
   let serious = 0;
   let minor = 0;
 
-  if (damageDiff >= 31) {
-    label = "Critical damage.";
+  if (damageDiff > 90) {
+    label = "Critical damage: 3 Crit.";
+    crit = 3;
+  } else if (damageDiff > 60) {
+    label = "Critical damage: 2 Crit.";
+    crit = 2;
+  } else if (damageDiff >= 31) {
+    label = "Critical damage: 1 Crit.";
     crit = 1;
   } else if (damageDiff >= 6) {
     label = "Serious hit.";
@@ -120,14 +126,15 @@ export function resolveAttack({
       weaponDamage,
       targetArmor,
     );
+    const crit = Math.max(baseDamage.crit || 0, 2);
     damage = {
       ...baseDamage,
-      label: "Critical hit: 2 Crit.",
-      crit: 2,
+      label: `Critical hit: ${crit} Crit.`,
+      crit,
       serious: 0,
       minor: 0,
     };
-    bodyDelta = -2;
+    bodyDelta = -crit;
   } else if (criticalFailure) {
     outcome = "critical-failure";
   } else if (hit) {

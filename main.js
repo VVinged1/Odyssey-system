@@ -399,9 +399,9 @@ async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
   if (!token || !isCharacterToken(token)) return false;
   const shouldInitialize = !isTrackedCharacter(token);
-  if (shouldInitialize) {
-    await updateTrackerData(tokenId, (current) => current);
-  }
+  if (!shouldInitialize) return false;
+
+  await updateTrackerData(tokenId, (current) => current);
   await ensureOverlayForToken(tokenId);
   return shouldInitialize;
 }

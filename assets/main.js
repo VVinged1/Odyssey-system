@@ -4178,8 +4178,14 @@ function calculateDamage(attackResult, defenseResult, weaponDamage = 0, armor = 
   let crit = 0;
   let serious = 0;
   let minor = 0;
-  if (damageDiff >= 31) {
-    label = "Critical damage.";
+  if (damageDiff > 90) {
+    label = "Critical damage: 3 Crit.";
+    crit = 3;
+  } else if (damageDiff > 60) {
+    label = "Critical damage: 2 Crit.";
+    crit = 2;
+  } else if (damageDiff >= 31) {
+    label = "Critical damage: 1 Crit.";
     crit = 1;
   } else if (damageDiff >= 6) {
     label = "Serious hit.";
@@ -4232,14 +4238,15 @@ function resolveAttack({
       weaponDamage,
       targetArmor
     );
+    const crit = Math.max(baseDamage.crit || 0, 2);
     damage = {
       ...baseDamage,
-      label: "Critical hit: 2 Crit.",
-      crit: 2,
+      label: `Critical hit: ${crit} Crit.`,
+      crit,
       serious: 0,
       minor: 0
     };
-    bodyDelta = -2;
+    bodyDelta = -crit;
   } else if (criticalFailure) {
     outcome = "critical-failure";
   } else if (hit) {
@@ -4546,9 +4553,8 @@ async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
   if (!token || !isCharacterToken(token)) return false;
   const shouldInitialize = !isTrackedCharacter(token);
-  if (shouldInitialize) {
-    await updateTrackerData(tokenId, (current2) => current2);
-  }
+  if (!shouldInitialize) return false;
+  await updateTrackerData(tokenId, (current2) => current2);
   await ensureOverlayForToken(tokenId);
   return shouldInitialize;
 }

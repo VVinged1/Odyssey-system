@@ -4566,17 +4566,6 @@ async function initializeCharacterToken(tokenId) {
   await ensureOverlayForToken(tokenId);
   return shouldInitialize;
 }
-function resolveDefaultTargetTokenId(attackerId) {
-  const visibleTargets = getCharacters().filter(
-    (token) => token.id !== attackerId && token.visible !== false
-  );
-  const otherSelected = selectionIds.find(
-    (id) => id !== attackerId && visibleTargets.some((token) => token.id === id)
-  );
-  if (otherSelected) return otherSelected;
-  const fallback = visibleTargets[0];
-  return fallback?.id ?? "";
-}
 async function pushDebugEntry(title, body, kind = "info") {
   const entry = {
     id: Date.now() * 1e3 + Math.floor(Math.random() * 1e3),
@@ -4858,8 +4847,8 @@ function getAttackDraft(token, data, targetCharacters) {
   const hasStoredTargetTokenId = Object.prototype.hasOwnProperty.call(stored, "targetTokenId");
   const draftTargetTokenId = persistedTargetTokenId || (hasStoredTargetTokenId ? String(stored.targetTokenId ?? "").trim() : null);
   const draftTargetTokenName = persistedTargetTokenName || String(stored.targetTokenName ?? "").trim();
-  const resolvedTarget = draftTargetTokenId ? targetCharacters.find((target) => target.id === draftTargetTokenId) ?? null : null;
-  const targetTokenId = draftTargetTokenId === "" ? "" : draftTargetTokenId ? draftTargetTokenId : resolveDefaultTargetTokenId(token.id);
+  const targetTokenId = draftTargetTokenId && draftTargetTokenId !== token.id ? draftTargetTokenId : "";
+  const resolvedTarget = targetTokenId ? targetCharacters.find((target) => target.id === targetTokenId) ?? null : null;
   return {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
     targetTokenId,

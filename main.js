@@ -751,16 +751,13 @@ function getAttackDraft(token, data, targetCharacters) {
     (hasStoredTargetTokenId ? String(stored.targetTokenId ?? "").trim() : null);
   const draftTargetTokenName =
     persistedTargetTokenName || String(stored.targetTokenName ?? "").trim();
-  const resolvedTarget = draftTargetTokenId
-    ? targetCharacters.find((target) => target.id === draftTargetTokenId) ?? null
-    : null;
-
   const targetTokenId =
-    draftTargetTokenId === ""
-      ? ""
-      : draftTargetTokenId
-        ? draftTargetTokenId
-        : resolveDefaultTargetTokenId(token.id);
+    draftTargetTokenId && draftTargetTokenId !== token.id
+      ? draftTargetTokenId
+      : "";
+  const resolvedTarget = targetTokenId
+    ? targetCharacters.find((target) => target.id === targetTokenId) ?? null
+    : null;
 
   return {
     skill: combatSkillNames.includes(stored.skill)

@@ -1,3 +1,4 @@
+import { buildShape } from "@owlbear-rodeo/sdk";
 import {
   APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
@@ -25,6 +26,12 @@ import { resolveAttack, rollDice } from "./odyssey_rules.js";
 
 const DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 const DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
+const TARGET_HIGHLIGHTS_KEY = "com.codex.body-hp/targetHighlights";
+const TARGET_HIGHLIGHT_BROADCAST_CHANNEL = "com.codex.body-hp/targetHighlight";
+const TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
+const TARGET_PICK_MODE_ID = "pick-target";
+const TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
+const EXTENSION_ICON_URL = new URL("./icon.svg", window.location.href).href;
 const CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 const ATTACK_ONLY_EXCLUDED_SKILLS = new Set([PARRY_SKILL_NAME]);
 const ATTRIBUTE_FIELDS = [
@@ -70,16 +77,26 @@ const ui = {
 let playerRole = "PLAYER";
 let playerId = "";
 let playerName = "";
+let playerColor = "#facc15";
 let sceneItems = [];
 let selectionIds = [];
 let activeTokenId = null;
 let debugEntries = [];
+let sharedTargetHighlights = {};
 let partyPlayers = [];
 let gmPrivateEntries = [];
 const collapsibleSectionState = new Map();
 const attackFormDrafts = new Map();
 const inputAutosaveTimers = new Map();
 let selectionPollTimer = null;
+const targetPickState = {
+  active: false,
+  attackerTokenId: null,
+  previousToolId: "",
+  previousModeId: undefined,
+  toolReady: false,
+  restoring: false,
+};
 
 function sanitizeDebugEntries(raw) {
   if (!Array.isArray(raw)) return [];
@@ -93,6 +110,31 @@ function sanitizeDebugEntries(raw) {
       timestamp: String(entry.timestamp ?? ""),
     }))
     .slice(0, 30);
+}
+
+function sanitizeTargetHighlights(raw) {
+  if (!raw || typeof raw !== "object") return {};
+
+  const next = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const playerKey = String(key ?? "").trim();
+    if (!playerKey || !value || typeof value !== "object") continue;
+
+    const attackerTokenId = String(value.attackerTokenId ?? "").trim();
+    const targetTokenId = String(value.targetTokenId ?? "").trim();
+    if (!attackerTokenId || !targetTokenId) continue;
+
+    next[playerKey] = {
+      playerId: playerKey,
+      playerName: String(value.playerName ?? "").trim(),
+      color: String(value.color ?? "#facc15").trim() || "#facc15",
+      attackerTokenId,
+      targetTokenId,
+      updatedAt: String(value.updatedAt ?? "").trim(),
+    };
+  }
+
+  return next;
 }
 
 function mergeDebugEntries(...entryGroups) {
@@ -319,6 +361,12 @@ function getSortedPartyPlayers() {
   return [...partyPlayers].sort((left, right) =>
     String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
   );
+}
+
+function getCurrentPlayerHighlightColor() {
+  if (playerColor) return playerColor;
+  const partyPlayer = partyPlayers.find((player) => player?.id === playerId);
+  return String(partyPlayer?.color ?? "#facc15");
 }
 
 function getCharacters() {
@@ -667,6 +715,359 @@ function saveAttackDraftValue(tokenId, field, value) {
     ...current,
     [field]: value,
   });
+}
+
+function isLocalTargetHighlight(item) {
+  return Boolean(item?.metadata?.[TARGET_HIGHLIGHT_KEY]);
+}
+
+async function clearRenderedTargetHighlights() {
+  const localItems = await OBR.scene.local.getItems();
+  const highlightIds = localItems
+    .filter(isLocalTargetHighlight)
+    .map((item) => item.id);
+
+  if (highlightIds.length) {
+    await OBR.scene.local.deleteItems(highlightIds);
+  }
+}
+
+async function buildTargetHighlightItem(targetToken, highlightEntry) {
+  let bounds = null;
+  try {
+    bounds = await OBR.scene.items.getItemBounds([targetToken.id]);
+  } catch (error) {
+    console.warn("[Body HP] Unable to read target bounds for highlight", error);
+  }
+
+  const width =
+    Math.max(
+      bounds?.width ?? 0,
+      (targetToken.width || 140) * Math.abs(targetToken.scale?.x ?? 1),
+      56,
+    ) + 22;
+  const height =
+    Math.max(
+      bounds?.height ?? 0,
+      (targetToken.height || 140) * Math.abs(targetToken.scale?.y ?? 1),
+      56,
+    ) + 22;
+  const position = bounds?.center ?? targetToken.position;
+
+  return buildShape()
+    .name(`Attack Target: ${getCharacterName(targetToken)}`)
+    .shapeType("ELLIPSE")
+    .width(width)
+    .height(height)
+    .position(position)
+    .rotation(0)
+    .attachedTo(targetToken.id)
+    .layer("ATTACHMENT")
+    .locked(true)
+    .disableHit(true)
+    .fillColor(highlightEntry.color)
+    .fillOpacity(0.08)
+    .strokeColor(highlightEntry.color)
+    .strokeOpacity(1)
+    .strokeWidth(4)
+    .metadata({
+      [TARGET_HIGHLIGHT_KEY]: {
+        playerId: highlightEntry.playerId,
+        playerName: highlightEntry.playerName,
+        color: highlightEntry.color,
+        attackerTokenId: highlightEntry.attackerTokenId,
+        targetTokenId: targetToken.id,
+      },
+    })
+    .build();
+}
+
+function buildCurrentTargetHighlightEntry() {
+  if (!playerId) return null;
+  const attacker = getCharacterById(activeTokenId);
+  if (!attacker || !isCharacterToken(attacker)) return null;
+
+  const targetCharacters = getCharacters().filter(
+    (item) => item.id !== attacker.id && item.visible !== false,
+  );
+  const draft = getAttackDraft(attacker, getTrackerData(attacker), targetCharacters);
+  const target = getCharacterById(draft.targetTokenId);
+  if (!target || !isCharacterToken(target) || target.visible === false || target.id === attacker.id) {
+    return null;
+  }
+
+  return {
+    playerId,
+    playerName,
+    color: getCurrentPlayerHighlightColor(),
+    attackerTokenId: attacker.id,
+    targetTokenId: target.id,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function renderSharedTargetHighlights() {
+  const localItems = await OBR.scene.local.getItems();
+  const existingHighlights = localItems.filter(isLocalTargetHighlight);
+  const nextEntries = Object.values(sanitizeTargetHighlights(sharedTargetHighlights)).filter(
+    (entry) => {
+      const attacker = getCharacterById(entry.attackerTokenId);
+      const target = getCharacterById(entry.targetTokenId);
+      return (
+        attacker &&
+        target &&
+        isCharacterToken(attacker) &&
+        isCharacterToken(target) &&
+        target.visible !== false &&
+        attacker.id !== target.id
+      );
+    },
+  );
+
+  const currentSignature = existingHighlights
+    .map((item) => {
+      const metadata = item.metadata?.[TARGET_HIGHLIGHT_KEY] ?? {};
+      return [
+        String(metadata.playerId ?? ""),
+        String(metadata.attackerTokenId ?? ""),
+        String(metadata.targetTokenId ?? ""),
+        String(metadata.color ?? ""),
+      ].join(":");
+    })
+    .sort()
+    .join("|");
+
+  const nextSignature = nextEntries
+    .map((entry) => [entry.playerId, entry.attackerTokenId, entry.targetTokenId, entry.color].join(":"))
+    .sort()
+    .join("|");
+
+  if (currentSignature === nextSignature && existingHighlights.length === nextEntries.length) {
+    return;
+  }
+
+  if (existingHighlights.length) {
+    await OBR.scene.local.deleteItems(existingHighlights.map((item) => item.id));
+  }
+
+  if (!nextEntries.length) return;
+
+  const items = [];
+  for (const entry of nextEntries) {
+    const target = getCharacterById(entry.targetTokenId);
+    if (!target) continue;
+    items.push(await buildTargetHighlightItem(target, entry));
+  }
+
+  if (items.length) {
+    await OBR.scene.local.addItems(items);
+  }
+}
+
+async function persistSharedTargetHighlights(nextHighlights) {
+  if (playerRole !== "GM") return;
+  await OBR.room.setMetadata({
+    [TARGET_HIGHLIGHTS_KEY]: sanitizeTargetHighlights(nextHighlights),
+  });
+}
+
+async function publishCurrentTargetHighlight(force = false) {
+  const nextEntry = buildCurrentTargetHighlightEntry();
+  const currentEntry = sharedTargetHighlights[playerId] ?? null;
+  const currentSignature = JSON.stringify(currentEntry ?? null);
+  const nextSignature = JSON.stringify(nextEntry ?? null);
+  if (!force && currentSignature === nextSignature) {
+    await renderSharedTargetHighlights();
+    return;
+  }
+
+  const nextHighlights = { ...sanitizeTargetHighlights(sharedTargetHighlights) };
+  if (nextEntry) {
+    nextHighlights[playerId] = nextEntry;
+  } else {
+    delete nextHighlights[playerId];
+  }
+
+  sharedTargetHighlights = nextHighlights;
+  await renderSharedTargetHighlights();
+
+  const message = {
+    type: "set-target-highlight",
+    playerId,
+    highlight: nextEntry,
+  };
+
+  await OBR.broadcast.sendMessage(
+    TARGET_HIGHLIGHT_BROADCAST_CHANNEL,
+    message,
+    { destination: "REMOTE" },
+  );
+
+  await persistSharedTargetHighlights(nextHighlights);
+}
+
+async function loadSharedTargetHighlights() {
+  const metadata = await OBR.room.getMetadata();
+  sharedTargetHighlights = sanitizeTargetHighlights(metadata?.[TARGET_HIGHLIGHTS_KEY]);
+  await renderSharedTargetHighlights();
+}
+
+async function teardownTargetPickerTool() {
+  if (!targetPickState.toolReady) return;
+
+  try {
+    await OBR.tool.removeMode(TARGET_PICK_MODE_ID);
+  } catch (error) {
+    console.warn("[Body HP] Unable to remove target picker mode", error);
+  }
+
+  try {
+    await OBR.tool.remove(TARGET_PICK_TOOL_ID);
+  } catch (error) {
+    console.warn("[Body HP] Unable to remove target picker tool", error);
+  }
+
+  targetPickState.toolReady = false;
+}
+
+async function restorePreviousTool() {
+  const previousToolId = targetPickState.previousToolId;
+  const previousModeId = targetPickState.previousModeId;
+  if (!previousToolId || previousToolId === TARGET_PICK_TOOL_ID) return;
+
+  targetPickState.restoring = true;
+  try {
+    await OBR.tool.activateTool(previousToolId);
+    if (previousModeId) {
+      try {
+        await OBR.tool.activateMode(previousToolId, previousModeId);
+      } catch (error) {
+        console.warn("[Body HP] Unable to restore previous tool mode", error);
+      }
+    }
+  } finally {
+    targetPickState.restoring = false;
+  }
+}
+
+async function stopTargetPick(statusMessage = "", statusKind = "info") {
+  const wasActive = targetPickState.active;
+  targetPickState.active = false;
+  targetPickState.attackerTokenId = null;
+  render();
+
+  if (wasActive) {
+    await restorePreviousTool();
+  }
+
+  await teardownTargetPickerTool();
+
+  targetPickState.previousToolId = "";
+  targetPickState.previousModeId = undefined;
+
+  if (statusMessage) {
+    setStatus(statusMessage, statusKind);
+  }
+}
+
+async function ensureTargetPickerTool() {
+  if (targetPickState.toolReady) return;
+
+  await OBR.tool.create({
+    id: TARGET_PICK_TOOL_ID,
+    icons: [{ icon: EXTENSION_ICON_URL, label: "Pick Attack Target" }],
+    defaultMode: TARGET_PICK_MODE_ID,
+  });
+
+  await OBR.tool.createMode({
+    id: TARGET_PICK_MODE_ID,
+    icons: [{ icon: EXTENSION_ICON_URL, label: "Pick Attack Target" }],
+    cursors: [{ cursor: "crosshair" }],
+    onToolClick: async (_context, event) => {
+      if (!targetPickState.active) return true;
+
+      const attacker = getCharacterById(targetPickState.attackerTokenId);
+      const target = event.target;
+
+      if (!attacker || !isCharacterToken(attacker)) {
+        await stopTargetPick("Select an attacker token first.", "error");
+        return true;
+      }
+
+      if (!target || !isCharacterToken(target)) {
+        setStatus("Click a visible character token to use it as target.", "error");
+        return true;
+      }
+
+      if (target.visible === false) {
+        setStatus("Hidden tokens cannot be targeted.", "error");
+        return true;
+      }
+
+      if (target.id === attacker.id) {
+        setStatus("Attacker and target must be different tokens.", "error");
+        return true;
+      }
+
+      saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
+      render();
+      await publishCurrentTargetHighlight(true);
+      await stopTargetPick(`Target set to ${getCharacterName(target)}.`, "success");
+      return true;
+    },
+    onKeyDown: (_context, event) => {
+      if (event.key === "Escape" && targetPickState.active) {
+        void stopTargetPick("Target picking cancelled.", "info");
+      }
+    },
+    onDeactivate: () => {
+      if (targetPickState.active && !targetPickState.restoring) {
+        void stopTargetPick("Target picking cancelled.", "info");
+      }
+    },
+  });
+
+  targetPickState.toolReady = true;
+}
+
+async function startTargetPick() {
+  const attacker = getCharacterById(activeTokenId);
+  if (!attacker) {
+    setStatus("Select an attacker token first.", "error");
+    return;
+  }
+  if (!canUseToken(attacker)) {
+    setStatus("You cannot roll for this attacker token.", "error");
+    return;
+  }
+
+  const targetCharacters = getCharacters().filter(
+    (item) => item.id !== attacker.id && item.visible !== false,
+  );
+  if (!targetCharacters.length) {
+    setStatus("Add at least one visible target token.", "error");
+    return;
+  }
+
+  if (targetPickState.active && targetPickState.attackerTokenId === attacker.id) {
+    await stopTargetPick("Target picking cancelled.", "info");
+    return;
+  }
+
+  if (targetPickState.active) {
+    await stopTargetPick();
+  }
+
+  targetPickState.previousToolId = await OBR.tool.getActiveTool();
+  targetPickState.previousModeId = await OBR.tool.getActiveToolMode();
+  targetPickState.attackerTokenId = attacker.id;
+  targetPickState.active = true;
+
+  await ensureTargetPickerTool();
+  await OBR.tool.activateTool(TARGET_PICK_TOOL_ID);
+  await OBR.tool.activateMode(TARGET_PICK_TOOL_ID, TARGET_PICK_MODE_ID);
+  render();
+  setStatus("Click a visible target token on the map to assign it.", "info");
 }
 
 function renderCollapsibleSection(title, content, open = false, sectionKey = "") {
@@ -1556,6 +1957,9 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
+  const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
+  const targetName = selectedTarget ? getCharacterName(selectedTarget) : "No target";
+  const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
 
   return renderCollapsibleSection(
     "Attack",
@@ -1577,6 +1981,12 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
               )
               .join("")}
           </select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Pick On Map</span>
+          <button type="button" class="secondary" data-action="pick-attack-target" ${disabledAttr}>
+            ${isPickingTarget ? "Cancel Target Pick" : "Pick Target On Map"}
+          </button>
         </label>
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
@@ -1613,6 +2023,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           ? "Attack goes from the selected attacker token to the selected target token."
           : "Add at least two visible character tokens to perform an attack."
       }</div>
+      <div class="muted">Current target: ${escapeHtml(targetName)}</div>
       <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
@@ -1930,10 +2341,11 @@ function render() {
 }
 
 async function syncState(showToast = false) {
-  const [role, id, name, items, selection, players] = await Promise.all([
+  const [role, id, name, color, items, selection, players] = await Promise.all([
     OBR.player.getRole(),
     OBR.player.getId(),
     OBR.player.getName(),
+    OBR.player.getColor(),
     OBR.scene.items.getItems(),
     OBR.player.getSelection(),
     OBR.party.getPlayers(),
@@ -1942,6 +2354,7 @@ async function syncState(showToast = false) {
   playerRole = role;
   playerId = id;
   playerName = name;
+  playerColor = color;
   partyPlayers = players ?? [];
   sceneItems = items;
   selectionIds = selection ?? [];
@@ -1960,6 +2373,7 @@ async function syncState(showToast = false) {
   }
 
   render();
+  await publishCurrentTargetHighlight();
 
   if (showToast) {
     setStatus(
@@ -1975,6 +2389,7 @@ async function selectCharacter(tokenId) {
   await initializeCharacterToken(tokenId);
   sceneItems = await OBR.scene.items.getItems();
   render();
+  await publishCurrentTargetHighlight(true);
 }
 
 async function changeBodyField(partName, field, delta) {
@@ -2712,6 +3127,13 @@ function bindUiEvents() {
       });
     }
 
+    if (action === "pick-attack-target") {
+      void startTargetPick().catch((error) => {
+        setStatus(error?.message ?? "Unable to start target picking.", "error");
+      });
+      return;
+    }
+
     if (action === "change-part" && partName && field) {
       void changeBodyField(partName, field, delta).catch((error) => {
         setStatus(error?.message ?? "Unable to update body value.", "error");
@@ -2772,6 +3194,11 @@ function bindUiEvents() {
 
     if (target.dataset.attackField && activeTokenId) {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
+      if (target.dataset.attackField === "targetTokenId") {
+        void publishCurrentTargetHighlight(true).catch((error) => {
+          console.warn("[Body HP] Unable to publish target highlight", error);
+        });
+      }
     }
 
     if (target.dataset.action === "select-owner-player") {
@@ -2907,6 +3334,7 @@ OBR.onReady(async () => {
   try {
     bindUiEvents();
     await loadSharedDebugConsole();
+    await loadSharedTargetHighlights();
     await syncState(true);
     startSelectionPolling();
     setStatus(
@@ -2917,6 +3345,9 @@ OBR.onReady(async () => {
     OBR.scene.items.onChange((items) => {
       sceneItems = items;
       render();
+      void publishCurrentTargetHighlight().catch((error) => {
+        console.warn("[Body HP] Unable to publish target highlight", error);
+      });
     });
 
     OBR.player.onChange((player) => {
@@ -2939,7 +3370,13 @@ OBR.onReady(async () => {
 
     OBR.party.onChange((players) => {
       partyPlayers = players ?? [];
+      playerColor =
+        partyPlayers.find((partyPlayer) => partyPlayer?.id === playerId)?.color ??
+        playerColor;
       render();
+      void publishCurrentTargetHighlight(true).catch((error) => {
+        console.warn("[Body HP] Unable to refresh shared target highlights", error);
+      });
     });
 
     OBR.broadcast.onMessage(DEBUG_BROADCAST_CHANNEL, (event) => {
@@ -2960,9 +3397,47 @@ OBR.onReady(async () => {
       }
     });
 
+    OBR.broadcast.onMessage(TARGET_HIGHLIGHT_BROADCAST_CHANNEL, (event) => {
+      const payload = event?.data;
+      if (!payload || typeof payload !== "object") return;
+      if (payload.type !== "set-target-highlight") return;
+
+      const targetPlayerId = String(payload.playerId ?? "").trim();
+      if (!targetPlayerId) return;
+
+      const nextHighlights = { ...sanitizeTargetHighlights(sharedTargetHighlights) };
+      if (payload.highlight && typeof payload.highlight === "object") {
+        nextHighlights[targetPlayerId] = {
+          playerId: targetPlayerId,
+          playerName: String(payload.highlight.playerName ?? "").trim(),
+          color: String(payload.highlight.color ?? "#facc15").trim() || "#facc15",
+          attackerTokenId: String(payload.highlight.attackerTokenId ?? "").trim(),
+          targetTokenId: String(payload.highlight.targetTokenId ?? "").trim(),
+          updatedAt: String(payload.highlight.updatedAt ?? "").trim(),
+        };
+      } else {
+        delete nextHighlights[targetPlayerId];
+      }
+
+      sharedTargetHighlights = sanitizeTargetHighlights(nextHighlights);
+      void renderSharedTargetHighlights().catch((error) => {
+        console.warn("[Body HP] Unable to render broadcast target highlight", error);
+      });
+
+      if (playerRole === "GM") {
+        void persistSharedTargetHighlights(sharedTargetHighlights).catch((error) => {
+          console.warn("[Body HP] Unable to persist broadcast target highlight", error);
+        });
+      }
+    });
+
     OBR.room.onMetadataChange((metadata) => {
       debugEntries = mergeDebugEntries(metadata?.[DEBUG_LOG_KEY], debugEntries);
       renderDebugConsole();
+      sharedTargetHighlights = sanitizeTargetHighlights(metadata?.[TARGET_HIGHLIGHTS_KEY]);
+      void renderSharedTargetHighlights().catch((error) => {
+        console.warn("[Body HP] Unable to render metadata target highlights", error);
+      });
     });
   } catch (error) {
     setStatus(error?.message ?? "Extension failed to initialize.", "error");

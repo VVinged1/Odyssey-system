@@ -3744,6 +3744,9 @@ var DEFAULT_TRACKER_DATA = {
       playerId: "",
       playerName: ""
     },
+    attackDraft: {
+      targetTokenId: ""
+    },
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
@@ -3807,6 +3810,7 @@ function sanitizeOdysseyData(raw) {
   if (!raw || typeof raw !== "object") return next;
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
+  next.attackDraft.targetTokenId = String(raw.attackDraft?.targetTokenId ?? "").trim();
   const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
   const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
   const rawSkillStrengthBonuses = raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object" ? raw.skillStrengthBonuses : {};
@@ -4843,9 +4847,11 @@ function formatTextTable(headers, rows) {
 function getAttackDraft(token, data, targetCharacters) {
   const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
   const stored = attackFormDrafts.get(token.id) ?? {};
+  const persistedTargetTokenId = String(data.odyssey?.attackDraft?.targetTokenId ?? "").trim();
   const combatSkillNames = getAttackSkillEntries(data.odyssey).map(([skillName]) => skillName);
   const fallbackSkill = combatSkillNames[0] ?? CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0];
-  const targetTokenId = stored.targetTokenId === "" ? "" : targetCharacters.some((target) => target.id === stored.targetTokenId) ? stored.targetTokenId : resolveDefaultTargetTokenId(token.id);
+  const draftTargetTokenId = Object.prototype.hasOwnProperty.call(stored, "targetTokenId") ? String(stored.targetTokenId ?? "").trim() : persistedTargetTokenId;
+  const targetTokenId = draftTargetTokenId === "" ? "" : targetCharacters.some((target) => target.id === draftTargetTokenId) ? draftTargetTokenId : resolveDefaultTargetTokenId(token.id);
   return {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
     targetTokenId,
@@ -4866,6 +4872,22 @@ function saveAttackDraftValue(tokenId, field, value) {
   attackFormDrafts.set(tokenId, {
     ...current2,
     [field]: value
+  });
+}
+async function persistAttackTargetTokenId(tokenId, targetTokenId) {
+  if (!tokenId) return;
+  const token = getCharacterById(tokenId);
+  if (!token) return;
+  const normalizedTargetTokenId = String(targetTokenId ?? "").trim();
+  const currentTargetTokenId = String(getOdysseyData(token).attackDraft?.targetTokenId ?? "").trim();
+  if (currentTargetTokenId === normalizedTargetTokenId) return;
+  await updateTrackerData(token.id, (current2) => {
+    var _a;
+    const next = structuredClone(current2);
+    next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
+    (_a = next.odyssey).attackDraft ?? (_a.attackDraft = { targetTokenId: "" });
+    next.odyssey.attackDraft.targetTokenId = normalizedTargetTokenId;
+    return next;
   });
 }
 function buildCircleCommands(radius, segments = 28) {
@@ -5031,6 +5053,7 @@ async function ensureTargetPickerTool() {
         return false;
       }
       saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
+      await persistAttackTargetTokenId(attacker.id, target.id);
       activeTokenId = attacker.id;
       render();
       const targetField = ui.selectedTokenPanel.querySelector('[data-attack-field="targetTokenId"]');
@@ -5950,6 +5973,7 @@ async function performAttack() {
   const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
   saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
+  await persistAttackTargetTokenId(attacker.id, targetTokenId);
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
   saveAttackDraftValue(attacker.id, "weaponDamage", getActionFieldValue('[data-attack-field="weaponDamage"]'));
   saveAttackDraftValue(attacker.id, "attackBonuses", getActionFieldValue('[data-attack-field="attackBonuses"]'));
@@ -6379,6 +6403,9 @@ function bindUiEvents() {
     if (target.dataset.attackField && activeTokenId) {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
       if (target.dataset.attackField === "targetTokenId") {
+        void persistAttackTargetTokenId(activeTokenId, target.value).catch((error) => {
+          console.warn("[Body HP] Unable to persist attack target", error);
+        });
         void syncTargetHighlight().catch((error) => {
           console.warn("[Body HP] Unable to sync target highlight", error);
         });

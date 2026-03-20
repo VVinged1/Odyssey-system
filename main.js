@@ -737,17 +737,25 @@ function getAttackDraft(token, data, targetCharacters) {
   const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
   const stored = attackFormDrafts.get(token.id) ?? {};
   const persistedTargetTokenId = String(data.odyssey?.attackDraft?.targetTokenId ?? "").trim();
+  const persistedTargetTokenName = String(data.odyssey?.attackDraft?.targetTokenName ?? "").trim();
   const combatSkillNames = getAttackSkillEntries(data.odyssey).map(([skillName]) => skillName);
   const fallbackSkill =
     combatSkillNames[0] ??
     CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ??
     CORE_COMBAT_SKILLS[0];
-  const draftTargetTokenId = persistedTargetTokenId || String(stored.targetTokenId ?? "").trim();
+  const hasStoredTargetTokenId = Object.prototype.hasOwnProperty.call(stored, "targetTokenId");
+  const draftTargetTokenId = persistedTargetTokenId ||
+    (hasStoredTargetTokenId ? String(stored.targetTokenId ?? "").trim() : null);
+  const draftTargetTokenName =
+    persistedTargetTokenName || String(stored.targetTokenName ?? "").trim();
+  const resolvedTarget = draftTargetTokenId
+    ? targetCharacters.find((target) => target.id === draftTargetTokenId) ?? null
+    : null;
 
   const targetTokenId =
     draftTargetTokenId === ""
       ? ""
-      : targetCharacters.some((target) => target.id === draftTargetTokenId)
+      : draftTargetTokenId
         ? draftTargetTokenId
         : resolveDefaultTargetTokenId(token.id);
 
@@ -756,6 +764,7 @@ function getAttackDraft(token, data, targetCharacters) {
       ? stored.skill
       : fallbackSkill,
     targetTokenId,
+    targetTokenName: resolvedTarget ? getCharacterName(resolvedTarget) : draftTargetTokenName,
     targetPart: BODY_ORDER.includes(stored.targetPart) ? stored.targetPart : "Torso",
     weaponDamage: stored.weaponDamage ?? String(defaultWeapon.damage),
     attackBonuses: stored.attackBonuses ?? "0",
@@ -1029,6 +1038,7 @@ async function ensureTargetPickerTool() {
       }
 
       saveAttackDraftValue(attacker.id, "targetTokenId", target.id);
+      saveAttackDraftValue(attacker.id, "targetTokenName", getCharacterName(target));
       await persistAttackTargetToken(attacker.id, target.id);
       activeTokenId = attacker.id;
       render();
@@ -1986,9 +1996,17 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
   const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
-  const targetName = selectedTarget ? getCharacterName(selectedTarget) : "Manual Defense";
+  const missingSelectedTargetOption =
+    draft.targetTokenId && !selectedTarget
+      ? `<option value="${escapeHtml(draft.targetTokenId)}" selected>${escapeHtml(
+          draft.targetTokenName || "Saved Target"
+        )}</option>`
+      : "";
+  const targetName = selectedTarget
+    ? getCharacterName(selectedTarget)
+    : draft.targetTokenName || "Manual Defense";
   const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
-  const manualDefenseDisabledAttr = tokenLocked || selectedTarget ? "disabled" : "";
+  const manualDefenseDisabledAttr = tokenLocked || draft.targetTokenId ? "disabled" : "";
 
   return renderCollapsibleSection(
     "Attack",
@@ -2002,6 +2020,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           <span class="field-label">Target Token</span>
           <select data-attack-field="targetTokenId" ${disabledAttr}>
             <option value="" ${draft.targetTokenId ? "" : "selected"}>No Target (Manual Defense)</option>
+            ${missingSelectedTargetOption}
             ${targetCharacters
               .map(
                 (target) =>
@@ -2785,6 +2804,7 @@ async function performAttack() {
   const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
   saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
+  saveAttackDraftValue(attacker.id, "targetTokenName", target ? getCharacterName(target) : "");
   await persistAttackTargetToken(attacker.id, targetTokenId);
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
   saveAttackDraftValue(attacker.id, "weaponDamage", getActionFieldValue('[data-attack-field="weaponDamage"]'));
@@ -3290,6 +3310,12 @@ function bindUiEvents() {
     if (target.dataset.attackField && activeTokenId) {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
       if (target.dataset.attackField === "targetTokenId") {
+        const selectedTarget = target.value ? getCharacterById(target.value) : null;
+        saveAttackDraftValue(
+          activeTokenId,
+          "targetTokenName",
+          selectedTarget ? getCharacterName(selectedTarget) : "",
+        );
         void persistAttackTargetToken(activeTokenId, target.value).catch((error) => {
           console.warn("[Body HP] Unable to persist attack target", error);
         });

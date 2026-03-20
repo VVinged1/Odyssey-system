@@ -4,14 +4,19 @@ export function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
 }
 
-export function rollDice(sides, modifier = 0) {
+export function rollDice(sides, modifier = 0, count = 1) {
   const safeSides = clamp(Number(sides) || 0, 2, 1000);
-  const roll = Math.floor(Math.random() * safeSides) + 1;
+  const safeCount = clamp(Number(count) || 0, 1, 100);
+  const rolls = Array.from({ length: safeCount }, () => Math.floor(Math.random() * safeSides) + 1);
+  const subtotal = rolls.reduce((sum, roll) => sum + roll, 0);
   return {
-    roll,
+    roll: rolls[0] ?? 0,
+    rolls,
+    count: safeCount,
     sides: safeSides,
+    subtotal,
     modifier: Number(modifier) || 0,
-    total: roll + (Number(modifier) || 0),
+    total: subtotal + (Number(modifier) || 0),
   };
 }
 

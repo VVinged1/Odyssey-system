@@ -4209,14 +4209,19 @@ async function syncTrackedOverlays() {
 function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
 }
-function rollDice(sides, modifier = 0) {
+function rollDice(sides, modifier = 0, count = 1) {
   const safeSides = clamp(Number(sides) || 0, 2, 1e3);
-  const roll = Math.floor(Math.random() * safeSides) + 1;
+  const safeCount = clamp(Number(count) || 0, 1, 100);
+  const rolls = Array.from({ length: safeCount }, () => Math.floor(Math.random() * safeSides) + 1);
+  const subtotal = rolls.reduce((sum, roll) => sum + roll, 0);
   return {
-    roll,
+    roll: rolls[0] ?? 0,
+    rolls,
+    count: safeCount,
     sides: safeSides,
+    subtotal,
     modifier: Number(modifier) || 0,
-    total: roll + (Number(modifier) || 0)
+    total: subtotal + (Number(modifier) || 0)
   };
 }
 function calculateAccuracy(attackSkill, attackBonuses = 0, attackPenalties = 0, defenseBonuses = 0, defensePenalties = 0, parry = 0) {
@@ -4696,7 +4701,9 @@ function formatAttackDebug({
   weaponDamage,
   strengthBonus,
   attackBonuses,
-  attackPenalties,
+  manualAttackPenalties,
+  automaticTargetPenalty,
+  totalAttackPenalties,
   defenseBonuses,
   defensePenalties,
   targetParry,
@@ -4715,7 +4722,7 @@ function formatAttackDebug({
     [
       [
         "Accuracy",
-        `${result.attackRoll} + ${attackSkillValue * 10} + ${attackBonuses} - ${attackPenalties} = ${result.attackTotal}`,
+        `${result.attackRoll} + ${attackSkillValue * 10} + ${attackBonuses} - ${totalAttackPenalties} = ${result.attackTotal}`,
         `${result.defenseRoll} + ${targetParry * 10} + ${defenseBonuses} - ${defensePenalties} = ${result.defenseTotal}`
       ],
       [
@@ -4737,6 +4744,8 @@ function formatAttackDebug({
       ["Target", `${targetName} -> ${targetPart}`],
       ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
       ["Strength Bonus", strengthBonus],
+      ["Manual Attack Penalty", manualAttackPenalties],
+      ["Auto Target Penalty", automaticTargetPenalty],
       ["Outcome", result.outcome],
       ["Damage Diff", result.damage?.damageDiff ?? 0],
       ["Damage Label", result.damage?.label ?? "No damage"],
@@ -4779,11 +4788,25 @@ function formatDiceDebug({ tokenName, result }) {
     ["Parameter", "Value"],
     [
       ["Actor", tokenName],
-      ["Roll", `${result.roll} (1-${result.sides})`],
+      ["Dice", `${result.count}d${result.sides}`],
+      ["Rolls", result.rolls.join(", ")],
+      ["Subtotal", result.subtotal],
       ["Modifier", result.modifier],
       ["Total", result.total]
     ]
   );
+}
+function getCurrentPlayerColor() {
+  return String(
+    partyPlayers.find((player) => player?.id === playerId)?.color ?? "#facc15"
+  );
+}
+function getAutomaticTargetPenalty(targetPart) {
+  if (targetPart === "Head") return 30;
+  if (targetPart === "L.Arm" || targetPart === "R.Arm" || targetPart === "L.Leg" || targetPart === "R.Leg") {
+    return 15;
+  }
+  return 0;
 }
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
@@ -4876,14 +4899,19 @@ async function buildTargetHighlightItem(targetToken) {
     bounds?.width ?? 0,
     (targetToken.width || 140) * Math.abs(targetToken.scale?.x ?? 1),
     56
-  ) + 22;
+  );
   const height = Math.max(
     bounds?.height ?? 0,
     (targetToken.height || 140) * Math.abs(targetToken.scale?.y ?? 1),
     56
-  ) + 22;
-  const position = bounds?.center ?? targetToken.position;
-  return buildShape().name(`Attack Target: ${getCharacterName(targetToken)}`).shapeType("RECTANGLE").width(width).height(height).position(position).rotation(targetToken.rotation ?? 0).attachedTo(targetToken.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor("#facc15").fillOpacity(0.14).strokeColor("#facc15").strokeOpacity(0).strokeWidth(0).metadata({
+  );
+  const diameter = Math.max(24, Math.min(width, height) - 4);
+  const center = bounds?.center ?? targetToken.position;
+  const position = {
+    x: center.x - diameter / 2,
+    y: center.y - diameter / 2
+  };
+  return buildShape().name(`Attack Target: ${getCharacterName(targetToken)}`).shapeType("CIRCLE").width(diameter).height(diameter).position(position).rotation(0).attachedTo(targetToken.id).layer("ATTACHMENT").locked(true).disableHit(true).fillColor(getCurrentPlayerColor()).fillOpacity(0.18).strokeColor(getCurrentPlayerColor()).strokeOpacity(0).strokeWidth(0).metadata({
     [TARGET_HIGHLIGHT_KEY]: {
       playerId,
       playerName,
@@ -5269,6 +5297,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
       </div>
       <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the selected target token." : "Add at least two visible character tokens to perform an attack."}</div>
       <div class="muted">Current target: ${escapeHtml(targetName)}</div>
+      <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
       <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
@@ -5290,6 +5319,10 @@ function renderEnglishDiceBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Dice Sides</span>
           <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Dice Count</span>
+          <input type="number" min="1" max="100" value="1" data-roll-field="count">
         </label>
         <label class="field-stack">
           <span class="field-label">Modifier</span>
@@ -5352,6 +5385,10 @@ function renderPrivateGmDiceBlock() {
           <input type="number" min="2" max="1000" value="20" data-gm-roll-field="dice">
         </label>
         <label class="field-stack">
+          <span class="field-label">Dice Count</span>
+          <input type="number" min="1" max="100" value="1" data-gm-roll-field="count">
+        </label>
+        <label class="field-stack">
           <span class="field-label">Modifier</span>
           <input type="number" value="0" data-gm-roll-field="modifier">
         </label>
@@ -5381,7 +5418,7 @@ function renderSelectedToken() {
   const tokenLocked = !canUseToken(token);
   const bodyFieldDisabled = !canEditTokenData(token) ? "disabled" : "";
   const gmOnlyDisabled = !isEditable() ? "disabled" : "";
-  const showPartBlock = isEditable() || canUseToken(token);
+  const showPartBlock = isEditable();
   const lastRollText = data.lastRoll ? escapeHtml(data.lastRoll.summary || "Last roll recorded") : "No rolls synced yet";
   ui.selectionHint.textContent = selected ? "Selected on map" : "Showing current focus";
   ui.selectedTokenPanel.innerHTML = `
@@ -5868,7 +5905,9 @@ async function performAttack() {
   const targetPart = getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(getActionFieldValue('[data-attack-field="weaponDamage"]')) || 0;
   const attackBonuses = Number(getActionFieldValue('[data-attack-field="attackBonuses"]')) || 0;
-  const attackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
+  const manualAttackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
+  const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
+  const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
   saveAttackDraftValue(attacker.id, "skill", skillName);
@@ -5893,7 +5932,7 @@ async function performAttack() {
     defenseBonuses,
     defensePenalties,
     attackBonuses,
-    attackPenalties,
+    attackPenalties: totalAttackPenalties,
     parry: targetParry,
     targetPart,
     targetArmor
@@ -5953,7 +5992,9 @@ async function performAttack() {
       weaponDamage: finalWeaponDamage,
       strengthBonus,
       attackBonuses,
-      attackPenalties,
+      manualAttackPenalties,
+      automaticTargetPenalty,
+      totalAttackPenalties,
       defenseBonuses,
       defensePenalties,
       targetParry,
@@ -5983,14 +6024,16 @@ async function performRollDice() {
     return;
   }
   const dice = Number(getActionFieldValue('[data-roll-field="dice"]')) || 20;
+  const count = Number(getActionFieldValue('[data-roll-field="count"]')) || 1;
   const modifier = Number(getActionFieldValue('[data-roll-field="modifier"]')) || 0;
-  const result = rollDice(dice, modifier);
+  const result = rollDice(dice, modifier, count);
+  const diceLabel = `${result.count}d${result.sides}`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
       actorName: playerName || "Owlbear Player",
-      summary: `Rolled d${result.sides}: ${result.roll}${modifier ? ` ${modifier >= 0 ? "+" : ""}${modifier}` : ""} = ${result.total}`,
+      summary: `Rolled ${diceLabel}: ${result.rolls.join(", ")}${modifier ? ` ${modifier >= 0 ? "+" : ""}${modifier}` : ""} = ${result.total}`,
       outcome: "roll",
       total: result.total,
       targetPart: "",
@@ -6006,7 +6049,7 @@ async function performRollDice() {
     result
   }), "success");
   await syncState();
-  setStatus(`d${result.sides} rolled ${result.total}.`, "success");
+  setStatus(`${diceLabel} rolled ${result.total}.`, "success");
 }
 async function addOdysseySkill() {
   if (!isEditable()) {
@@ -6161,17 +6204,19 @@ async function performPrivateGmRoll() {
     return;
   }
   const dice = Number(getActionFieldValue('[data-gm-roll-field="dice"]')) || 20;
+  const count = Number(getActionFieldValue('[data-gm-roll-field="count"]')) || 1;
   const modifier = Number(getActionFieldValue('[data-gm-roll-field="modifier"]')) || 0;
-  const result = rollDice(dice, modifier);
+  const result = rollDice(dice, modifier, count);
+  const diceLabel = `${result.count}d${result.sides}`;
   pushPrivateGmEntry(
-    `GM private d${result.sides}`,
+    `GM private ${diceLabel}`,
     formatDiceDebug({
       tokenName: "GM private roll",
       result
     })
   );
   render();
-  setStatus(`Private GM roll: d${result.sides} = ${result.total}.`, "success");
+  setStatus(`Private GM roll: ${diceLabel} = ${result.total}.`, "success");
 }
 function bindUiEvents() {
   ui.refreshBtn.addEventListener("click", () => {

@@ -4295,7 +4295,7 @@ function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, de
 // main.js
 var DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 var DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
-var DEBUG_ENTRY_LIMIT = 250;
+var DEBUG_ENTRY_LIMIT = 50;
 var TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 var TARGET_PICK_MODE_ID = "pick-target";
 var TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
@@ -4348,6 +4348,8 @@ var activeTokenId = null;
 var debugEntries = [];
 var partyPlayers = [];
 var gmPrivateEntries = [];
+var pendingLocalDebugEntryIds = /* @__PURE__ */ new Set();
+var pendingLocalDebugClear = false;
 var collapsibleSectionState = /* @__PURE__ */ new Map();
 var attackFormDrafts = /* @__PURE__ */ new Map();
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
@@ -4580,10 +4582,11 @@ async function pushDebugEntry(title, body, kind = "info") {
   const nextEntries = mergeDebugEntries([entry], metadata?.[DEBUG_LOG_KEY], debugEntries);
   debugEntries = nextEntries;
   renderDebugConsole();
+  pendingLocalDebugEntryIds.add(entry.id);
   await lib_default.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,
     { type: "debug-entry", entry },
-    { destination: "REMOTE" }
+    { destination: "ALL" }
   );
   if (playerRole === "GM") {
     await lib_default.room.setMetadata({
@@ -4598,10 +4601,11 @@ async function clearDebugConsole() {
   }
   debugEntries = [];
   renderDebugConsole();
+  pendingLocalDebugClear = true;
   await lib_default.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,
     { type: "debug-clear" },
-    { destination: "REMOTE" }
+    { destination: "ALL" }
   );
   await lib_default.room.setMetadata({
     [DEBUG_LOG_KEY]: []
@@ -6672,11 +6676,19 @@ lib_default.onReady(async () => {
       const payload = event?.data;
       if (!payload || typeof payload !== "object") return;
       if (payload.type === "debug-clear") {
+        if (pendingLocalDebugClear) {
+          pendingLocalDebugClear = false;
+          return;
+        }
         debugEntries = [];
         renderDebugConsole();
         return;
       }
       if (payload.type !== "debug-entry") return;
+      if (pendingLocalDebugEntryIds.has(payload.entry?.id)) {
+        pendingLocalDebugEntryIds.delete(payload.entry.id);
+        return;
+      }
       const nextEntries = mergeDebugEntries([payload.entry], debugEntries);
       debugEntries = nextEntries;
       renderDebugConsole();

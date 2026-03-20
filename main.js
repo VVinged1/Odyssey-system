@@ -26,7 +26,7 @@ import { resolveAttack, rollDice } from "./odyssey_rules.js";
 
 const DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 const DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
-const DEBUG_ENTRY_LIMIT = 250;
+const DEBUG_ENTRY_LIMIT = 50;
 const TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 const TARGET_PICK_MODE_ID = "pick-target";
 const TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
@@ -93,6 +93,8 @@ let activeTokenId = null;
 let debugEntries = [];
 let partyPlayers = [];
 let gmPrivateEntries = [];
+const pendingLocalDebugEntryIds = new Set();
+let pendingLocalDebugClear = false;
 const collapsibleSectionState = new Map();
 const attackFormDrafts = new Map();
 const inputAutosaveTimers = new Map();
@@ -439,10 +441,11 @@ async function pushDebugEntry(title, body, kind = "info") {
   const nextEntries = mergeDebugEntries([entry], metadata?.[DEBUG_LOG_KEY], debugEntries);
   debugEntries = nextEntries;
   renderDebugConsole();
+  pendingLocalDebugEntryIds.add(entry.id);
   await OBR.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,
     { type: "debug-entry", entry },
-    { destination: "REMOTE" },
+    { destination: "ALL" },
   );
 
   if (playerRole === "GM") {
@@ -460,10 +463,11 @@ async function clearDebugConsole() {
 
   debugEntries = [];
   renderDebugConsole();
+  pendingLocalDebugClear = true;
   await OBR.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,
     { type: "debug-clear" },
-    { destination: "REMOTE" },
+    { destination: "ALL" },
   );
   await OBR.room.setMetadata({
     [DEBUG_LOG_KEY]: [],
@@ -3617,12 +3621,20 @@ OBR.onReady(async () => {
       if (!payload || typeof payload !== "object") return;
 
       if (payload.type === "debug-clear") {
+        if (pendingLocalDebugClear) {
+          pendingLocalDebugClear = false;
+          return;
+        }
         debugEntries = [];
         renderDebugConsole();
         return;
       }
 
       if (payload.type !== "debug-entry") return;
+      if (pendingLocalDebugEntryIds.has(payload.entry?.id)) {
+        pendingLocalDebugEntryIds.delete(payload.entry.id);
+        return;
+      }
 
       const nextEntries = mergeDebugEntries([payload.entry], debugEntries);
       debugEntries = nextEntries;

@@ -3689,11 +3689,15 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 3;
+var VISUAL_VERSION = 4;
+var HP_COLOR_STOPS = [
+  { ratio: 1, color: "#73FF5A" },
+  { ratio: 0.75, color: "#FFF243" },
+  { ratio: 0.5, color: "#FFAF22" },
+  { ratio: 0.25, color: "#AC0004" },
+  { ratio: 0, color: "#000000" }
+];
 var RING_COLORS = {
-  full: "#73FF5A",
-  half: "#FFAF22",
-  kaputt: "#FF460D",
   base: "#000000",
   border: "#050505"
 };
@@ -4046,10 +4050,48 @@ function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
   commands.push([Command.CLOSE]);
   return commands;
 }
+function hexToRgb(hex) {
+  const normalized = String(hex).replace("#", "");
+  const value = normalized.length === 3 ? normalized.split("").map((char) => `${char}${char}`).join("") : normalized;
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16) || 0,
+    g: Number.parseInt(value.slice(2, 4), 16) || 0,
+    b: Number.parseInt(value.slice(4, 6), 16) || 0
+  };
+}
+function rgbToHex({ r, g, b }) {
+  return `#${[r, g, b].map(
+    (channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, "0").toUpperCase()
+  ).join("")}`;
+}
+function mixHexColors(startHex, endHex, ratio) {
+  const safeRatio = clamp(ratio, 0, 1);
+  const start = hexToRgb(startHex);
+  const end = hexToRgb(endHex);
+  return rgbToHex({
+    r: start.r + (end.r - start.r) * safeRatio,
+    g: start.g + (end.g - start.g) * safeRatio,
+    b: start.b + (end.b - start.b) * safeRatio
+  });
+}
+function getHpColor(ratio) {
+  const safeRatio = clamp(ratio, 0, 1);
+  for (let index = 0; index < HP_COLOR_STOPS.length - 1; index += 1) {
+    const upper = HP_COLOR_STOPS[index];
+    const lower = HP_COLOR_STOPS[index + 1];
+    if (safeRatio > upper.ratio || safeRatio < lower.ratio) {
+      continue;
+    }
+    const span = upper.ratio - lower.ratio;
+    if (span <= 0) return upper.color;
+    const progress = (safeRatio - lower.ratio) / span;
+    return mixHexColors(lower.color, upper.color, progress);
+  }
+  return HP_COLOR_STOPS.at(-1)?.color ?? RING_COLORS.base;
+}
 function getPartColor(part) {
-  if (part.max <= 0 || part.current <= 0) return RING_COLORS.kaputt;
-  if (part.current < part.max) return RING_COLORS.half;
-  return RING_COLORS.full;
+  if (part.max <= 0) return getHpColor(0);
+  return getHpColor(part.current / part.max);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
   return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({

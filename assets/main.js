@@ -4282,6 +4282,7 @@ function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, de
 // main.js
 var DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 var DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
+var DEBUG_ENTRY_LIMIT = 250;
 var TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 var TARGET_PICK_MODE_ID = "pick-target";
 var TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
@@ -4314,6 +4315,7 @@ var ui = {
   selectionHint: document.getElementById("selectionHint"),
   selectedTokenPanel: document.getElementById("selectedTokenPanel"),
   debugConsole: document.getElementById("debugConsole"),
+  clearDebugBtn: document.getElementById("clearDebugBtn"),
   trackedSection: document.getElementById("trackedSection"),
   trackedCount: document.getElementById("trackedCount"),
   trackedList: document.getElementById("trackedList"),
@@ -4351,7 +4353,7 @@ function sanitizeDebugEntries(raw) {
     body: String(entry.body ?? ""),
     kind: String(entry.kind ?? "info"),
     timestamp: String(entry.timestamp ?? "")
-  })).slice(0, 30);
+  })).slice(0, DEBUG_ENTRY_LIMIT);
 }
 function mergeDebugEntries(...entryGroups) {
   const merged = /* @__PURE__ */ new Map();
@@ -4360,7 +4362,7 @@ function mergeDebugEntries(...entryGroups) {
       merged.set(entry.id, entry);
     }
   }
-  return [...merged.values()].sort((left, right) => Number(right.id) - Number(left.id)).slice(0, 30);
+  return [...merged.values()].sort((left, right) => Number(right.id) - Number(left.id)).slice(0, DEBUG_ENTRY_LIMIT);
 }
 function setStatus(message, kind = "info") {
   ui.statusBox.textContent = message;
@@ -4581,6 +4583,23 @@ async function pushDebugEntry(title, body, kind = "info") {
     });
   }
 }
+async function clearDebugConsole() {
+  if (playerRole !== "GM") {
+    setStatus("Only the GM can clear the debug console.", "error");
+    return;
+  }
+  debugEntries = [];
+  renderDebugConsole();
+  await lib_default.broadcast.sendMessage(
+    DEBUG_BROADCAST_CHANNEL,
+    { type: "debug-clear" },
+    { destination: "REMOTE" }
+  );
+  await lib_default.room.setMetadata({
+    [DEBUG_LOG_KEY]: []
+  });
+  setStatus("Debug console cleared.", "success");
+}
 function renderDebugConsole() {
   if (!debugEntries.length) {
     ui.debugConsole.innerHTML = `
@@ -4606,7 +4625,7 @@ Actions from all players and the GM will appear here after rolls and attacks.</p
 }
 async function loadSharedDebugConsole() {
   const metadata = await lib_default.room.getMetadata();
-  debugEntries = mergeDebugEntries(metadata?.[DEBUG_LOG_KEY], debugEntries);
+  debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
 }
 function arraysEqual(left, right) {
   if (left.length !== right.length) return false;
@@ -4641,7 +4660,9 @@ function formatAttackDebug({
   totalAttackPenalties,
   defenseBonuses,
   defensePenalties,
+  baseTargetParry,
   targetParry,
+  parryMode,
   targetArmor,
   result,
   beforeHp,
@@ -4681,14 +4702,18 @@ function formatAttackDebug({
       ["Strength Bonus", strengthBonus],
       ["Manual Attack Penalty", manualAttackPenalties],
       ["Auto Target Penalty", automaticTargetPenalty],
+      ["Parry Mode", getParryModeLabel(parryMode)],
+      ["Base Parry", baseTargetParry],
+      ["Effective Parry", targetParry],
+      ["Armor", targetArmor],
       ["Outcome", result.outcome],
       ["Damage Diff", result.damage?.damageDiff ?? 0],
       ["Damage Label", result.damage?.label ?? "No damage"],
       ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
       ["Converted Crit", critApplied],
-      ["Crit State", `${beforeHp} -> ${afterHp}`],
-      ["Minor State", `${beforeMinor} -> ${afterMinor}`],
-      ["Serious State", `${beforeSerious} -> ${afterSerious}`]
+      ["Crit State", formatStateTransition(beforeHp, afterHp)],
+      ["Minor State", formatStateTransition(beforeMinor, afterMinor)],
+      ["Serious State", formatStateTransition(beforeSerious, afterSerious)]
     ]
   );
   return `${accuracyTable}
@@ -4743,6 +4768,23 @@ function getAutomaticTargetPenalty(targetPart) {
   }
   return 0;
 }
+function getParryDivisor(mode) {
+  if (mode === "off") return 0;
+  const numeric = Number(mode);
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 5) {
+    return numeric;
+  }
+  return 1;
+}
+function getParryModeLabel(mode) {
+  if (mode === "off") return "Ignore Parry";
+  const divisor = getParryDivisor(mode);
+  return `${divisor} Opponent${divisor === 1 ? "" : "s"}`;
+}
+function formatStateTransition(before, after) {
+  if (before == null || after == null) return "-";
+  return `${before} -> ${after}`;
+}
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
     `Character: ${tokenName}`,
@@ -4794,15 +4836,19 @@ function getAttackDraft(token, data, targetCharacters) {
   const stored = attackFormDrafts.get(token.id) ?? {};
   const combatSkillNames = getAttackSkillEntries(data.odyssey).map(([skillName]) => skillName);
   const fallbackSkill = combatSkillNames[0] ?? CORE_COMBAT_SKILLS.find((key) => key in data.odyssey.skills) ?? CORE_COMBAT_SKILLS[0];
+  const targetTokenId = stored.targetTokenId === "" ? "" : targetCharacters.some((target) => target.id === stored.targetTokenId) ? stored.targetTokenId : resolveDefaultTargetTokenId(token.id);
   return {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
-    targetTokenId: targetCharacters.some((target) => target.id === stored.targetTokenId) ? stored.targetTokenId : resolveDefaultTargetTokenId(token.id),
+    targetTokenId,
     targetPart: BODY_ORDER.includes(stored.targetPart) ? stored.targetPart : "Torso",
     weaponDamage: stored.weaponDamage ?? String(defaultWeapon.damage),
     attackBonuses: stored.attackBonuses ?? "0",
     attackPenalties: stored.attackPenalties ?? "0",
     defenseBonuses: stored.defenseBonuses ?? "0",
-    defensePenalties: stored.defensePenalties ?? "0"
+    defensePenalties: stored.defensePenalties ?? "0",
+    manualArmor: stored.manualArmor ?? "0",
+    manualParry: stored.manualParry ?? "0",
+    parryMode: ["off", "1", "2", "3", "4", "5"].includes(String(stored.parryMode)) ? String(stored.parryMode) : "1"
   };
 }
 function saveAttackDraftValue(tokenId, field, value) {
@@ -5191,12 +5237,14 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const targetCharacters = getCharacters().filter(
     (item) => item.id !== token.id && item.visible !== false
   );
-  const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
+  const disabledAttr = tokenLocked ? "disabled" : "";
+  const pickDisabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft2 = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill);
   const selectedTarget = targetCharacters.find((target) => target.id === draft2.targetTokenId) ?? null;
-  const targetName = selectedTarget ? getCharacterName(selectedTarget) : "No target";
+  const targetName = selectedTarget ? getCharacterName(selectedTarget) : "Manual Defense";
   const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
+  const manualDefenseDisabledAttr = tokenLocked || selectedTarget ? "disabled" : "";
   return renderCollapsibleSection(
     "Attack",
     `
@@ -5208,6 +5256,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Token</span>
           <select data-attack-field="targetTokenId" ${disabledAttr}>
+            <option value="" ${draft2.targetTokenId ? "" : "selected"}>No Target (Manual Defense)</option>
             ${targetCharacters.map(
       (target) => `<option value="${target.id}" ${target.id === draft2.targetTokenId ? "selected" : ""}>${escapeHtml(
         getCharacterName(target)
@@ -5217,7 +5266,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         </label>
         <label class="field-stack">
           <span class="field-label">Pick On Map</span>
-          <button type="button" class="secondary" data-action="pick-attack-target" ${disabledAttr}>
+          <button type="button" class="secondary" data-action="pick-attack-target" ${pickDisabledAttr}>
             ${isPickingTarget ? "Cancel Target Pick" : "Pick Target On Map"}
           </button>
         </label>
@@ -5249,11 +5298,28 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           <span class="field-label">Defense Penalty</span>
           <input type="number" value="${draft2.defensePenalties}" data-attack-field="defensePenalties" ${disabledAttr}>
         </label>
+        <label class="field-stack">
+          <span class="field-label">Parry Mode</span>
+          <select data-attack-field="parryMode" ${disabledAttr}>
+            <option value="off" ${draft2.parryMode === "off" ? "selected" : ""}>Do Not Count Parry</option>
+            ${[1, 2, 3, 4, 5].map(
+      (value) => `<option value="${value}" ${String(value) === draft2.parryMode ? "selected" : ""}>${value} Opponent${value === 1 ? "" : "s"}</option>`
+    ).join("")}
+          </select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Manual Armor</span>
+          <input type="number" min="0" max="99" value="${draft2.manualArmor}" data-attack-field="manualArmor" ${manualDefenseDisabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Manual Parry</span>
+          <input type="number" min="0" max="10" value="${draft2.manualParry}" data-attack-field="manualParry" ${manualDefenseDisabledAttr}>
+        </label>
       </div>
-      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the selected target token." : "Add at least two visible character tokens to perform an attack."}</div>
+      <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the selected target token, or you can switch to manual defense." : "No visible target tokens found. Attack can still be rolled with manual defense values."}</div>
       <div class="muted">Current target: ${escapeHtml(targetName)}</div>
       <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
-      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense.</div>
+      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense only for melee attacks. Manual Armor/Parry are used when no target token is selected.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${disabledAttr}>Attack</button>
       </div>
@@ -5519,6 +5585,7 @@ function render() {
   ui.roleBadge.textContent = playerRole === "GM" ? "GM" : "PLAYER";
   ui.trackedSection.classList.toggle("hidden", playerRole !== "GM");
   ui.allTokensSection.classList.toggle("hidden", playerRole !== "GM");
+  ui.clearDebugBtn?.classList.toggle("hidden", playerRole !== "GM");
   renderSelectedToken();
   renderDebugConsole();
   if (playerRole === "GM") {
@@ -5840,24 +5907,24 @@ async function performAttack() {
     setStatus("You cannot roll for this attacker token.", "error");
     return;
   }
-  const targetTokenId = getActionFieldValue('[data-attack-field="targetTokenId"]') || resolveDefaultTargetTokenId(attacker.id);
-  const target = getCharacterById(targetTokenId);
-  if (!target) {
+  const targetTokenId = getActionFieldValue('[data-attack-field="targetTokenId"]') || "";
+  const target = targetTokenId ? getCharacterById(targetTokenId) : null;
+  if (targetTokenId && !target) {
     setStatus("Choose a valid target token.", "error");
     return;
   }
-  if (target.visible === false) {
+  if (target?.visible === false) {
     setStatus("Hidden tokens cannot be targeted.", "error");
     return;
   }
-  if (target.id === attacker.id) {
+  if (target && target.id === attacker.id) {
     setStatus("Attacker and target must be different tokens.", "error");
     return;
   }
   const attackerData = getTrackerData(attacker);
   const attackerOdyssey = getOdysseyData(attacker);
-  const targetData = getTrackerData(target);
-  const targetOdyssey = getOdysseyData(target);
+  const targetData = target ? getTrackerData(target) : null;
+  const targetOdyssey = target ? getOdysseyData(target) : null;
   const skillName = getActionFieldValue('[data-attack-field="skill"]');
   const targetPart = getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(getActionFieldValue('[data-attack-field="weaponDamage"]')) || 0;
@@ -5867,6 +5934,10 @@ async function performAttack() {
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
+  const manualArmor = clamp(Number(getActionFieldValue('[data-attack-field="manualArmor"]')) || 0, 0, 99);
+  const manualParry = clamp(Number(getActionFieldValue('[data-attack-field="manualParry"]')) || 0, 0, 10);
+  const parryMode = getActionFieldValue('[data-attack-field="parryMode"]') || "1";
+  const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
   saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
@@ -5875,14 +5946,18 @@ async function performAttack() {
   saveAttackDraftValue(attacker.id, "attackPenalties", getActionFieldValue('[data-attack-field="attackPenalties"]'));
   saveAttackDraftValue(attacker.id, "defenseBonuses", getActionFieldValue('[data-attack-field="defenseBonuses"]'));
   saveAttackDraftValue(attacker.id, "defensePenalties", getActionFieldValue('[data-attack-field="defensePenalties"]'));
-  const targetArmor = targetData.body[targetPart]?.armor ?? 0;
-  const targetPartState = targetData.body[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
-  const beforeHp = targetPartState.current ?? 0;
-  const beforeMinor = targetPartState.minor ?? 0;
-  const beforeSerious = targetPartState.serious ?? 0;
+  saveAttackDraftValue(attacker.id, "manualArmor", getActionFieldValue('[data-attack-field="manualArmor"]'));
+  saveAttackDraftValue(attacker.id, "manualParry", getActionFieldValue('[data-attack-field="manualParry"]'));
+  saveAttackDraftValue(attacker.id, "parryMode", parryMode);
+  const targetArmor = target ? targetData?.body?.[targetPart]?.armor ?? 0 : manualArmor;
+  const targetPartState = targetData?.body?.[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
+  const beforeHp = target ? targetPartState.current ?? 0 : null;
+  const beforeMinor = target ? targetPartState.minor ?? 0 : null;
+  const beforeSerious = target ? targetPartState.serious ?? 0 : null;
   const strengthBonus = getSkillStrengthBonusFlag(attackerOdyssey, skillName) ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
-  const targetParry = skillName === MELEE_SKILL_NAME ? targetOdyssey.skills[PARRY_SKILL_NAME] ?? 0 : 0;
+  const baseTargetParry = skillName === MELEE_SKILL_NAME ? target ? targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0 : manualParry : 0;
+  const targetParry = parryDivisor <= 0 ? 0 : Math.max(Math.floor(baseTargetParry / parryDivisor), 0);
   const result = resolveAttack({
     attackSkill: attackerOdyssey.skills[skillName] ?? 0,
     weaponDamage: finalWeaponDamage,
@@ -5894,19 +5969,20 @@ async function performAttack() {
     targetPart,
     targetArmor
   });
-  const projectedPartState = result.hit && result.damage ? projectPartDamage(targetPartState, result.damage) : {
-    ...targetPartState,
+  const projectedPartState = target && result.hit && result.damage ? projectPartDamage(targetPartState, result.damage) : {
+    ...target ? targetPartState : {},
     critApplied: 0
   };
-  const afterHp = projectedPartState.current ?? beforeHp;
-  const afterMinor = projectedPartState.minor ?? beforeMinor;
-  const afterSerious = projectedPartState.serious ?? beforeSerious;
+  const afterHp = target ? projectedPartState.current ?? beforeHp : null;
+  const afterMinor = target ? projectedPartState.minor ?? beforeMinor : null;
+  const afterSerious = target ? projectedPartState.serious ?? beforeSerious : null;
+  const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
   await updateTrackerData(attacker.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
       actorName: playerName || "Owlbear Player",
-      summary: `${getCharacterName(attacker)} -> ${getCharacterName(target)}: ${result.summary}`,
+      summary: `${getCharacterName(attacker)} -> ${resolvedTargetName}: ${result.summary}`,
       outcome: result.outcome,
       total: result.attackTotal,
       targetPart: result.targetPart,
@@ -5916,33 +5992,37 @@ async function performAttack() {
     next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
     return next;
   });
-  await updateTrackerData(target.id, (current2) => {
-    const next = structuredClone(current2);
-    if (result.hit && next.body[result.targetPart]) {
-      next.body[result.targetPart].current = projectedPartState.current;
-      next.body[result.targetPart].minor = projectedPartState.minor;
-      next.body[result.targetPart].serious = projectedPartState.serious;
-    }
-    next.lastRoll = {
-      eventId: 0,
-      actorName: getCharacterName(attacker),
-      summary: result.summary,
-      outcome: result.outcome,
-      total: result.attackTotal,
-      targetPart: result.targetPart,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      source: "owlbear-extension"
-    };
-    next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
-    return next;
-  });
+  if (target) {
+    await updateTrackerData(target.id, (current2) => {
+      const next = structuredClone(current2);
+      if (result.hit && next.body[result.targetPart]) {
+        next.body[result.targetPart].current = projectedPartState.current;
+        next.body[result.targetPart].minor = projectedPartState.minor;
+        next.body[result.targetPart].serious = projectedPartState.serious;
+      }
+      next.lastRoll = {
+        eventId: 0,
+        actorName: getCharacterName(attacker),
+        summary: result.summary,
+        outcome: result.outcome,
+        total: result.attackTotal,
+        targetPart: result.targetPart,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        source: "owlbear-extension"
+      };
+      next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
+      return next;
+    });
+  }
   await ensureOverlayForToken(attacker.id);
-  await ensureOverlayForToken(target.id);
+  if (target) {
+    await ensureOverlayForToken(target.id);
+  }
   await pushDebugEntry(
-    `${getCharacterName(attacker)} attacks ${getCharacterName(target)}`,
+    `${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
       attackerName: getCharacterName(attacker),
-      targetName: getCharacterName(target),
+      targetName: resolvedTargetName,
       targetPart,
       attackSkillName: skillName,
       attackSkillValue: attackerOdyssey.skills[skillName] ?? 0,
@@ -5954,7 +6034,9 @@ async function performAttack() {
       totalAttackPenalties,
       defenseBonuses,
       defensePenalties,
+      baseTargetParry,
       targetParry,
+      parryMode,
       targetArmor,
       result,
       beforeHp,
@@ -5968,7 +6050,7 @@ async function performAttack() {
     result.hit ? "success" : "info"
   );
   await syncState();
-  setStatus(`${getCharacterName(attacker)} -> ${getCharacterName(target)}: ${result.summary}`, result.hit ? "success" : "info");
+  setStatus(`${getCharacterName(attacker)} -> ${resolvedTargetName}: ${result.summary}`, result.hit ? "success" : "info");
 }
 async function performRollDice() {
   const token = getCharacterById(activeTokenId);
@@ -6229,6 +6311,12 @@ function bindUiEvents() {
       });
       return;
     }
+    if (action === "clear-debug-console") {
+      void clearDebugConsole().catch((error) => {
+        setStatus(error?.message ?? "Unable to clear debug console.", "error");
+      });
+      return;
+    }
     if (action === "change-part" && partName && field) {
       void changeBodyField(partName, field, delta).catch((error) => {
         setStatus(error?.message ?? "Unable to update body value.", "error");
@@ -6440,6 +6528,11 @@ lib_default.onReady(async () => {
     lib_default.broadcast.onMessage(DEBUG_BROADCAST_CHANNEL, (event) => {
       const payload = event?.data;
       if (!payload || typeof payload !== "object") return;
+      if (payload.type === "debug-clear") {
+        debugEntries = [];
+        renderDebugConsole();
+        return;
+      }
       if (payload.type !== "debug-entry") return;
       const nextEntries = mergeDebugEntries([payload.entry], debugEntries);
       debugEntries = nextEntries;
@@ -6453,7 +6546,7 @@ lib_default.onReady(async () => {
       }
     });
     lib_default.room.onMetadataChange((metadata) => {
-      debugEntries = mergeDebugEntries(metadata?.[DEBUG_LOG_KEY], debugEntries);
+      debugEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
       renderDebugConsole();
     });
   } catch (error) {

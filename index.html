@@ -38,7 +38,10 @@
         <details class="collapsible-block" data-section-key="global:debug-console" open>
           <summary class="collapsible-title">Debug Console</summary>
           <div class="collapsible-body">
-            <div class="muted">Last rolls and full combat tables</div>
+            <div class="row row-gap">
+              <div class="muted">Last rolls and full combat tables</div>
+              <button id="clearDebugBtn" type="button" class="secondary hidden" data-action="clear-debug-console">Clear Console</button>
+            </div>
             <div id="debugConsole"></div>
           </div>
         </details>
@@ -61,6 +64,6 @@
       </section>
     </div>
 
-    <script type="module" src="./assets/main.js?v=1.2.8"></script>
+    <script type="module" src="./assets/main.js?v=1.2.9"></script>
   </body>
 </html>

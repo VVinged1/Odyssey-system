@@ -210,6 +210,7 @@ function getTransientFieldKey(field) {
   }
 
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
+  if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
   if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
   if (field.dataset.rollCharField) return `roll-char:${field.dataset.rollCharField}`;
   if (field.dataset.rollSkillField) return `roll-skill:${field.dataset.rollSkillField}`;
@@ -235,6 +236,7 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
   return (
     fieldKey === focusedKey ||
     fieldKey.startsWith("attack:") ||
+    fieldKey.startsWith("manual-attack:") ||
     fieldKey.startsWith("roll:") ||
     fieldKey.startsWith("roll-char:") ||
     fieldKey.startsWith("roll-skill:") ||
@@ -789,6 +791,12 @@ function saveAttackDraftValue(tokenId, field, value) {
   });
 }
 
+function getSharedAttackDraftField(manualField) {
+  if (manualField === "skill") return "skill";
+  if (manualField === "weaponDamage") return "weaponDamage";
+  return "";
+}
+
 async function persistAttackTargetToken(tokenId, targetTokenId) {
   if (!tokenId) return;
 
@@ -1140,34 +1148,12 @@ async function startTargetPick() {
   setStatus("Click a visible target token on the map to assign it.", "info");
 }
 
-async function registerAttackTargetContextMenu() {
-  await OBR.contextMenu.create({
-    id: ATTACK_TARGET_CONTEXT_MENU_ID,
-    icons: [
-      {
-        icon: EXTENSION_ICON_URL,
-        label: "Set As Attack Target",
-        filter: {
-          min: 1,
-          max: 1,
-          every: [{ key: "layer", value: "CHARACTER" }],
-        },
-      },
-    ],
-    onClick: (context, elementId) => {
-      void (async () => {
-        const attacker = getCharacterById(activeTokenId);
-        const target =
-          getCharacterById(elementId) ??
-          context.items.find((item) => item.id === elementId) ??
-          context.items[0] ??
-          null;
-        await assignAttackTarget(attacker, target, `Target set to ${getCharacterName(target)} via context menu.`);
-      })().catch((error) => {
-        setStatus(error?.message ?? "Unable to set attack target.", "error");
-      });
-    },
-  });
+async function removeAttackTargetContextMenu() {
+  try {
+    await OBR.contextMenu.remove(ATTACK_TARGET_CONTEXT_MENU_ID);
+  } catch (_error) {
+    // Ignore missing menu registrations from older extension builds.
+  }
 }
 
 function renderCollapsibleSection(title, content, open = false, sectionKey = "") {
@@ -2077,6 +2063,10 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           <select data-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
         </label>
         <label class="field-stack">
+          <span class="field-label">Current Target</span>
+          <div class="hint-box">${escapeHtml(targetName)}</div>
+        </label>
+        <label class="field-stack">
           <span class="field-label">Pick On Map</span>
           <button type="button" class="secondary" data-action="pick-attack-target" ${pickDisabledAttr}>
             ${isPickingTarget ? "Cancel Target Pick" : "Pick Target On Map"}
@@ -2129,7 +2119,6 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           ? "Attack goes from the selected attacker token to the saved target chosen on the map."
           : "No visible target tokens found. You can still keep a saved target or use No Target Attack below."
       }</div>
-      <div class="muted">Current target: ${escapeHtml(targetName)}</div>
       <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
       <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense only for melee attacks.</div>
       <div class="row row-gap">
@@ -2147,12 +2136,21 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
     (item) => item.id !== token.id && item.visible !== false,
   );
   const draft = getAttackDraft(token, data, targetCharacters);
+  const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
   const disabledAttr = tokenLocked ? "disabled" : "";
 
   return renderCollapsibleSection(
     "No Target Attack",
     `
       <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">Attack Skill</span>
+          <select data-manual-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon Damage</span>
+          <input type="number" value="${draft.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr}>
+        </label>
         <label class="field-stack">
           <span class="field-label">Manual Armor</span>
           <input type="number" min="0" max="99" value="${draft.manualArmor}" data-attack-field="manualArmor" ${disabledAttr}>
@@ -2860,13 +2858,19 @@ async function performAttack({ manualDefense = false } = {}) {
     return;
   }
 
-  const attackerData = getTrackerData(attacker);
   const attackerOdyssey = getOdysseyData(attacker);
   const targetData = target ? getTrackerData(target) : null;
   const targetOdyssey = target ? getOdysseyData(target) : null;
-  const skillName = getActionFieldValue('[data-attack-field="skill"]');
+  const skillName =
+    manualDefense
+      ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]')
+      : getActionFieldValue('[data-attack-field="skill"]');
   const targetPart = getActionFieldValue('[data-attack-field="targetPart"]');
-  const weaponDamage = Number(getActionFieldValue('[data-attack-field="weaponDamage"]')) || 0;
+  const weaponDamage = Number(
+    manualDefense
+      ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]')
+      : getActionFieldValue('[data-attack-field="weaponDamage"]')
+  ) || 0;
   const attackBonuses = Number(getActionFieldValue('[data-attack-field="attackBonuses"]')) || 0;
   const manualAttackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
   const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
@@ -2884,7 +2888,7 @@ async function performAttack({ manualDefense = false } = {}) {
     await persistAttackTargetToken(attacker.id, targetTokenId);
   }
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
-  saveAttackDraftValue(attacker.id, "weaponDamage", getActionFieldValue('[data-attack-field="weaponDamage"]'));
+  saveAttackDraftValue(attacker.id, "weaponDamage", String(weaponDamage));
   saveAttackDraftValue(attacker.id, "attackBonuses", getActionFieldValue('[data-attack-field="attackBonuses"]'));
   saveAttackDraftValue(attacker.id, "attackPenalties", getActionFieldValue('[data-attack-field="attackPenalties"]'));
   saveAttackDraftValue(attacker.id, "defenseBonuses", getActionFieldValue('[data-attack-field="defenseBonuses"]'));
@@ -3410,6 +3414,13 @@ function bindUiEvents() {
       }
     }
 
+    if (target.dataset.manualAttackField && activeTokenId) {
+      const draftField = getSharedAttackDraftField(target.dataset.manualAttackField);
+      if (draftField) {
+        saveAttackDraftValue(activeTokenId, draftField, target.value);
+      }
+    }
+
     if (target.dataset.action === "select-owner-player") {
       void setOwnerPlayer(target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save owner.", "error");
@@ -3480,6 +3491,13 @@ function bindUiEvents() {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
     }
 
+    if (target.dataset.manualAttackField) {
+      const draftField = getSharedAttackDraftField(target.dataset.manualAttackField);
+      if (draftField) {
+        saveAttackDraftValue(activeTokenId, draftField, target.value);
+      }
+    }
+
     if (target.dataset.action === "set-odyssey-skill") {
       const skill = target.dataset.skill;
       if (!skill) return;
@@ -3542,7 +3560,7 @@ function bindUiEvents() {
 OBR.onReady(async () => {
   try {
     bindUiEvents();
-    await registerAttackTargetContextMenu();
+    await removeAttackTargetContextMenu();
     await loadSharedDebugConsole();
     await syncState(true);
     startSelectionPolling();

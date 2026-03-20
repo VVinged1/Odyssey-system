@@ -4453,7 +4453,8 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
   return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:");
 }
 function captureSelectedPanelState() {
-  if (!activeTokenId || !ui.selectedTokenPanel.childElementCount) return null;
+  const renderedTokenId = String(ui.selectedTokenPanel.dataset.tokenId ?? "").trim();
+  if (!renderedTokenId || !ui.selectedTokenPanel.childElementCount) return null;
   let focusedKey = "";
   let selectionStart = null;
   let selectionEnd = null;
@@ -4476,7 +4477,7 @@ function captureSelectedPanelState() {
     ]);
   });
   return {
-    tokenId: activeTokenId,
+    tokenId: renderedTokenId,
     fields,
     focusedKey,
     selectionStart,
@@ -5527,6 +5528,7 @@ function renderSelectedToken() {
   const token = getCharacterById(activeTokenId);
   if (!token) {
     ui.selectionHint.textContent = "No character token selected";
+    delete ui.selectedTokenPanel.dataset.tokenId;
     ui.selectedTokenPanel.innerHTML = '<div class="empty">Add a character token to the map from Owlbear Rodeo Characters, then select it.</div>';
     return;
   }
@@ -5541,6 +5543,7 @@ function renderSelectedToken() {
   const showPartBlock = isEditable();
   const lastRollText = data.lastRoll ? escapeHtml(data.lastRoll.summary || "Last roll recorded") : "No rolls synced yet";
   ui.selectionHint.textContent = selected ? "Selected on map" : "Showing current focus";
+  ui.selectedTokenPanel.dataset.tokenId = token.id;
   ui.selectedTokenPanel.innerHTML = `
     <div class="selected-card">
       <div class="selected-head">

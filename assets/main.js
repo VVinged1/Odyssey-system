@@ -4890,9 +4890,8 @@ function formatRawDiceRolls(result) {
   return result.rolls.join(", ");
 }
 function formatDiceRollsWithModifier(result) {
-  const rawRolls = formatRawDiceRolls(result);
   const modifier = Number(result.modifier) || 0;
-  return `(${rawRolls}) ${modifier >= 0 ? "+" : "-"} ${Math.abs(modifier)}`;
+  return result.rolls.map((roll) => (Number(roll) || 0) + modifier).join(", ");
 }
 function buildDiceRollSummary(diceLabel, result) {
   return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], with modifier ${formatDiceRollsWithModifier(result)}`;

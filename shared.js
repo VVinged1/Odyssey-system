@@ -215,7 +215,7 @@ export function sanitizeOdysseyData(raw) {
       key === "Magic"
         ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0
         : raw.attributes?.[key] ?? 0;
-    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 15);
+    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
 
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);

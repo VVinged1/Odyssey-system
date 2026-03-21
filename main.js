@@ -219,6 +219,7 @@ function getTransientFieldKey(field) {
   if (field.dataset.rollSkillField) return `roll-skill:${field.dataset.rollSkillField}`;
   if (field.dataset.gmRollField) return `gm-roll:${field.dataset.gmRollField}`;
   if (field.dataset.skillField) return `new-skill:${field.dataset.skillField}`;
+  if (field.dataset.weaponField) return `new-weapon:${field.dataset.weaponField}`;
 
   if (field.dataset.action === "select-owner-player") return "owner";
   if (field.dataset.action === "set-odyssey-skill") return `skill:${field.dataset.skill ?? ""}`;
@@ -227,6 +228,12 @@ function getTransientFieldKey(field) {
   }
   if (field.dataset.action === "set-odyssey-attribute") {
     return `attribute:${field.dataset.attribute ?? ""}`;
+  }
+  if (field.dataset.action === "set-weapon-name") {
+    return `weapon-name:${field.dataset.weaponIndex ?? ""}`;
+  }
+  if (field.dataset.action === "set-weapon-damage") {
+    return `weapon-damage:${field.dataset.weaponIndex ?? ""}`;
   }
   if (field.dataset.action === "set-field") {
     return `part:${field.dataset.part ?? ""}:${field.dataset.field ?? ""}`;
@@ -244,7 +251,8 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
     fieldKey.startsWith("roll-char:") ||
     fieldKey.startsWith("roll-skill:") ||
     fieldKey.startsWith("gm-roll:") ||
-    fieldKey.startsWith("new-skill:")
+    fieldKey.startsWith("new-skill:") ||
+    fieldKey.startsWith("new-weapon:")
   );
 }
 
@@ -743,7 +751,8 @@ function formatTextTable(headers, rows) {
 }
 
 function getAttackDraft(token, data, targetCharacters) {
-  const defaultWeapon = getAvailableWeapons(token, "melee")[0] ?? { damage: 0 };
+  const availableWeapons = getAvailableWeapons(token, "melee");
+  const defaultWeapon = availableWeapons[0] ?? { name: "Default", damage: 0 };
   const stored = attackFormDrafts.get(token.id) ?? {};
   const persistedTargetTokenId = String(data.odyssey?.attackDraft?.targetTokenId ?? "").trim();
   const persistedTargetTokenName = String(data.odyssey?.attackDraft?.targetTokenName ?? "").trim();
@@ -764,6 +773,9 @@ function getAttackDraft(token, data, targetCharacters) {
   const resolvedTarget = targetTokenId
     ? targetCharacters.find((target) => target.id === targetTokenId) ?? null
     : null;
+  const storedWeaponName = String(stored.weaponName ?? "").trim();
+  const selectedWeapon =
+    availableWeapons.find((weapon) => weapon.name === storedWeaponName) ?? defaultWeapon;
 
   return {
     skill: combatSkillNames.includes(stored.skill)
@@ -772,7 +784,8 @@ function getAttackDraft(token, data, targetCharacters) {
     targetTokenId,
     targetTokenName: resolvedTarget ? getCharacterName(resolvedTarget) : draftTargetTokenName,
     targetPart: BODY_ORDER.includes(stored.targetPart) ? stored.targetPart : "Torso",
-    weaponDamage: stored.weaponDamage ?? String(defaultWeapon.damage),
+    weaponName: selectedWeapon?.name ?? defaultWeapon.name,
+    weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
     attackBonuses: stored.attackBonuses ?? "0",
     attackPenalties: stored.attackPenalties ?? "0",
     defenseBonuses: stored.defenseBonuses ?? "0",
@@ -796,8 +809,60 @@ function saveAttackDraftValue(tokenId, field, value) {
 
 function getSharedAttackDraftField(manualField) {
   if (manualField === "skill") return "skill";
+  if (manualField === "weaponName") return "weaponName";
   if (manualField === "weaponDamage") return "weaponDamage";
   return "";
+}
+
+function buildWeaponOptions(weapons, selectedWeaponName = "") {
+  return weapons
+    .map(
+      (weapon) => `<option value="${escapeHtml(weapon.name)}" ${
+        weapon.name === selectedWeaponName ? "selected" : ""
+      }>${escapeHtml(weapon.name)} (${weapon.damage >= 0 ? "+" : ""}${weapon.damage})</option>`,
+    )
+    .join("");
+}
+
+function getWeaponByName(token, weaponName) {
+  const normalizedWeaponName = String(weaponName ?? "").trim();
+  const weapons = getAvailableWeapons(token, "melee");
+  return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? weapons[0] ?? null;
+}
+
+function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage) {
+  if (!tokenId) return;
+
+  saveAttackDraftValue(tokenId, "weaponName", weaponName);
+  saveAttackDraftValue(tokenId, "weaponDamage", String(weaponDamage));
+
+  const attackWeaponSelect = ui.selectedTokenPanel.querySelector('[data-attack-field="weaponName"]');
+  if (attackWeaponSelect instanceof HTMLSelectElement) {
+    const hasOption = Array.from(attackWeaponSelect.options).some(
+      (option) => option.value === weaponName,
+    );
+    if (hasOption) {
+      attackWeaponSelect.value = weaponName;
+    }
+  }
+
+  const manualWeaponSelect = ui.selectedTokenPanel.querySelector('[data-manual-attack-field="weaponName"]');
+  if (manualWeaponSelect instanceof HTMLSelectElement) {
+    const hasOption = Array.from(manualWeaponSelect.options).some(
+      (option) => option.value === weaponName,
+    );
+    if (hasOption) {
+      manualWeaponSelect.value = weaponName;
+    }
+  }
+
+  ui.selectedTokenPanel
+    .querySelectorAll('[data-attack-field="weaponDamage"], [data-manual-attack-field="weaponDamage"]')
+    .forEach((field) => {
+      if (field instanceof HTMLInputElement) {
+        field.value = String(weaponDamage);
+      }
+    });
 }
 
 async function persistAttackTargetToken(tokenId, targetTokenId) {
@@ -2045,6 +2110,63 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
   );
 }
 
+function renderEnglishWeaponsBlock(data, disabledAttr) {
+  const meleeWeapons = data.odyssey.weapons?.melee ?? [];
+  const weaponRows = meleeWeapons
+    .map(
+      (weapon, index) => `
+        <div class="weapon-row">
+          <input
+            type="text"
+            value="${escapeHtml(weapon.name)}"
+            data-action="set-weapon-name"
+            data-weapon-index="${index}"
+            ${disabledAttr}
+          >
+          <input
+            type="number"
+            min="-99"
+            max="99"
+            value="${weapon.damage}"
+            data-action="set-weapon-damage"
+            data-weapon-index="${index}"
+            ${disabledAttr}
+          >
+          <button
+            type="button"
+            class="danger"
+            data-action="remove-weapon"
+            data-weapon-index="${index}"
+            ${disabledAttr}
+          >Remove</button>
+        </div>
+      `,
+    )
+    .join("");
+
+  return renderCollapsibleSection(
+    "Weapons",
+    `
+      <div class="field-label">Melee Weapons</div>
+      <div class="list">${weaponRows || '<div class="empty">No melee weapons yet.</div>'}</div>
+      <div class="form-grid">
+        <label class="field-stack">
+          <span class="field-label">Weapon Name</span>
+          <input type="text" data-weapon-field="new-name" placeholder="New weapon" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon Damage</span>
+          <input type="number" min="-99" max="99" value="0" data-weapon-field="new-damage" ${disabledAttr}>
+        </label>
+      </div>
+      <div class="row row-gap">
+        <button type="button" class="secondary" data-action="add-weapon" ${disabledAttr}>Add Weapon</button>
+      </div>
+    `,
+    false,
+  );
+}
+
 function renderEnglishAttackBlock(token, data, tokenLocked) {
   if (!canViewAttackBlock(token)) return "";
 
@@ -2055,6 +2177,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const pickDisabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
+  const weaponOptions = buildWeaponOptions(getAvailableWeapons(token, "melee"), draft.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
   const targetName = selectedTarget
     ? getCharacterName(selectedTarget)
@@ -2070,6 +2193,10 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Attack Skill</span>
           <select data-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon</span>
+          <select data-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
         </label>
         <label class="field-stack">
           <span class="field-label">Current Target</span>
@@ -2146,6 +2273,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   );
   const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
+  const weaponOptions = buildWeaponOptions(getAvailableWeapons(token, "melee"), draft.weaponName);
   const disabledAttr = tokenLocked ? "disabled" : "";
 
   return renderCollapsibleSection(
@@ -2155,6 +2283,10 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Attack Skill</span>
           <select data-manual-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon</span>
+          <select data-manual-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
         </label>
         <label class="field-stack">
           <span class="field-label">Weapon Damage</span>
@@ -2349,6 +2481,7 @@ function renderSelectedToken() {
           `
           : ""
       }
+      ${renderEnglishWeaponsBlock({ odyssey }, tokenLocked ? "disabled" : "")}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
@@ -2695,10 +2828,35 @@ async function setOdysseyAttribute(attribute, value) {
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
-    next.odyssey.attributes[attribute] = clamp(Number(value) || 0, 0, 15);
+    next.odyssey.attributes[attribute] = clamp(Number(value) || 0, 0, 20);
     return next;
   });
   await syncState();
+}
+
+async function addWeapon() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
+    return;
+  }
+
+  const name = getActionFieldValue('[data-weapon-field="new-name"]').trim() || "New Weapon";
+  const damage = clamp(Number(getActionFieldValue('[data-weapon-field="new-damage"]')) || 0, -99, 99);
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    next.odyssey.weapons.melee ??= [];
+    next.odyssey.weapons.melee.push({ name, damage });
+    return next;
+  });
+  await syncState();
+  syncAttackWeaponInputs(token.id, name, damage);
+  setStatus(`Weapon "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
 
 async function setWeaponDamage(index, value) {
@@ -2712,16 +2870,23 @@ async function setWeaponDamage(index, value) {
     return;
   }
 
+  const currentWeaponName = getOdysseyData(token).weapons?.melee?.[index]?.name ?? "Default";
+  const nextDamage = clamp(Number(value) || 0, -99, 99);
+
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey.weapons.melee ??= [];
     if (!next.odyssey.weapons.melee[index]) {
       next.odyssey.weapons.melee[index] = { name: "Default", damage: 0 };
     }
-    next.odyssey.weapons.melee[index].damage = clamp(Number(value) || 0, -99, 99);
+    next.odyssey.weapons.melee[index].damage = nextDamage;
     return next;
   });
   await syncState();
+  const currentDraft = attackFormDrafts.get(token.id) ?? {};
+  if (currentDraft.weaponName === currentWeaponName) {
+    syncAttackWeaponInputs(token.id, currentWeaponName, nextDamage);
+  }
 }
 
 async function setWeaponName(index, value) {
@@ -2735,16 +2900,57 @@ async function setWeaponName(index, value) {
     return;
   }
 
+  const previousWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0 };
+  const nextWeaponName = String(value || "").trim() || "Default";
+
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey.weapons.melee ??= [];
     if (!next.odyssey.weapons.melee[index]) {
       next.odyssey.weapons.melee[index] = { name: "Default", damage: 0 };
     }
-    next.odyssey.weapons.melee[index].name = String(value || "").trim() || "Default";
+    next.odyssey.weapons.melee[index].name = nextWeaponName;
     return next;
   });
   await syncState();
+  const currentDraft = attackFormDrafts.get(token.id) ?? {};
+  if (currentDraft.weaponName === previousWeapon.name) {
+    syncAttackWeaponInputs(token.id, nextWeaponName, previousWeapon.damage);
+  }
+}
+
+async function removeWeapon(index) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can edit this token.", "error");
+    return;
+  }
+
+  const currentWeapons = getOdysseyData(token).weapons?.melee ?? [];
+  const removedWeapon = currentWeapons[index];
+  if (!removedWeapon) {
+    setStatus("Weapon not found.", "error");
+    return;
+  }
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    next.odyssey.weapons.melee = (next.odyssey.weapons.melee ?? []).filter(
+      (_weapon, weaponIndex) => weaponIndex !== index,
+    );
+    return next;
+  });
+  await syncState();
+  const refreshedToken = getCharacterById(token.id);
+  const fallbackWeapon = refreshedToken
+    ? getAvailableWeapons(refreshedToken, "melee")[0] ?? { name: "Default", damage: 0 }
+    : { name: "Default", damage: 0 };
+  syncAttackWeaponInputs(token.id, fallbackWeapon.name, fallbackWeapon.damage);
+  setStatus(`Weapon "${removedWeapon.name}" removed.`, "success");
 }
 
 async function autosaveDraftField(draft) {
@@ -2762,7 +2968,7 @@ async function autosaveDraftField(draft) {
 
     if (draft.action === "set-odyssey-attribute") {
       if (!isEditable()) return next;
-      next.odyssey.attributes[draft.attribute] = clamp(Number(draft.value) || 0, 0, 15);
+      next.odyssey.attributes[draft.attribute] = clamp(Number(draft.value) || 0, 0, 20);
       return next;
     }
 
@@ -2880,6 +3086,10 @@ async function performAttack({ manualDefense = false } = {}) {
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]')
       : getActionFieldValue('[data-attack-field="skill"]');
+  const weaponName =
+    manualDefense
+      ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]')
+      : getActionFieldValue('[data-attack-field="weaponName"]');
   const targetPart = getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense
@@ -2897,6 +3107,7 @@ async function performAttack({ manualDefense = false } = {}) {
   const parryMode = getActionFieldValue('[data-attack-field="parryMode"]') || "1";
   const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
+  saveAttackDraftValue(attacker.id, "weaponName", weaponName);
   if (!manualDefense) {
     saveAttackDraftValue(attacker.id, "targetTokenId", targetTokenId);
     saveAttackDraftValue(attacker.id, "targetTokenName", target ? getCharacterName(target) : "");
@@ -3400,9 +3611,25 @@ function bindUiEvents() {
       return;
     }
 
+    if (action === "add-weapon") {
+      void addWeapon().catch((error) => {
+        setStatus(error?.message ?? "Unable to add weapon.", "error");
+      });
+      return;
+    }
+
     if (action === "remove-skill" && skill) {
       void removeOdysseySkill(skill).catch((error) => {
         setStatus(error?.message ?? "Unable to remove skill.", "error");
+      });
+      return;
+    }
+
+    if (action === "remove-weapon") {
+      const weaponIndex = Number(actionNode.dataset.weaponIndex ?? -1);
+      if (weaponIndex < 0) return;
+      void removeWeapon(weaponIndex).catch((error) => {
+        setStatus(error?.message ?? "Unable to remove weapon.", "error");
       });
     }
   });
@@ -3412,6 +3639,14 @@ function bindUiEvents() {
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
 
     if (target.dataset.attackField && activeTokenId) {
+      if (target.dataset.attackField === "weaponName") {
+        const token = getCharacterById(activeTokenId);
+        const selectedWeapon = token ? getWeaponByName(token, target.value) : null;
+        if (selectedWeapon) {
+          syncAttackWeaponInputs(activeTokenId, selectedWeapon.name, selectedWeapon.damage);
+        }
+        return;
+      }
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
       if (target.dataset.attackField === "targetTokenId") {
         const selectedTarget = target.value ? getCharacterById(target.value) : null;
@@ -3430,6 +3665,14 @@ function bindUiEvents() {
     }
 
     if (target.dataset.manualAttackField && activeTokenId) {
+      if (target.dataset.manualAttackField === "weaponName") {
+        const token = getCharacterById(activeTokenId);
+        const selectedWeapon = token ? getWeaponByName(token, target.value) : null;
+        if (selectedWeapon) {
+          syncAttackWeaponInputs(activeTokenId, selectedWeapon.name, selectedWeapon.damage);
+        }
+        return;
+      }
       const draftField = getSharedAttackDraftField(target.dataset.manualAttackField);
       if (draftField) {
         saveAttackDraftValue(activeTokenId, draftField, target.value);

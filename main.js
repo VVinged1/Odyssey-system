@@ -1,5 +1,6 @@
 import { Command, buildPath } from "@owlbear-rodeo/sdk";
 import {
+  ABILITIES_SKILL_CATEGORY,
   APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
   COMBAT_SKILL_CATEGORY,
@@ -15,7 +16,9 @@ import {
   getBodyTotals,
   getCharacterName,
   getOdysseyData,
+  getTargetableBodyParts,
   getTrackerData,
+  SHIELD_PART_NAME,
   isCharacterToken,
   isTrackedCharacter,
   sortCharacters,
@@ -42,6 +45,7 @@ const TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
 )}") 16 16, crosshair`;
 const CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 const ATTACK_ONLY_EXCLUDED_SKILLS = new Set([PARRY_SKILL_NAME]);
+const UNARMED_WEAPON_NAME = "Not Armed";
 const ATTRIBUTE_FIELDS = [
   ["Strength", "Strength"],
   ["Agility", "Agility"],
@@ -152,9 +156,10 @@ function escapeHtml(value) {
 }
 
 function getSkillCategory(odyssey, skillName) {
-  return odyssey?.skillCategories?.[skillName] === COMBAT_SKILL_CATEGORY
-    ? COMBAT_SKILL_CATEGORY
-    : APPLIED_SKILL_CATEGORY;
+  const category = odyssey?.skillCategories?.[skillName];
+  if (category === COMBAT_SKILL_CATEGORY) return COMBAT_SKILL_CATEGORY;
+  if (category === ABILITIES_SKILL_CATEGORY) return ABILITIES_SKILL_CATEGORY;
+  return APPLIED_SKILL_CATEGORY;
 }
 
 function getSkillStrengthBonusFlag(odyssey, skillName) {
@@ -173,8 +178,14 @@ function getCombatSkillEntries(odyssey) {
   );
 }
 
+function getAbilitiesSkillEntries(odyssey) {
+  return getSortedSkillEntries(odyssey).filter(
+    ([skillName]) => getSkillCategory(odyssey, skillName) === ABILITIES_SKILL_CATEGORY,
+  );
+}
+
 function getAttackSkillEntries(odyssey) {
-  return getCombatSkillEntries(odyssey).filter(
+  return [...getCombatSkillEntries(odyssey), ...getAbilitiesSkillEntries(odyssey)].filter(
     ([skillName]) => !ATTACK_ONLY_EXCLUDED_SKILLS.has(skillName),
   );
 }
@@ -197,10 +208,12 @@ function buildSkillOptions(skillEntries, selectedValue = "") {
 
 function buildGroupedSkillOptions(odyssey, selectedValue = "") {
   const combatOptions = buildSkillOptions(getCombatSkillEntries(odyssey), selectedValue);
+  const abilitiesOptions = buildSkillOptions(getAbilitiesSkillEntries(odyssey), selectedValue);
   const appliedOptions = buildSkillOptions(getAppliedSkillEntries(odyssey), selectedValue);
 
   return [
     combatOptions ? `<optgroup label="Combat">${combatOptions}</optgroup>` : "",
+    abilitiesOptions ? `<optgroup label="Abilities">${abilitiesOptions}</optgroup>` : "",
     appliedOptions ? `<optgroup label="Applied">${appliedOptions}</optgroup>` : "",
   ]
     .filter(Boolean)
@@ -669,7 +682,12 @@ function getCurrentPlayerColor() {
 
 function getAutomaticTargetPenalty(targetPart) {
   if (targetPart === "Head") return 30;
-  if (targetPart === "L.Arm" || targetPart === "R.Arm" || targetPart === "L.Leg" || targetPart === "R.Leg") {
+  if (
+    targetPart === "L.Arm" ||
+    targetPart === "R.Arm" ||
+    targetPart === "L.Leg" ||
+    targetPart === "R.Leg"
+  ) {
     return 15;
   }
   return 0;
@@ -751,8 +769,8 @@ function formatTextTable(headers, rows) {
 }
 
 function getAttackDraft(token, data, targetCharacters) {
-  const availableWeapons = getAvailableWeapons(token, "melee");
-  const defaultWeapon = availableWeapons[0] ?? { name: "Default", damage: 0 };
+  const availableWeapons = getAttackSelectableWeapons(token);
+  const defaultWeapon = getDefaultAttackWeapon(token);
   const stored = attackFormDrafts.get(token.id) ?? {};
   const persistedTargetTokenId = String(data.odyssey?.attackDraft?.targetTokenId ?? "").trim();
   const persistedTargetTokenName = String(data.odyssey?.attackDraft?.targetTokenName ?? "").trim();
@@ -824,10 +842,22 @@ function buildWeaponOptions(weapons, selectedWeaponName = "") {
     .join("");
 }
 
+function getAttackSelectableWeapons(token) {
+  const odyssey = getOdysseyData(token);
+  const meleeWeapons = odyssey.weapons?.melee ?? [];
+  return [{ name: UNARMED_WEAPON_NAME, damage: 0 }, ...meleeWeapons];
+}
+
+function getDefaultAttackWeapon(token) {
+  const odyssey = getOdysseyData(token);
+  const meleeWeapons = odyssey.weapons?.melee ?? [];
+  return meleeWeapons[0] ?? { name: UNARMED_WEAPON_NAME, damage: 0 };
+}
+
 function getWeaponByName(token, weaponName) {
   const normalizedWeaponName = String(weaponName ?? "").trim();
-  const weapons = getAvailableWeapons(token, "melee");
-  return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? weapons[0] ?? null;
+  const weapons = getAttackSelectableWeapons(token);
+  return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? getDefaultAttackWeapon(token);
 }
 
 function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage) {
@@ -1913,6 +1943,7 @@ function renderOdysseySkillsBlock(data, disabledAttr) {
           <span class="field-label">Категория</span>
           <select data-skill-field="new-category" ${disabledAttr}>
             <option value="${COMBAT_SKILL_CATEGORY}">Боевой</option>
+            <option value="${ABILITIES_SKILL_CATEGORY}">Abilities</option>
             <option value="${APPLIED_SKILL_CATEGORY}" selected>Прикладной</option>
           </select>
         </label>
@@ -2065,6 +2096,11 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
     getCombatSkillEntries(data.odyssey),
     disabledAttr,
   );
+  const abilitiesSkillRows = renderOdysseySkillRows(
+    data.odyssey,
+    getAbilitiesSkillEntries(data.odyssey),
+    disabledAttr,
+  );
   const appliedSkillRows = renderOdysseySkillRows(
     data.odyssey,
     getAppliedSkillEntries(data.odyssey),
@@ -2076,6 +2112,8 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
     `
       <div class="field-label">Combat</div>
       <div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div>
+      <div class="field-label">Abilities</div>
+      <div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div>
       <div class="field-label">Applied</div>
       <div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div>
       <div class="form-grid">
@@ -2091,6 +2129,7 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
           <span class="field-label">Category</span>
           <select data-skill-field="new-category" ${disabledAttr}>
             <option value="${COMBAT_SKILL_CATEGORY}">Combat</option>
+            <option value="${ABILITIES_SKILL_CATEGORY}">Abilities</option>
             <option value="${APPLIED_SKILL_CATEGORY}" selected>Applied</option>
           </select>
         </label>
@@ -2177,8 +2216,9 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const pickDisabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
-  const weaponOptions = buildWeaponOptions(getAvailableWeapons(token, "melee"), draft.weaponName);
+  const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
+  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null);
   const targetName = selectedTarget
     ? getCharacterName(selectedTarget)
     : draft.targetTokenName || "No target selected";
@@ -2211,7 +2251,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
           <select data-attack-field="targetPart" ${disabledAttr}>
-            ${BODY_ORDER.map(
+            ${targetableBodyParts.map(
               (part) =>
                 `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
             ).join("")}
@@ -2273,7 +2313,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   );
   const draft = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
-  const weaponOptions = buildWeaponOptions(getAvailableWeapons(token, "melee"), draft.weaponName);
+  const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const disabledAttr = tokenLocked ? "disabled" : "";
 
   return renderCollapsibleSection(
@@ -2947,8 +2987,8 @@ async function removeWeapon(index) {
   await syncState();
   const refreshedToken = getCharacterById(token.id);
   const fallbackWeapon = refreshedToken
-    ? getAvailableWeapons(refreshedToken, "melee")[0] ?? { name: "Default", damage: 0 }
-    : { name: "Default", damage: 0 };
+    ? getDefaultAttackWeapon(refreshedToken)
+    : { name: UNARMED_WEAPON_NAME, damage: 0 };
   syncAttackWeaponInputs(token.id, fallbackWeapon.name, fallbackWeapon.damage);
   setStatus(`Weapon "${removedWeapon.name}" removed.`, "success");
 }
@@ -3313,7 +3353,9 @@ async function addOdysseySkill() {
       ? COMBAT_SKILL_CATEGORY
       : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY
         ? COMBAT_SKILL_CATEGORY
-        : APPLIED_SKILL_CATEGORY;
+        : getActionFieldValue('[data-skill-field="new-category"]') === ABILITIES_SKILL_CATEGORY
+          ? ABILITIES_SKILL_CATEGORY
+          : APPLIED_SKILL_CATEGORY;
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);

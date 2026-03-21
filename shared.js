@@ -5,15 +5,18 @@ export { OBR };
 export const EXTENSION_ID = "com.codex.body-hp";
 export const META_KEY = `${EXTENSION_ID}/data`;
 export const OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
-export const BODY_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+export const SHIELD_PART_NAME = "Shield";
+const BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+export const BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME];
 export const ROLL_HISTORY_LIMIT = 12;
 export const COMBAT_SKILL_CATEGORY = "combat";
 export const APPLIED_SKILL_CATEGORY = "applied";
+export const ABILITIES_SKILL_CATEGORY = "abilities";
 export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 4;
+const VISUAL_VERSION = 5;
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -52,6 +55,7 @@ export const BODY_DEFAULTS = {
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
   "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
 };
 
 export const DEFAULT_TRACKER_DATA = {
@@ -204,7 +208,9 @@ export function sanitizeOdysseyData(raw) {
     next.skillCategories[normalizedKey] =
       categoryValue === COMBAT_SKILL_CATEGORY
         ? COMBAT_SKILL_CATEGORY
-        : APPLIED_SKILL_CATEGORY;
+        : categoryValue === ABILITIES_SKILL_CATEGORY
+          ? ABILITIES_SKILL_CATEGORY
+          : APPLIED_SKILL_CATEGORY;
     next.skillStrengthBonuses[normalizedKey] = Boolean(
       rawSkillStrengthBonuses[normalizedKey] ?? rawSkillStrengthBonuses[key] ?? false,
     );
@@ -293,10 +299,18 @@ export function sortCharacters(items) {
 
 export function formatOverlayText(data) {
   const body = data.body;
-  return [
+  const lines = [
     `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
     `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`,
-  ].join("\n");
+  ];
+
+  if (hasConfiguredShield(data)) {
+    lines.unshift(
+      `${SHIELD_PART_NAME} ${body[SHIELD_PART_NAME].current}/${body[SHIELD_PART_NAME].max}(${body[SHIELD_PART_NAME].armor})`,
+    );
+  }
+
+  return lines.join("\n");
 }
 
 export function formatLastRoll(lastRoll) {
@@ -327,13 +341,33 @@ export function getAvailableWeapons(token, mode = "melee") {
 }
 
 export function getBodyTotals(data) {
-  return BODY_ORDER.reduce(
+  return BODY_TOTAL_ORDER.reduce(
     (accumulator, partName) => {
       accumulator.current += data.body[partName].current;
       accumulator.max += data.body[partName].max;
       return accumulator;
     },
     { current: 0, max: 0 },
+  );
+}
+
+export function hasConfiguredShield(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody;
+  const shield = body?.[SHIELD_PART_NAME];
+  if (!shield || typeof shield !== "object") return false;
+
+  return (
+    (Number(shield.max) || 0) > 0 ||
+    (Number(shield.current) || 0) > 0 ||
+    (Number(shield.armor) || 0) > 0 ||
+    (Number(shield.minor) || 0) > 0 ||
+    (Number(shield.serious) || 0) > 0
+  );
+}
+
+export function getTargetableBodyParts(dataOrBody) {
+  return BODY_ORDER.filter(
+    (partName) => partName !== SHIELD_PART_NAME || hasConfiguredShield(dataOrBody),
   );
 }
 
@@ -392,6 +426,10 @@ async function getTokenMetrics(token) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const shieldThickness = Math.max(4, visibleDiameter * 0.028);
+  const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
+  const shieldInnerRadius = Math.max(4, shieldOuterRadius - shieldThickness);
+  const shieldOffsetY = -(outerRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
 
   return {
     center,
@@ -400,6 +438,9 @@ async function getTokenMetrics(token) {
     outerInnerRadius,
     torsoOuterRadius,
     torsoInnerRadius,
+    shieldOuterRadius,
+    shieldInnerRadius,
+    shieldOffsetY,
   };
 }
 
@@ -421,9 +462,15 @@ function arcPoints(radius, startAngle, endAngle, segments = 18) {
   return points;
 }
 
-function buildAnnulusCommands(radiusOuter, radiusInner) {
-  const outer = arcPoints(radiusOuter, -180, 180, 36);
-  const inner = arcPoints(radiusInner, -180, 180, 36);
+function buildAnnulusCommands(radiusOuter, radiusInner, offsetX = 0, offsetY = 0) {
+  const outer = arcPoints(radiusOuter, -180, 180, 36).map((point) => ({
+    x: point.x + offsetX,
+    y: point.y + offsetY,
+  }));
+  const inner = arcPoints(radiusInner, -180, 180, 36).map((point) => ({
+    x: point.x + offsetX,
+    y: point.y + offsetY,
+  }));
   const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
 
   for (const point of outer.slice(1)) {
@@ -517,7 +564,9 @@ function getHpColor(ratio) {
 }
 
 function getPartColor(part) {
-  if (part.max <= 0) return getHpColor(0);
+  if (part.max <= 0) {
+    return (Number(part?.armor) || 0) > 0 ? getHpColor(1) : getHpColor(0);
+  }
   return getHpColor(part.current / part.max);
 }
 
@@ -687,6 +736,25 @@ export function buildOverlayItems(token, data, metrics) {
     ),
   );
 
+  if (hasConfiguredShield(data)) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        "shield-ring",
+        buildAnnulusCommands(
+          metrics.shieldOuterRadius,
+          metrics.shieldInnerRadius,
+          0,
+          metrics.shieldOffsetY,
+        ),
+        getPartColor(data.body[SHIELD_PART_NAME]),
+        3,
+        "evenodd",
+      ),
+    );
+  }
+
   return items;
 }
 
@@ -767,7 +835,11 @@ export async function syncTrackedOverlays() {
     .filter(isOverlayItem)
     .filter((item) => {
       const token = byId.get(item.metadata[OVERLAY_KEY]);
-      return !token || !isTrackedCharacter(token);
+      return (
+        !token ||
+        !isTrackedCharacter(token) ||
+        Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION
+      );
     })
     .map((item) => item.id);
 

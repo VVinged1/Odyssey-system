@@ -3681,15 +3681,18 @@ var lib_default = OBR;
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
-var BODY_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+var SHIELD_PART_NAME = "Shield";
+var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
+var ABILITIES_SKILL_CATEGORY = "abilities";
 var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 4;
+var VISUAL_VERSION = 5;
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -3726,7 +3729,8 @@ var BODY_DEFAULTS = {
   "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
   "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 }
+  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
 var DEFAULT_TRACKER_DATA = {
   enabled: true,
@@ -3846,7 +3850,7 @@ function sanitizeOdysseyData(raw) {
     const categoryValue = String(
       rawSkillCategories[normalizedKey] ?? rawSkillCategories[key] ?? ""
     ).toLowerCase();
-    next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
+    next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : categoryValue === ABILITIES_SKILL_CATEGORY ? ABILITIES_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
     next.skillStrengthBonuses[normalizedKey] = Boolean(
       rawSkillStrengthBonuses[normalizedKey] ?? rawSkillStrengthBonuses[key] ?? false
     );
@@ -3908,6 +3912,12 @@ function getCharacterName(item) {
   if (byName) return byName;
   return `Character ${item.id.slice(0, 6)}`;
 }
+function hasConfiguredShield(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody;
+  const shield = body?.[SHIELD_PART_NAME];
+  if (!shield || typeof shield !== "object") return false;
+  return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0 || (Number(shield.minor) || 0) > 0 || (Number(shield.serious) || 0) > 0;
+}
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
@@ -3959,13 +3969,20 @@ async function getTokenMetrics(token) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const shieldThickness = Math.max(4, visibleDiameter * 0.028);
+  const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
+  const shieldInnerRadius = Math.max(4, shieldOuterRadius - shieldThickness);
+  const shieldOffsetY = -(outerRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
   return {
     center,
     visibleDiameter,
     outerRadius,
     outerInnerRadius,
     torsoOuterRadius,
-    torsoInnerRadius
+    torsoInnerRadius,
+    shieldOuterRadius,
+    shieldInnerRadius,
+    shieldOffsetY
   };
 }
 function polar(radius, angle) {
@@ -3984,9 +4001,15 @@ function arcPoints(radius, startAngle, endAngle, segments = 18) {
   }
   return points;
 }
-function buildAnnulusCommands(radiusOuter, radiusInner) {
-  const outer = arcPoints(radiusOuter, -180, 180, 36);
-  const inner = arcPoints(radiusInner, -180, 180, 36);
+function buildAnnulusCommands(radiusOuter, radiusInner, offsetX = 0, offsetY = 0) {
+  const outer = arcPoints(radiusOuter, -180, 180, 36).map((point) => ({
+    x: point.x + offsetX,
+    y: point.y + offsetY
+  }));
+  const inner = arcPoints(radiusInner, -180, 180, 36).map((point) => ({
+    x: point.x + offsetX,
+    y: point.y + offsetY
+  }));
   const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
   for (const point of outer.slice(1)) {
     commands.push([Command.LINE, point.x, point.y]);
@@ -4054,7 +4077,9 @@ function getHpColor(ratio) {
   return HP_COLOR_STOPS.at(-1)?.color ?? RING_COLORS.base;
 }
 function getPartColor(part) {
-  if (part.max <= 0) return getHpColor(0);
+  if (part.max <= 0) {
+    return (Number(part?.armor) || 0) > 0 ? getHpColor(1) : getHpColor(0);
+  }
   return getHpColor(part.current / part.max);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
@@ -4181,6 +4206,24 @@ function buildOverlayItems(token, data, metrics) {
       "evenodd"
     )
   );
+  if (hasConfiguredShield(data)) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        "shield-ring",
+        buildAnnulusCommands(
+          metrics.shieldOuterRadius,
+          metrics.shieldInnerRadius,
+          0,
+          metrics.shieldOffsetY
+        ),
+        getPartColor(data.body[SHIELD_PART_NAME]),
+        3,
+        "evenodd"
+      )
+    );
+  }
   return items;
 }
 async function updateTrackerData(tokenId, updater) {
@@ -4225,7 +4268,7 @@ async function syncTrackedOverlays() {
   const byId = new Map(items.map((item) => [item.id, item]));
   const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
     const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token);
+    return !token || !isTrackedCharacter(token) || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
   }).map((item) => item.id);
   if (staleOverlayIds.length) {
     await lib_default.scene.items.deleteItems(staleOverlayIds);

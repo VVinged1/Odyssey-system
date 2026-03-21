@@ -3681,15 +3681,18 @@ var lib_default = OBR;
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
-var BODY_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+var SHIELD_PART_NAME = "Shield";
+var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
+var ABILITIES_SKILL_CATEGORY = "abilities";
 var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 4;
+var VISUAL_VERSION = 5;
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -3726,7 +3729,8 @@ var BODY_DEFAULTS = {
   "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
   "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 }
+  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
 var DEFAULT_TRACKER_DATA = {
   enabled: true,
@@ -3846,7 +3850,7 @@ function sanitizeOdysseyData(raw) {
     const categoryValue = String(
       rawSkillCategories[normalizedKey] ?? rawSkillCategories[key] ?? ""
     ).toLowerCase();
-    next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
+    next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : categoryValue === ABILITIES_SKILL_CATEGORY ? ABILITIES_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
     next.skillStrengthBonuses[normalizedKey] = Boolean(
       rawSkillStrengthBonuses[normalizedKey] ?? rawSkillStrengthBonuses[key] ?? false
     );
@@ -3915,10 +3919,16 @@ function sortCharacters(items) {
 }
 function formatOverlayText(data) {
   const body = data.body;
-  return [
+  const lines = [
     `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
     `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
-  ].join("\n");
+  ];
+  if (hasConfiguredShield(data)) {
+    lines.unshift(
+      `${SHIELD_PART_NAME} ${body[SHIELD_PART_NAME].current}/${body[SHIELD_PART_NAME].max}(${body[SHIELD_PART_NAME].armor})`
+    );
+  }
+  return lines.join("\n");
 }
 function getOdysseyData(item) {
   return sanitizeOdysseyData(getTrackerData(item).odyssey);
@@ -3929,19 +3939,25 @@ function canPlayerControlToken(playerRole2, playerId2, token) {
   const odyssey = getOdysseyData(token);
   return Boolean(playerId2) && odyssey.owner.playerId === playerId2;
 }
-function getAvailableWeapons(token, mode = "melee") {
-  const odyssey = getOdysseyData(token);
-  const list = mode === "ranged" ? odyssey.weapons.ranged : odyssey.weapons.melee;
-  return list.length ? list : [{ name: "Default", damage: 0 }];
-}
 function getBodyTotals(data) {
-  return BODY_ORDER.reduce(
+  return BODY_TOTAL_ORDER.reduce(
     (accumulator, partName) => {
       accumulator.current += data.body[partName].current;
       accumulator.max += data.body[partName].max;
       return accumulator;
     },
     { current: 0, max: 0 }
+  );
+}
+function hasConfiguredShield(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody;
+  const shield = body?.[SHIELD_PART_NAME];
+  if (!shield || typeof shield !== "object") return false;
+  return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0 || (Number(shield.minor) || 0) > 0 || (Number(shield.serious) || 0) > 0;
+}
+function getTargetableBodyParts(dataOrBody) {
+  return BODY_ORDER.filter(
+    (partName) => partName !== SHIELD_PART_NAME || hasConfiguredShield(dataOrBody)
   );
 }
 function getEffectiveSize(token) {
@@ -3995,13 +4011,20 @@ async function getTokenMetrics(token) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const shieldThickness = Math.max(4, visibleDiameter * 0.028);
+  const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
+  const shieldInnerRadius = Math.max(4, shieldOuterRadius - shieldThickness);
+  const shieldOffsetY = -(outerRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
   return {
     center,
     visibleDiameter,
     outerRadius,
     outerInnerRadius,
     torsoOuterRadius,
-    torsoInnerRadius
+    torsoInnerRadius,
+    shieldOuterRadius,
+    shieldInnerRadius,
+    shieldOffsetY
   };
 }
 function polar(radius, angle) {
@@ -4020,9 +4043,15 @@ function arcPoints(radius, startAngle, endAngle, segments = 18) {
   }
   return points;
 }
-function buildAnnulusCommands(radiusOuter, radiusInner) {
-  const outer = arcPoints(radiusOuter, -180, 180, 36);
-  const inner = arcPoints(radiusInner, -180, 180, 36);
+function buildAnnulusCommands(radiusOuter, radiusInner, offsetX = 0, offsetY = 0) {
+  const outer = arcPoints(radiusOuter, -180, 180, 36).map((point) => ({
+    x: point.x + offsetX,
+    y: point.y + offsetY
+  }));
+  const inner = arcPoints(radiusInner, -180, 180, 36).map((point) => ({
+    x: point.x + offsetX,
+    y: point.y + offsetY
+  }));
   const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
   for (const point of outer.slice(1)) {
     commands.push([Command.LINE, point.x, point.y]);
@@ -4090,7 +4119,9 @@ function getHpColor(ratio) {
   return HP_COLOR_STOPS.at(-1)?.color ?? RING_COLORS.base;
 }
 function getPartColor(part) {
-  if (part.max <= 0) return getHpColor(0);
+  if (part.max <= 0) {
+    return (Number(part?.armor) || 0) > 0 ? getHpColor(1) : getHpColor(0);
+  }
   return getHpColor(part.current / part.max);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
@@ -4141,6 +4172,24 @@ function buildOverlayItems(token, data, metrics) {
       "evenodd"
     )
   );
+  if (hasConfiguredShield(data)) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        "shield-ring",
+        buildAnnulusCommands(
+          metrics.shieldOuterRadius,
+          metrics.shieldInnerRadius,
+          0,
+          metrics.shieldOffsetY
+        ),
+        getPartColor(data.body[SHIELD_PART_NAME]),
+        3,
+        "evenodd"
+      )
+    );
+  }
   return items;
 }
 async function updateTrackerData(tokenId, updater) {
@@ -4176,7 +4225,7 @@ async function syncTrackedOverlays() {
   const byId = new Map(items.map((item) => [item.id, item]));
   const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
     const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token);
+    return !token || !isTrackedCharacter(token) || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
   }).map((item) => item.id);
   if (staleOverlayIds.length) {
     await lib_default.scene.items.deleteItems(staleOverlayIds);
@@ -4353,6 +4402,7 @@ var TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
 )}") 16 16, crosshair`;
 var CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 var ATTACK_ONLY_EXCLUDED_SKILLS = /* @__PURE__ */ new Set([PARRY_SKILL_NAME]);
+var UNARMED_WEAPON_NAME = "Not Armed";
 var ATTRIBUTE_UI_FIELDS = [
   ["Strength", "Strength"],
   ["Agility", "Agility"],
@@ -4432,7 +4482,10 @@ function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 function getSkillCategory(odyssey, skillName) {
-  return odyssey?.skillCategories?.[skillName] === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
+  const category = odyssey?.skillCategories?.[skillName];
+  if (category === COMBAT_SKILL_CATEGORY) return COMBAT_SKILL_CATEGORY;
+  if (category === ABILITIES_SKILL_CATEGORY) return ABILITIES_SKILL_CATEGORY;
+  return APPLIED_SKILL_CATEGORY;
 }
 function getSkillStrengthBonusFlag(odyssey, skillName) {
   return Boolean(odyssey?.skillStrengthBonuses?.[skillName]);
@@ -4447,8 +4500,13 @@ function getCombatSkillEntries(odyssey) {
     ([skillName]) => getSkillCategory(odyssey, skillName) === COMBAT_SKILL_CATEGORY
   );
 }
+function getAbilitiesSkillEntries(odyssey) {
+  return getSortedSkillEntries(odyssey).filter(
+    ([skillName]) => getSkillCategory(odyssey, skillName) === ABILITIES_SKILL_CATEGORY
+  );
+}
 function getAttackSkillEntries(odyssey) {
-  return getCombatSkillEntries(odyssey).filter(
+  return [...getCombatSkillEntries(odyssey), ...getAbilitiesSkillEntries(odyssey)].filter(
     ([skillName]) => !ATTACK_ONLY_EXCLUDED_SKILLS.has(skillName)
   );
 }
@@ -4464,9 +4522,11 @@ function buildSkillOptions(skillEntries, selectedValue = "") {
 }
 function buildGroupedSkillOptions(odyssey, selectedValue = "") {
   const combatOptions = buildSkillOptions(getCombatSkillEntries(odyssey), selectedValue);
+  const abilitiesOptions = buildSkillOptions(getAbilitiesSkillEntries(odyssey), selectedValue);
   const appliedOptions = buildSkillOptions(getAppliedSkillEntries(odyssey), selectedValue);
   return [
     combatOptions ? `<optgroup label="Combat">${combatOptions}</optgroup>` : "",
+    abilitiesOptions ? `<optgroup label="Abilities">${abilitiesOptions}</optgroup>` : "",
     appliedOptions ? `<optgroup label="Applied">${appliedOptions}</optgroup>` : ""
   ].filter(Boolean).join("");
 }
@@ -4893,8 +4953,8 @@ function formatTextTable(headers, rows) {
   ].join("\n");
 }
 function getAttackDraft(token, data, targetCharacters) {
-  const availableWeapons = getAvailableWeapons(token, "melee");
-  const defaultWeapon = availableWeapons[0] ?? { name: "Default", damage: 0 };
+  const availableWeapons = getAttackSelectableWeapons(token);
+  const defaultWeapon = getDefaultAttackWeapon(token);
   const stored = attackFormDrafts.get(token.id) ?? {};
   const persistedTargetTokenId = String(data.odyssey?.attackDraft?.targetTokenId ?? "").trim();
   const persistedTargetTokenName = String(data.odyssey?.attackDraft?.targetTokenName ?? "").trim();
@@ -4942,10 +5002,20 @@ function buildWeaponOptions(weapons, selectedWeaponName = "") {
     (weapon) => `<option value="${escapeHtml(weapon.name)}" ${weapon.name === selectedWeaponName ? "selected" : ""}>${escapeHtml(weapon.name)} (${weapon.damage >= 0 ? "+" : ""}${weapon.damage})</option>`
   ).join("");
 }
+function getAttackSelectableWeapons(token) {
+  const odyssey = getOdysseyData(token);
+  const meleeWeapons = odyssey.weapons?.melee ?? [];
+  return [{ name: UNARMED_WEAPON_NAME, damage: 0 }, ...meleeWeapons];
+}
+function getDefaultAttackWeapon(token) {
+  const odyssey = getOdysseyData(token);
+  const meleeWeapons = odyssey.weapons?.melee ?? [];
+  return meleeWeapons[0] ?? { name: UNARMED_WEAPON_NAME, damage: 0 };
+}
 function getWeaponByName(token, weaponName) {
   const normalizedWeaponName = String(weaponName ?? "").trim();
-  const weapons = getAvailableWeapons(token, "melee");
-  return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? weapons[0] ?? null;
+  const weapons = getAttackSelectableWeapons(token);
+  return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? getDefaultAttackWeapon(token);
 }
 function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage) {
   if (!tokenId) return;
@@ -5363,6 +5433,11 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
     getCombatSkillEntries(data.odyssey),
     disabledAttr
   );
+  const abilitiesSkillRows = renderOdysseySkillRows(
+    data.odyssey,
+    getAbilitiesSkillEntries(data.odyssey),
+    disabledAttr
+  );
   const appliedSkillRows = renderOdysseySkillRows(
     data.odyssey,
     getAppliedSkillEntries(data.odyssey),
@@ -5373,6 +5448,8 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
     `
       <div class="field-label">Combat</div>
       <div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div>
+      <div class="field-label">Abilities</div>
+      <div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div>
       <div class="field-label">Applied</div>
       <div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div>
       <div class="form-grid">
@@ -5388,6 +5465,7 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
           <span class="field-label">Category</span>
           <select data-skill-field="new-category" ${disabledAttr}>
             <option value="${COMBAT_SKILL_CATEGORY}">Combat</option>
+            <option value="${ABILITIES_SKILL_CATEGORY}">Abilities</option>
             <option value="${APPLIED_SKILL_CATEGORY}" selected>Applied</option>
           </select>
         </label>
@@ -5468,8 +5546,9 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const pickDisabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft2 = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill);
-  const weaponOptions = buildWeaponOptions(getAvailableWeapons(token, "melee"), draft2.weaponName);
+  const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft2.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft2.targetTokenId) ?? null;
+  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null);
   const targetName = selectedTarget ? getCharacterName(selectedTarget) : draft2.targetTokenName || "No target selected";
   const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
   const attackDisabledAttr = tokenLocked || !draft2.targetTokenId ? "disabled" : "";
@@ -5499,7 +5578,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
           <select data-attack-field="targetPart" ${disabledAttr}>
-            ${BODY_ORDER.map(
+            ${targetableBodyParts.map(
       (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
     ).join("")}
           </select>
@@ -5551,7 +5630,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   );
   const draft2 = getAttackDraft(token, data, targetCharacters);
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill);
-  const weaponOptions = buildWeaponOptions(getAvailableWeapons(token, "melee"), draft2.weaponName);
+  const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft2.weaponName);
   const disabledAttr = tokenLocked ? "disabled" : "";
   return renderCollapsibleSection(
     "No Target Attack",
@@ -6138,7 +6217,7 @@ async function removeWeapon(index) {
   });
   await syncState();
   const refreshedToken = getCharacterById(token.id);
-  const fallbackWeapon = refreshedToken ? getAvailableWeapons(refreshedToken, "melee")[0] ?? { name: "Default", damage: 0 } : { name: "Default", damage: 0 };
+  const fallbackWeapon = refreshedToken ? getDefaultAttackWeapon(refreshedToken) : { name: UNARMED_WEAPON_NAME, damage: 0 };
   syncAttackWeaponInputs(token.id, fallbackWeapon.name, fallbackWeapon.damage);
   setStatus(`Weapon "${removedWeapon.name}" removed.`, "success");
 }
@@ -6450,7 +6529,7 @@ async function addOdysseySkill() {
     setStatus("Enter a skill name first.", "error");
     return;
   }
-  const category = name === MELEE_SKILL_NAME || name === PARRY_SKILL_NAME ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
+  const category = name === MELEE_SKILL_NAME || name === PARRY_SKILL_NAME ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === ABILITIES_SKILL_CATEGORY ? ABILITIES_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
   await updateTrackerData(token.id, (current2) => {
     var _a, _b;
     const next = structuredClone(current2);

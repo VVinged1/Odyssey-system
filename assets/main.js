@@ -5732,7 +5732,7 @@ function renderSelectedToken() {
             ${renderCharacteristicsBlock({ odyssey }, gmOnlyDisabled)}
             ${renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled)}
           ` : ""}
-      ${renderEnglishWeaponsBlock({ odyssey }, tokenLocked ? "disabled" : "")}
+      ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
@@ -6040,8 +6040,8 @@ async function addWeapon() {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
   const name = getActionFieldValue('[data-weapon-field="new-name"]').trim() || "New Weapon";
@@ -6063,8 +6063,8 @@ async function setWeaponDamage(index, value) {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
   const currentWeaponName = getOdysseyData(token).weapons?.melee?.[index]?.name ?? "Default";
@@ -6091,8 +6091,8 @@ async function setWeaponName(index, value) {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
   const previousWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0 };
@@ -6119,8 +6119,8 @@ async function removeWeapon(index) {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
   const currentWeapons = getOdysseyData(token).weapons?.melee ?? [];

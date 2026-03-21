@@ -2481,7 +2481,7 @@ function renderSelectedToken() {
           `
           : ""
       }
-      ${renderEnglishWeaponsBlock({ odyssey }, tokenLocked ? "disabled" : "")}
+      ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
@@ -2840,8 +2840,8 @@ async function addWeapon() {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
 
@@ -2865,8 +2865,8 @@ async function setWeaponDamage(index, value) {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
 
@@ -2895,8 +2895,8 @@ async function setWeaponName(index, value) {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
 
@@ -2925,8 +2925,8 @@ async function removeWeapon(index) {
     setStatus("Select a character first.", "error");
     return;
   }
-  if (!canEditTokenData(token)) {
-    setStatus("Only the GM or assigned player can edit this token.", "error");
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
     return;
   }
 

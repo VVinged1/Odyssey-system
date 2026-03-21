@@ -4886,16 +4886,25 @@ function projectPartDamage(part, damage) {
     critApplied: totalCrit
   };
 }
+function formatRawDiceRolls(result) {
+  return result.rolls.join(", ");
+}
+function formatDiceRollsWithModifier(result) {
+  const rawRolls = formatRawDiceRolls(result);
+  const modifier = Number(result.modifier) || 0;
+  return `(${rawRolls}) ${modifier >= 0 ? "+" : "-"} ${Math.abs(modifier)}`;
+}
+function buildDiceRollSummary(diceLabel, result) {
+  return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], with modifier ${formatDiceRollsWithModifier(result)}`;
+}
 function formatDiceDebug({ tokenName, result }) {
   return formatTextTable(
     ["Parameter", "Value"],
     [
       ["Actor", tokenName],
       ["Dice", `${result.count}d${result.sides}`],
-      ["Rolls", result.rolls.join(", ")],
-      ["Subtotal", result.subtotal],
-      ["Modifier", result.modifier],
-      ["Total", result.total]
+      ["Raw Dice", formatRawDiceRolls(result)],
+      ["With Modifier", formatDiceRollsWithModifier(result)]
     ]
   );
 }
@@ -6515,12 +6524,13 @@ async function performRollDice() {
   const modifier = Number(getActionFieldValue('[data-roll-field="modifier"]')) || 0;
   const result = rollDice(dice, modifier, count);
   const diceLabel = `${result.count}d${result.sides}`;
+  const summary = buildDiceRollSummary(diceLabel, result);
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
       actorName: playerName || "Owlbear Player",
-      summary: `Rolled ${diceLabel}: ${result.rolls.join(", ")}${modifier ? ` ${modifier >= 0 ? "+" : ""}${modifier}` : ""} = ${result.total}`,
+      summary,
       outcome: "roll",
       total: result.total,
       targetPart: "",
@@ -6536,7 +6546,7 @@ async function performRollDice() {
     result
   }), "success");
   await syncState();
-  setStatus(`${diceLabel} rolled ${result.total}.`, "success");
+  setStatus(summary, "success");
 }
 async function addOdysseySkill() {
   if (!isEditable()) {
@@ -6695,6 +6705,7 @@ async function performPrivateGmRoll() {
   const modifier = Number(getActionFieldValue('[data-gm-roll-field="modifier"]')) || 0;
   const result = rollDice(dice, modifier, count);
   const diceLabel = `${result.count}d${result.sides}`;
+  const summary = buildDiceRollSummary(diceLabel, result);
   pushPrivateGmEntry(
     `GM private ${diceLabel}`,
     formatDiceDebug({
@@ -6703,7 +6714,7 @@ async function performPrivateGmRoll() {
     })
   );
   render();
-  setStatus(`Private GM roll: ${diceLabel} = ${result.total}.`, "success");
+  setStatus(`Private GM roll. ${summary}`, "success");
 }
 function bindUiEvents() {
   ui.refreshBtn.addEventListener("click", () => {

@@ -3949,6 +3949,13 @@ function getBodyTotals(data) {
     { current: 0, max: 0 }
   );
 }
+function getArmorTotal(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  return BODY_ORDER.reduce(
+    (total, partName) => total + (Number(body?.[partName]?.armor) || 0),
+    0
+  );
+}
 function hasConfiguredShield(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
   const shield = body?.[SHIELD_PART_NAME];
@@ -4895,6 +4902,10 @@ function formatDiceRollsWithModifier(result) {
 }
 function buildDiceRollSummary(diceLabel, result) {
   return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], with modifier ${formatDiceRollsWithModifier(result)}`;
+}
+function formatOverlayPreviewText(data) {
+  return `Armor Total ${getArmorTotal(data)}
+${formatOverlayText(data)}`;
 }
 function formatDiceDebug({ tokenName, result }) {
   return formatTextTable(
@@ -5911,7 +5922,7 @@ function renderSelectedToken() {
   ) : ""}
       ${renderCollapsibleSection(
     "Overlay Preview",
-    `<pre class="console-output">${escapeHtml(formatOverlayText(data))}</pre>`,
+    `<pre class="console-output">${escapeHtml(formatOverlayPreviewText(data))}</pre>`,
     false
   )}
     </div>`;

@@ -12,6 +12,7 @@ import {
   clamp,
   ensureOverlayForToken,
   formatOverlayText,
+  getArmorTotal,
   getAvailableWeapons,
   getBodyTotals,
   getCharacterName,
@@ -674,6 +675,10 @@ function formatDiceRollsWithModifier(result) {
 
 function buildDiceRollSummary(diceLabel, result) {
   return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], with modifier ${formatDiceRollsWithModifier(result)}`;
+}
+
+function formatOverlayPreviewText(data) {
+  return `Armor Total ${getArmorTotal(data)}\n${formatOverlayText(data)}`;
 }
 
 function formatDiceDebug({ tokenName, result }) {
@@ -1716,7 +1721,7 @@ function legacyRenderSelectedToken() {
       )}
       ${renderCollapsibleSection(
         "Overlay preview",
-        `<pre class="console-output">${escapeHtml(formatOverlayText(data))}</pre>`,
+        `<pre class="console-output">${escapeHtml(formatOverlayPreviewText(data))}</pre>`,
         false,
       )}
     </div>`;
@@ -2617,7 +2622,7 @@ function renderSelectedToken() {
       }
       ${renderCollapsibleSection(
         "Overlay Preview",
-        `<pre class="console-output">${escapeHtml(formatOverlayText(data))}</pre>`,
+        `<pre class="console-output">${escapeHtml(formatOverlayPreviewText(data))}</pre>`,
         false,
       )}
     </div>`;

@@ -89,6 +89,32 @@ export function calculateDamage(attackResult, defenseResult, weaponDamage = 0, a
   };
 }
 
+export function getAttackOutcomeIcon(outcome) {
+  switch (outcome) {
+    case "critical-success":
+      return "🎯";
+    case "success":
+      return "✅";
+    case "critical-failure":
+      return "💀";
+    default:
+      return "❌";
+  }
+}
+
+export function formatAttackOutcomeLabel(outcome) {
+  switch (outcome) {
+    case "critical-success":
+      return `${getAttackOutcomeIcon(outcome)} Critical Success`;
+    case "success":
+      return `${getAttackOutcomeIcon(outcome)} Success`;
+    case "critical-failure":
+      return `${getAttackOutcomeIcon(outcome)} Critical Failure`;
+    default:
+      return `${getAttackOutcomeIcon(outcome)} Failure`;
+  }
+}
+
 export function resolveAttack({
   attackSkill = 0,
   weaponDamage = 0,
@@ -165,13 +191,13 @@ export function resolveAttack({
 
 function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, defenseTotal }) {
   if (outcome === "critical-success") {
-    return `Critical success to ${part}. Roll ${attackRoll}; ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
+    return `${getAttackOutcomeIcon(outcome)} Critical success to ${part}. Roll ${attackRoll}; ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
   }
   if (outcome === "critical-failure") {
-    return `Critical failure. Roll ${attackRoll}.`;
+    return `${getAttackOutcomeIcon(outcome)} Critical failure. Roll ${attackRoll}.`;
   }
   if (outcome === "success") {
-    return `Hit ${part}. ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
+    return `${getAttackOutcomeIcon(outcome)} Hit ${part}. ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
   }
-  return `Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
+  return `${getAttackOutcomeIcon(outcome)} Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
 }

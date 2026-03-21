@@ -25,7 +25,12 @@ import {
   syncTrackedOverlays,
   updateTrackerData,
 } from "./shared.js";
-import { resolveAttack, rollDice } from "./odyssey_rules.js";
+import {
+  formatAttackOutcomeLabel,
+  getAttackOutcomeIcon,
+  resolveAttack,
+  rollDice,
+} from "./odyssey_rules.js";
 
 const DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 const DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
@@ -615,7 +620,7 @@ function formatAttackDebug({
       ["Base Parry", baseTargetParry],
       ["Effective Parry", targetParry],
       ["Armor", targetArmor],
-      ["Outcome", result.outcome],
+      ["Outcome", formatAttackOutcomeLabel(result.outcome)],
       ["Damage Diff", result.damage?.damageDiff ?? 0],
       ["Damage Label", result.damage?.label ?? "No damage"],
       ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
@@ -626,7 +631,7 @@ function formatAttackDebug({
     ],
   );
 
-  return `${accuracyTable}\n\n${damageTable}`;
+  return [`Result: ${formatAttackOutcomeLabel(result.outcome)}`, "", accuracyTable, "", damageTable].join("\n");
 }
 
 function projectPartDamage(part, damage) {
@@ -713,11 +718,20 @@ function formatStateTransition(before, after) {
   return `${before} -> ${after}`;
 }
 
+function getCheckResultIcon(resultLabel) {
+  return String(resultLabel).trim() === "Check Passed" ? "✅" : "❌";
+}
+
+function formatCheckResultLabel(resultLabel) {
+  const normalized = String(resultLabel).trim() || "Check Failed";
+  return `${getCheckResultIcon(normalized)} ${normalized}`;
+}
+
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
     `Character: ${tokenName}`,
     `Characteristic: ${attributeLabel}`,
-    `${result.result}`,
+    `${formatCheckResultLabel(result.result)}`,
     "",
     formatTextTable(
       ["Roll", "Base Attribute", "Modifier", "Final Attribute"],
@@ -730,7 +744,7 @@ function formatRollSkillDebug({ tokenName, skillName, result }) {
   return [
     `Character: ${tokenName}`,
     `Skill: ${skillName}`,
-    `${result.result}`,
+    `${formatCheckResultLabel(result.result)}`,
     "",
     formatTextTable(
       ["Parameter", "Value"],
@@ -3249,7 +3263,7 @@ async function performAttack({ manualDefense = false } = {}) {
     await ensureOverlayForToken(target.id);
   }
   await pushDebugEntry(
-    `${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
+    `${getAttackOutcomeIcon(result.outcome)} ${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
       attackerName: getCharacterName(attacker),
       targetName: resolvedTargetName,
@@ -3419,7 +3433,7 @@ async function performRollChar() {
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel =
     ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
-  const summary = `Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
+  const summary = `${getCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
@@ -3438,7 +3452,7 @@ async function performRollChar() {
   });
 
   await pushDebugEntry(
-    `${getCharacterName(token)} rolls characteristic`,
+    `${getCheckResultIcon(result.result)} ${getCharacterName(token)} rolls characteristic`,
     formatRollCharDebug({
       tokenName: getCharacterName(token),
       attributeLabel,
@@ -3470,7 +3484,7 @@ async function performRollSkill() {
   const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
-  const summary = `Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
+  const summary = `${getCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
@@ -3489,7 +3503,7 @@ async function performRollSkill() {
   });
 
   await pushDebugEntry(
-    `${getCharacterName(token)} checks skill`,
+    `${getCheckResultIcon(result.result)} ${getCharacterName(token)} checks skill`,
     formatRollSkillDebug({
       tokenName: getCharacterName(token),
       skillName,

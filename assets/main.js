@@ -4301,6 +4301,30 @@ function calculateDamage(attackResult, defenseResult, weaponDamage = 0, armor = 
     minor
   };
 }
+function getAttackOutcomeIcon(outcome) {
+  switch (outcome) {
+    case "critical-success":
+      return "\u{1F3AF}";
+    case "success":
+      return "\u2705";
+    case "critical-failure":
+      return "\u{1F480}";
+    default:
+      return "\u274C";
+  }
+}
+function formatAttackOutcomeLabel(outcome) {
+  switch (outcome) {
+    case "critical-success":
+      return `${getAttackOutcomeIcon(outcome)} Critical Success`;
+    case "success":
+      return `${getAttackOutcomeIcon(outcome)} Success`;
+    case "critical-failure":
+      return `${getAttackOutcomeIcon(outcome)} Critical Failure`;
+    default:
+      return `${getAttackOutcomeIcon(outcome)} Failure`;
+  }
+}
 function resolveAttack({
   attackSkill = 0,
   weaponDamage = 0,
@@ -4372,15 +4396,15 @@ function resolveAttack({
 }
 function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, defenseTotal }) {
   if (outcome === "critical-success") {
-    return `Critical success to ${part}. Roll ${attackRoll}; ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
+    return `${getAttackOutcomeIcon(outcome)} Critical success to ${part}. Roll ${attackRoll}; ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
   }
   if (outcome === "critical-failure") {
-    return `Critical failure. Roll ${attackRoll}.`;
+    return `${getAttackOutcomeIcon(outcome)} Critical failure. Roll ${attackRoll}.`;
   }
   if (outcome === "success") {
-    return `Hit ${part}. ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
+    return `${getAttackOutcomeIcon(outcome)} Hit ${part}. ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
   }
-  return `Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
+  return `${getAttackOutcomeIcon(outcome)} Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
 }
 
 // main.js
@@ -4827,7 +4851,7 @@ function formatAttackDebug({
       ["Base Parry", baseTargetParry],
       ["Effective Parry", targetParry],
       ["Armor", targetArmor],
-      ["Outcome", result.outcome],
+      ["Outcome", formatAttackOutcomeLabel(result.outcome)],
       ["Damage Diff", result.damage?.damageDiff ?? 0],
       ["Damage Label", result.damage?.label ?? "No damage"],
       ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
@@ -4837,9 +4861,7 @@ function formatAttackDebug({
       ["Serious State", formatStateTransition(beforeSerious, afterSerious)]
     ]
   );
-  return `${accuracyTable}
-
-${damageTable}`;
+  return [`Result: ${formatAttackOutcomeLabel(result.outcome)}`, "", accuracyTable, "", damageTable].join("\n");
 }
 function projectPartDamage(part, damage) {
   const next = {
@@ -4906,11 +4928,18 @@ function formatStateTransition(before, after) {
   if (before == null || after == null) return "-";
   return `${before} -> ${after}`;
 }
+function getCheckResultIcon(resultLabel) {
+  return String(resultLabel).trim() === "Check Passed" ? "\u2705" : "\u274C";
+}
+function formatCheckResultLabel(resultLabel) {
+  const normalized = String(resultLabel).trim() || "Check Failed";
+  return `${getCheckResultIcon(normalized)} ${normalized}`;
+}
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
     `Character: ${tokenName}`,
     `Characteristic: ${attributeLabel}`,
-    `${result.result}`,
+    `${formatCheckResultLabel(result.result)}`,
     "",
     formatTextTable(
       ["Roll", "Base Attribute", "Modifier", "Final Attribute"],
@@ -4922,7 +4951,7 @@ function formatRollSkillDebug({ tokenName, skillName, result }) {
   return [
     `Character: ${tokenName}`,
     `Skill: ${skillName}`,
-    `${result.result}`,
+    `${formatCheckResultLabel(result.result)}`,
     "",
     formatTextTable(
       ["Parameter", "Value"],
@@ -6438,7 +6467,7 @@ async function performAttack({ manualDefense = false } = {}) {
     await ensureOverlayForToken(target.id);
   }
   await pushDebugEntry(
-    `${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
+    `${getAttackOutcomeIcon(result.outcome)} ${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
       attackerName: getCharacterName(attacker),
       targetName: resolvedTargetName,
@@ -6582,7 +6611,7 @@ async function performRollChar() {
   const odyssey = getOdysseyData(token);
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
-  const summary = `Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
+  const summary = `${getCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
@@ -6599,7 +6628,7 @@ async function performRollChar() {
     return next;
   });
   await pushDebugEntry(
-    `${getCharacterName(token)} rolls characteristic`,
+    `${getCheckResultIcon(result.result)} ${getCharacterName(token)} rolls characteristic`,
     formatRollCharDebug({
       tokenName: getCharacterName(token),
       attributeLabel,
@@ -6628,7 +6657,7 @@ async function performRollSkill() {
   const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
-  const summary = `Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
+  const summary = `${getCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
@@ -6645,7 +6674,7 @@ async function performRollSkill() {
     return next;
   });
   await pushDebugEntry(
-    `${getCharacterName(token)} checks skill`,
+    `${getCheckResultIcon(result.result)} ${getCharacterName(token)} checks skill`,
     formatRollSkillDebug({
       tokenName: getCharacterName(token),
       skillName,

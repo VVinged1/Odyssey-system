@@ -5845,7 +5845,7 @@ function renderSelectedToken() {
                                 <button type="button" data-action="change-part" data-part="${escapeHtml(
         partName
       )}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button>
-                                <input type="number" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
+                                <input type="text" inputmode="numeric" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="current" ${bodyFieldDisabled}>
                                 <button type="button" data-action="change-part" data-part="${escapeHtml(
@@ -5854,12 +5854,12 @@ function renderSelectedToken() {
                               </div>
                             </td>
                             <td>
-                              <input class="compact-input" type="number" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
+                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="max" ${bodyFieldDisabled}>
                             </td>
                             <td>
-                              <input class="compact-input" type="number" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
+                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>

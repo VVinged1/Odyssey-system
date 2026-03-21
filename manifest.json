@@ -1,15 +1,15 @@
 {
   "name": "Odyssey System",
-  "version": "1.2.27",
+  "version": "1.2.28",
   "manifest_version": 1,
   "description": "OS",
   "author": "Codex",
-  "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.2.27",
-  "background_url": "https://VVinged1.github.io/Odyssey-system/background.html?v=1.2.27",
+  "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.2.28",
+  "background_url": "https://VVinged1.github.io/Odyssey-system/background.html?v=1.2.28",
   "action": {
     "title": "Odyssey System",
-    "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.2.27",
-    "popover": "https://VVinged1.github.io/Odyssey-system/index.html?v=1.2.27",
+    "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.2.28",
+    "popover": "https://VVinged1.github.io/Odyssey-system/index.html?v=1.2.28",
     "height": 860,
     "width": 560
   }

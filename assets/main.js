@@ -3812,7 +3812,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 7;
+var VISUAL_VERSION = 8;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3833,6 +3833,13 @@ var OUTER_SEGMENTS = [
   { part: "L.Arm", angle: 198, span: 30 }
 ];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
+var OVERLAY_IMAGE_KIND = "overlay-image";
+var OVERLAY_STROKE_WIDTH = 0.75;
+var OVERLAY_IMAGE_GRID = {
+  offset: { x: 0, y: 0 },
+  dpi: 150
+};
+var cachedGridDpi = null;
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -4117,12 +4124,7 @@ async function getTokenMetrics(token) {
   const center = token.position;
   const width = effectiveSize.width;
   const height = effectiveSize.height;
-  let gridDpi = 150;
-  try {
-    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
-  } catch (error) {
-    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
-  }
+  const gridDpi = await getCachedGridDpi();
   const scaleFactor = Math.max(
     Math.abs(token.scale?.x ?? 1),
     Math.abs(token.scale?.y ?? 1),
@@ -4165,6 +4167,19 @@ async function getTokenMetrics(token) {
     shieldInnerRadius,
     shieldOffsetY
   };
+}
+async function getCachedGridDpi(forceRefresh = false) {
+  if (!forceRefresh && Number.isFinite(cachedGridDpi) && cachedGridDpi > 0) {
+    return cachedGridDpi;
+  }
+  let gridDpi = 150;
+  try {
+    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
+  } catch (error) {
+    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
+  }
+  cachedGridDpi = Math.max(1, Number(gridDpi) || 150);
+  return cachedGridDpi;
 }
 function polar(radius, angle) {
   const radians = angle * Math.PI / 180;
@@ -4267,96 +4282,151 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind,
-    visualVersion: VISUAL_VERSION
-  }).build();
+function roundMetric(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
 }
-function buildOverlayItems(token, data, metrics) {
-  const items = [];
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd"
-    )
+function commandsToSvgPath(commands) {
+  return commands.map((command) => {
+    const [type, x = 0, y = 0] = command;
+    if (type === Command.MOVE) {
+      return `M ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.LINE) {
+      return `L ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.CLOSE) {
+      return "Z";
+    }
+    return "";
+  }).filter(Boolean).join(" ");
+}
+function buildOverlayBounds(metrics, data) {
+  const specialActive = hasConfiguredSpecial(data);
+  const shieldActive = hasConfiguredShield(data);
+  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
+  const horizontalExtent = Math.max(
+    ringRadius,
+    shieldActive ? metrics.shieldOuterRadius : 0
   );
-  for (const segment of OUTER_SEGMENTS) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `segment-${segment.part}`,
+  const topExtent = Math.max(
+    ringRadius,
+    shieldActive ? Math.abs(metrics.shieldOffsetY) + metrics.shieldOuterRadius : 0
+  );
+  const bottomExtent = ringRadius;
+  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
+  return {
+    minX: -horizontalExtent - padding,
+    maxX: horizontalExtent + padding,
+    minY: -topExtent - padding,
+    maxY: bottomExtent + padding
+  };
+}
+function buildOverlaySignature(token, data, metrics) {
+  const bodySignature = BODY_ORDER.map((partName) => {
+    const part = data.body?.[partName] ?? {};
+    return [
+      partName,
+      Number(part.current) || 0,
+      Number(part.max) || 0,
+      Number(part.armor) || 0
+    ].join(":");
+  }).join("|");
+  return [
+    VISUAL_VERSION,
+    roundMetric(metrics.visibleDiameter),
+    roundMetric(metrics.outerRadius),
+    roundMetric(metrics.outerInnerRadius),
+    roundMetric(metrics.torsoOuterRadius),
+    roundMetric(metrics.torsoInnerRadius),
+    roundMetric(metrics.specialOuterRadius),
+    roundMetric(metrics.specialInnerRadius),
+    roundMetric(metrics.shieldOuterRadius),
+    roundMetric(metrics.shieldInnerRadius),
+    roundMetric(metrics.shieldOffsetY),
+    bodySignature
+  ].join(";");
+}
+function buildOverlaySvgMarkup(token, data, metrics) {
+  const layers = [
+    {
+      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
+      fill: RING_COLORS.base,
+      fillRule: "evenodd"
+    },
+    ...OUTER_SEGMENTS.map((segment) => ({
+      d: commandsToSvgPath(
         buildSectorCommands(
           metrics.outerRadius,
           metrics.outerInnerRadius,
           segment.angle,
           segment.span
-        ),
-        getPartColor(data.body[segment.part]),
-        1
-      )
-    );
-  }
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd"
-    )
-  );
+        )
+      ),
+      fill: getPartColor(data.body[segment.part]),
+      fillRule: "nonzero"
+    })),
+    {
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
+      ),
+      fill: getPartColor(data.body.Torso),
+      fillRule: "evenodd"
+    }
+  ];
   if (hasConfiguredSpecial(data)) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        "special-ring",
-        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-        getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-        3,
-        "evenodd"
-      )
-    );
+    layers.push({
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
+      ),
+      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+      fillRule: "evenodd"
+    });
   }
   if (hasConfiguredShield(data)) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        "shield-ring",
+    layers.push({
+      d: commandsToSvgPath(
         buildAnnulusCommands(
           metrics.shieldOuterRadius,
           metrics.shieldInnerRadius,
           0,
           metrics.shieldOffsetY
-        ),
-        getPartColor(data.body[SHIELD_PART_NAME]),
-        4,
-        "evenodd"
-      )
-    );
+        )
+      ),
+      fill: getPartColor(data.body[SHIELD_PART_NAME]),
+      fillRule: "evenodd"
+    });
   }
-  return items;
+  const bounds = buildOverlayBounds(metrics, data);
+  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
+  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
+    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
+  ).join("")}</svg>`;
+  return {
+    svg,
+    width,
+    height,
+    signature: buildOverlaySignature(token, data, metrics)
+  };
 }
-function getExpectedOverlayKinds(data) {
-  const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
-  if (hasConfiguredSpecial(data)) {
-    expected.push("special-ring");
-  }
-  if (hasConfiguredShield(data)) {
-    expected.push("shield-ring");
-  }
-  return expected;
+async function buildOverlayImageItem(token, data, metrics) {
+  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
+  const dpi = await getCachedGridDpi();
+  const image = {
+    width: Math.max(1, Math.ceil(width)),
+    height: Math.max(1, Math.ceil(height)),
+    mime: "image/svg+xml",
+    url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  };
+  return {
+    item: buildImage(image, { ...OVERLAY_IMAGE_GRID, dpi }).name(`Overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).scale({ x: 1, y: 1 }).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+      [OVERLAY_KEY]: token.id,
+      kind: OVERLAY_IMAGE_KIND,
+      visualVersion: VISUAL_VERSION,
+      signature
+    }).build(),
+    signature
+  };
 }
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
@@ -4379,12 +4449,48 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems2 = items ?? await lib_default.scene.items.getItems();
   const token = sceneItems2.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
-  await removeOverlaysForToken(tokenId, sceneItems2);
-  if (!isTrackedCharacter(token) || token.visible === false) return;
+  const overlayItems = sceneItems2.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId);
+  if (!isTrackedCharacter(token) || token.visible === false) {
+    if (overlayItems.length) {
+      await lib_default.scene.items.deleteItems(overlayItems.map((item) => item.id));
+    }
+    return;
+  }
   const metrics = await getTokenMetrics(token);
-  await lib_default.scene.items.addItems(
-    buildOverlayItems(token, getTrackerData(token), metrics)
+  const data = getTrackerData(token);
+  const { item: nextOverlayItem, signature } = await buildOverlayImageItem(token, data, metrics);
+  const currentOverlay = overlayItems.find(
+    (item) => String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND
   );
+  const staleOverlayIds = overlayItems.filter((item) => item.id !== currentOverlay?.id).map((item) => item.id);
+  if (currentOverlay) {
+    const signatureMatches = String(currentOverlay.metadata?.signature ?? "") === signature;
+    const visuallyValid = currentOverlay.attachedTo === token.id && currentOverlay.visible === true && Number(currentOverlay.metadata?.visualVersion ?? 0) === VISUAL_VERSION;
+    if (!signatureMatches || !visuallyValid) {
+      await lib_default.scene.items.updateItems([currentOverlay.id], (itemsToUpdate) => {
+        const overlay = itemsToUpdate[0];
+        if (!overlay) return;
+        overlay.name = nextOverlayItem.name;
+        overlay.position = nextOverlayItem.position;
+        overlay.rotation = nextOverlayItem.rotation;
+        overlay.scale = nextOverlayItem.scale;
+        overlay.visible = nextOverlayItem.visible;
+        overlay.attachedTo = nextOverlayItem.attachedTo;
+        overlay.layer = nextOverlayItem.layer;
+        overlay.locked = nextOverlayItem.locked;
+        overlay.disableHit = nextOverlayItem.disableHit;
+        overlay.disableAttachmentBehavior = nextOverlayItem.disableAttachmentBehavior;
+        overlay.metadata = nextOverlayItem.metadata;
+        overlay.image = nextOverlayItem.image;
+        overlay.grid = nextOverlayItem.grid;
+      });
+    }
+  } else {
+    await lib_default.scene.items.addItems([nextOverlayItem]);
+  }
+  if (staleOverlayIds.length) {
+    await lib_default.scene.items.deleteItems(staleOverlayIds);
+  }
 }
 async function ensureOverlayForToken(tokenId, items) {
   const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
@@ -4412,7 +4518,7 @@ async function syncTrackedOverlays() {
   }
   const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
     const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
+    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION || String(item.metadata?.kind ?? "") !== OVERLAY_IMAGE_KIND;
   }).map((item) => item.id);
   if (staleOverlayIds.length) {
     await lib_default.scene.items.deleteItems(staleOverlayIds);
@@ -4420,14 +4526,12 @@ async function syncTrackedOverlays() {
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
     const overlayItems = overlaysByTokenId.get(token.id) ?? [];
-    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
-    const seenKinds = /* @__PURE__ */ new Set();
-    const needsRebuild = overlayItems.length !== expectedKinds.length || overlayItems.some((item) => {
-      const kind = String(item.metadata?.kind ?? "");
-      const invalid = item.attachedTo !== token.id || item.visible !== true || !expectedKinds.includes(kind) || seenKinds.has(kind);
-      seenKinds.add(kind);
-      return invalid;
-    });
+    const currentOverlay = overlayItems.find(
+      (item) => String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND
+    );
+    const metrics = await getTokenMetrics(token);
+    const expectedSignature = buildOverlaySignature(token, getTrackerData(token), metrics);
+    const needsRebuild = overlayItems.length !== 1 || !currentOverlay || currentOverlay.attachedTo !== token.id || currentOverlay.visible !== true || String(currentOverlay.metadata?.signature ?? "") !== expectedSignature;
     if (needsRebuild) {
       await ensureOverlayForToken(token.id);
     }
@@ -4658,10 +4762,15 @@ var playerId = "";
 var playerName = "";
 var playerColor = "#facc15";
 var sceneItems = [];
+var localSceneItems = [];
 var selectionIds = [];
 var activeTokenId = null;
 var debugEntries = [];
 var partyPlayers = [];
+var sortedPartyPlayersCache = [];
+var characterListCache = [];
+var trackedCharacterListCache = [];
+var charactersByIdCache = /* @__PURE__ */ new Map();
 var gmPrivateEntries = [];
 var pendingLocalDebugEntryIds = /* @__PURE__ */ new Set();
 var pendingLocalDebugClear = false;
@@ -4669,7 +4778,8 @@ var collapsibleSectionState = /* @__PURE__ */ new Map();
 var attackFormDrafts = /* @__PURE__ */ new Map();
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
 var selectionPollTimer = null;
-var overlayMaintenanceTimer = null;
+var renderScheduled = false;
+var sceneSideEffectsTimer = null;
 var targetPickState = {
   active: false,
   attackerTokenId: null,
@@ -4678,6 +4788,62 @@ var targetPickState = {
   toolReady: false,
   restoring: false
 };
+function rebuildSceneCaches() {
+  characterListCache = sortCharacters(sceneItems.filter(isCharacterToken));
+  trackedCharacterListCache = characterListCache.filter(isTrackedCharacter);
+  charactersByIdCache = new Map(characterListCache.map((item) => [item.id, item]));
+}
+function setSceneItems(items) {
+  sceneItems = Array.isArray(items) ? items : [];
+  rebuildSceneCaches();
+}
+function setLocalSceneItems(items) {
+  localSceneItems = Array.isArray(items) ? items : [];
+}
+function setSelectionState(selection) {
+  selectionIds = selection ?? [];
+}
+function setPartyPlayersState(players) {
+  partyPlayers = players ?? [];
+  sortedPartyPlayersCache = [...partyPlayers].sort(
+    (left, right) => String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
+  );
+}
+function removeLocalItemsFromCache(ids) {
+  if (!ids.length) return;
+  const removeSet = new Set(ids);
+  setLocalSceneItems(localSceneItems.filter((item) => !removeSet.has(item.id)));
+}
+function upsertLocalItemsInCache(items) {
+  if (!items.length) return;
+  const byId = new Map(localSceneItems.map((item) => [item.id, item]));
+  for (const item of items) {
+    byId.set(item.id, item);
+  }
+  setLocalSceneItems([...byId.values()]);
+}
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  window.requestAnimationFrame(() => {
+    renderScheduled = false;
+    render();
+  });
+}
+function scheduleSceneSideEffects(items = sceneItems) {
+  if (sceneSideEffectsTimer) {
+    clearTimeout(sceneSideEffectsTimer);
+  }
+  sceneSideEffectsTimer = window.setTimeout(() => {
+    sceneSideEffectsTimer = null;
+    void syncLocalOwnedHiddenTokenViews(items).catch((error) => {
+      console.warn("[Body HP] Unable to sync local hidden-token views", error);
+    });
+    void syncTargetHighlight().catch((error) => {
+      console.warn("[Body HP] Unable to sync target highlight", error);
+    });
+  }, 60);
+}
 function sanitizeDebugEntries(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((entry) => entry && typeof entry === "object").map((entry) => ({
@@ -4856,15 +5022,13 @@ function restoreSelectedPanelState(panelState) {
   }
 }
 function getSortedPartyPlayers() {
-  return [...partyPlayers].sort(
-    (left, right) => String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
-  );
+  return sortedPartyPlayersCache;
 }
 function getCharacters() {
-  return sortCharacters(sceneItems.filter(isCharacterToken));
+  return characterListCache;
 }
 function getTrackedCharacters() {
-  return getCharacters().filter(isTrackedCharacter);
+  return trackedCharacterListCache;
 }
 function getControllableCharacters() {
   return getTrackedCharacters().filter(
@@ -4872,7 +5036,7 @@ function getControllableCharacters() {
   );
 }
 function getCharacterById(tokenId) {
-  return getCharacters().find((item) => item.id === tokenId) ?? null;
+  return charactersByIdCache.get(tokenId) ?? null;
 }
 function resolveActiveTokenId() {
   const characters = getCharacters();
@@ -4912,12 +5076,33 @@ function canViewDiceBlock(token) {
 function canViewOverlayPreview(token) {
   return canUseToken(token);
 }
+function applyLocalTrackerDataUpdate(tokenId, updater) {
+  const nextItems = sceneItems.map((item) => {
+    if (item.id !== tokenId) return item;
+    const nextItem = structuredClone(item);
+    nextItem.metadata ?? (nextItem.metadata = {});
+    nextItem.metadata[META_KEY] = updater(getTrackerData(item));
+    return nextItem;
+  });
+  setSceneItems(nextItems);
+}
+async function updateTrackerData2(tokenId, updater) {
+  applyLocalTrackerDataUpdate(tokenId, updater);
+  scheduleRender();
+  try {
+    await updateTrackerData(tokenId, updater);
+  } catch (error) {
+    setSceneItems(await lib_default.scene.items.getItems());
+    scheduleRender();
+    throw error;
+  }
+}
 async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
   if (!token || !isCharacterToken(token)) return false;
   const shouldInitialize = !isTrackedCharacter(token);
   if (!shouldInitialize) return false;
-  await updateTrackerData(tokenId, (current2) => current2);
+  await updateTrackerData2(tokenId, (current2) => current2);
   await ensureOverlayForToken(tokenId);
   return shouldInitialize;
 }
@@ -4994,6 +5179,23 @@ function arraysEqual(left, right) {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
 }
+async function handleSelectionChange(selection, allowInitialize = true) {
+  const nextSelection = selection ?? [];
+  setSelectionState(nextSelection);
+  const selectedCharacterId = nextSelection.find((id) => charactersByIdCache.has(id));
+  if (selectedCharacterId) {
+    activeTokenId = selectedCharacterId;
+    if (allowInitialize) {
+      await initializeCharacterToken(selectedCharacterId);
+    }
+  } else if (activeTokenId && !charactersByIdCache.has(activeTokenId)) {
+    activeTokenId = null;
+  } else {
+    activeTokenId = resolveActiveTokenId();
+  }
+  scheduleRender();
+  await syncTargetHighlight();
+}
 function startSelectionPolling() {
   if (selectionPollTimer) {
     clearInterval(selectionPollTimer);
@@ -5001,13 +5203,13 @@ function startSelectionPolling() {
   selectionPollTimer = setInterval(() => {
     void lib_default.player.getSelection().then((selection) => selection ?? []).then((selection) => {
       if (!arraysEqual(selectionIds, selection)) {
-        return syncState();
+        return handleSelectionChange(selection);
       }
       return null;
     }).catch((error) => {
       console.warn("[Body HP] Selection polling failed", error);
     });
-  }, 200);
+  }, 1500);
 }
 function formatAttackDebug({
   attackerName,
@@ -5437,7 +5639,7 @@ async function persistAttackTargetToken(tokenId, targetTokenId) {
   if (currentTargetTokenId === normalizedTargetTokenId && currentTargetTokenName === normalizedTargetTokenName) {
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
@@ -5472,7 +5674,7 @@ async function assignAttackTarget(attacker, target, successMessage) {
   saveAttackDraftValue(attacker.id, "targetTokenName", getCharacterName(target));
   await persistAttackTargetToken(attacker.id, target.id);
   activeTokenId = attacker.id;
-  render();
+  scheduleRender();
   const targetField = ui.selectedTokenPanel.querySelector('[data-attack-field="targetTokenId"]');
   if (targetField instanceof HTMLInputElement || targetField instanceof HTMLSelectElement) {
     targetField.value = target.id;
@@ -5501,10 +5703,10 @@ function isLocalTargetHighlight(item) {
   return Boolean(item?.metadata?.[TARGET_HIGHLIGHT_KEY]);
 }
 async function clearTargetHighlight() {
-  const localItems = await lib_default.scene.local.getItems();
-  const highlightIds = localItems.filter(isLocalTargetHighlight).map((item) => item.id);
+  const highlightIds = localSceneItems.filter(isLocalTargetHighlight).map((item) => item.id);
   if (highlightIds.length) {
     await lib_default.scene.local.deleteItems(highlightIds);
+    removeLocalItemsFromCache(highlightIds);
   }
 }
 async function buildTargetHighlightItem(targetToken) {
@@ -5547,11 +5749,12 @@ async function syncTargetHighlight() {
   );
   const draft2 = getAttackDraft(attacker, getTrackerData(attacker), targetCharacters);
   const target = getCharacterById(draft2.targetTokenId);
-  const localItems = await lib_default.scene.local.getItems();
-  const existingHighlights = localItems.filter(isLocalTargetHighlight);
+  const existingHighlights = localSceneItems.filter(isLocalTargetHighlight);
   if (!target || !isCharacterToken(target) || target.visible === false || target.id === attacker.id) {
     if (existingHighlights.length) {
-      await lib_default.scene.local.deleteItems(existingHighlights.map((item) => item.id));
+      const highlightIds = existingHighlights.map((item) => item.id);
+      await lib_default.scene.local.deleteItems(highlightIds);
+      removeLocalItemsFromCache(highlightIds);
     }
     return;
   }
@@ -5559,9 +5762,13 @@ async function syncTargetHighlight() {
     return;
   }
   if (existingHighlights.length) {
-    await lib_default.scene.local.deleteItems(existingHighlights.map((item) => item.id));
+    const highlightIds = existingHighlights.map((item) => item.id);
+    await lib_default.scene.local.deleteItems(highlightIds);
+    removeLocalItemsFromCache(highlightIds);
   }
-  await lib_default.scene.local.addItems([await buildTargetHighlightItem(target)]);
+  const nextHighlight = await buildTargetHighlightItem(target);
+  await lib_default.scene.local.addItems([nextHighlight]);
+  upsertLocalItemsInCache([nextHighlight]);
 }
 function isLocalSelfViewItem(item) {
   return Boolean(item?.metadata?.[LOCAL_SELF_VIEW_KEY]);
@@ -5587,10 +5794,10 @@ async function buildLocalSelfViewItem(token) {
   }).build();
 }
 async function clearLocalSelfViews() {
-  const localItems = await lib_default.scene.local.getItems();
-  const localViewIds = localItems.filter(isLocalSelfViewItem).map((item) => item.id);
+  const localViewIds = localSceneItems.filter(isLocalSelfViewItem).map((item) => item.id);
   if (localViewIds.length) {
     await lib_default.scene.local.deleteItems(localViewIds);
+    removeLocalItemsFromCache(localViewIds);
   }
 }
 async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
@@ -5602,14 +5809,13 @@ async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
     (item) => isCharacterToken(item) && item.visible === false && canUseToken(item)
   );
   const desiredTokenIds = new Set(desiredTokens.map((token) => token.id));
-  const localItems = await lib_default.scene.local.getItems();
-  const existingViews = localItems.filter(isLocalSelfViewItem);
+  const existingViews = localSceneItems.filter(isLocalSelfViewItem);
   const staleViewIds = existingViews.filter((item) => !desiredTokenIds.has(String(item.metadata?.[LOCAL_SELF_VIEW_KEY]?.tokenId ?? ""))).map((item) => item.id);
   if (staleViewIds.length) {
     await lib_default.scene.local.deleteItems(staleViewIds);
+    removeLocalItemsFromCache(staleViewIds);
   }
-  const currentLocalItems = staleViewIds.length ? await lib_default.scene.local.getItems() : localItems;
-  const currentViews = currentLocalItems.filter(isLocalSelfViewItem);
+  const currentViews = localSceneItems.filter(isLocalSelfViewItem);
   const viewIdsToReplace = [];
   const itemsToAdd = [];
   for (const token of desiredTokens) {
@@ -5627,22 +5833,12 @@ async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
   }
   if (viewIdsToReplace.length) {
     await lib_default.scene.local.deleteItems(viewIdsToReplace);
+    removeLocalItemsFromCache(viewIdsToReplace);
   }
   if (itemsToAdd.length) {
     await lib_default.scene.local.addItems(itemsToAdd);
+    upsertLocalItemsInCache(itemsToAdd);
   }
-}
-function scheduleOverlayMaintenance() {
-  if (playerRole !== "GM") return;
-  if (overlayMaintenanceTimer) {
-    clearTimeout(overlayMaintenanceTimer);
-  }
-  overlayMaintenanceTimer = window.setTimeout(() => {
-    overlayMaintenanceTimer = null;
-    void syncTrackedOverlays().catch((error) => {
-      console.warn("[Body HP] Overlay maintenance failed", error);
-    });
-  }, 120);
 }
 async function teardownTargetPickerTool() {
   if (!targetPickState.toolReady) return;
@@ -5680,7 +5876,7 @@ async function stopTargetPick(statusMessage = "", statusKind = "info") {
   const wasActive = targetPickState.active;
   targetPickState.active = false;
   targetPickState.attackerTokenId = null;
-  render();
+  scheduleRender();
   if (wasActive) {
     await restorePreviousTool();
   }
@@ -5773,7 +5969,7 @@ async function startTargetPick() {
   await ensureTargetPickerTool();
   await lib_default.tool.activateTool(TARGET_PICK_TOOL_ID);
   await lib_default.tool.activateMode(TARGET_PICK_TOOL_ID, TARGET_PICK_MODE_ID);
-  render();
+  scheduleRender();
   setStatus("Click a visible target token on the map to assign it.", "info");
 }
 async function removeAttackTargetContextMenu() {
@@ -6093,7 +6289,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
       </div>
       <div class="muted">${targetCharacters.length ? "Attack goes from the selected attacker token to the saved target chosen on the map." : "No visible target tokens found. You can still keep a saved target or use No Target Attack below."}</div>
       <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
-      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense only for melee attacks.</div>
+      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is always added to defense unless Parry Mode is set to Do Not Count Parry.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${attackDisabledAttr}>Attack</button>
       </div>
@@ -6443,23 +6639,23 @@ async function syncState(showToast = false) {
   playerId = id;
   playerName = name;
   playerColor = color;
-  partyPlayers = players ?? [];
-  sceneItems = items;
-  selectionIds = selection ?? [];
+  setPartyPlayersState(players);
+  setSceneItems(items);
+  setSelectionState(selection);
   const selectedCharacterId = selectionIds.find(
-    (selectionId) => sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
+    (selectionId) => charactersByIdCache.has(selectionId)
   );
   if (selectedCharacterId) {
     activeTokenId = selectedCharacterId;
     const initialized = await initializeCharacterToken(selectedCharacterId);
     if (initialized) {
-      sceneItems = await lib_default.scene.items.getItems();
+      setSceneItems(await lib_default.scene.items.getItems());
     }
-  } else if (activeTokenId && !sceneItems.some((item) => item.id === activeTokenId)) {
-    activeTokenId = null;
+  } else if (activeTokenId && !charactersByIdCache.has(activeTokenId)) {
+    activeTokenId = resolveActiveTokenId();
   }
   await syncLocalOwnedHiddenTokenViews(sceneItems);
-  render();
+  scheduleRender();
   await syncTargetHighlight();
   if (showToast) {
     setStatus(
@@ -6472,8 +6668,7 @@ async function selectCharacter(tokenId) {
   activeTokenId = tokenId;
   await lib_default.player.select([tokenId], true);
   await initializeCharacterToken(tokenId);
-  sceneItems = await lib_default.scene.items.getItems();
-  render();
+  scheduleRender();
   await syncTargetHighlight();
 }
 async function reloadTokenVisuals() {
@@ -6494,9 +6689,9 @@ async function reloadTokenVisuals() {
     await removeOverlaysForToken(token.id, currentItems);
     await ensureOverlayForToken(token.id);
   }
-  sceneItems = await lib_default.scene.items.getItems();
+  setSceneItems(await lib_default.scene.items.getItems());
   await syncLocalOwnedHiddenTokenViews(sceneItems);
-  render();
+  scheduleRender();
   await syncTargetHighlight();
   setStatus(`${getCharacterName(token)} visuals reloaded.`, "success");
 }
@@ -6511,7 +6706,7 @@ async function healLimbs() {
     return;
   }
   const healedParts = ["L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     for (const partName of healedParts) {
       const part = next.body?.[partName];
@@ -6523,7 +6718,6 @@ async function healLimbs() {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
   setStatus(`${getCharacterName(token)} healed.`, "success");
 }
 async function changeBodyField(partName, field, delta) {
@@ -6536,7 +6730,7 @@ async function changeBodyField(partName, field, delta) {
     setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     const part = next.body[partName];
     if (!part) return next;
@@ -6551,7 +6745,6 @@ async function changeBodyField(partName, field, delta) {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
 }
 async function setBodyField(partName, field, value) {
   const token = getCharacterById(activeTokenId);
@@ -6563,7 +6756,7 @@ async function setBodyField(partName, field, value) {
     setStatus("Only the GM or assigned player can edit this token.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     const part = next.body[partName];
     if (!part) return next;
@@ -6579,7 +6772,6 @@ async function setBodyField(partName, field, value) {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
 }
 async function setOwnerPlayer(ownerPlayerId) {
   if (!isEditable()) {
@@ -6592,7 +6784,7 @@ async function setOwnerPlayer(ownerPlayerId) {
     return;
   }
   const selectedPlayer = getSortedPartyPlayers().find((player) => player.id === ownerPlayerId);
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     next.odyssey ?? (next.odyssey = structuredClone(getTrackerData(token).odyssey));
@@ -6602,7 +6794,6 @@ async function setOwnerPlayer(ownerPlayerId) {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
 }
 async function setOdysseySkill(skill, value) {
   const token = getCharacterById(activeTokenId);
@@ -6614,12 +6805,11 @@ async function setOdysseySkill(skill, value) {
     setStatus("Only the GM can edit Odyssey skills.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     next.odyssey.skills[skill] = clamp(Number(value) || 0, 0, 10);
     return next;
   });
-  await syncState();
 }
 async function setOdysseySkillStrengthBonus(skill, enabled) {
   const token = getCharacterById(activeTokenId);
@@ -6631,14 +6821,13 @@ async function setOdysseySkillStrengthBonus(skill, enabled) {
     setStatus("Only the GM can edit Odyssey skills.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     (_a = next.odyssey).skillStrengthBonuses ?? (_a.skillStrengthBonuses = {});
     next.odyssey.skillStrengthBonuses[skill] = Boolean(enabled);
     return next;
   });
-  await syncState();
 }
 async function setOdysseyAttribute(attribute, value) {
   const token = getCharacterById(activeTokenId);
@@ -6650,12 +6839,11 @@ async function setOdysseyAttribute(attribute, value) {
     setStatus("Only the GM can edit characteristics.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     next.odyssey.attributes[attribute] = clamp(Number(value) || 0, 0, 20);
     return next;
   });
-  await syncState();
 }
 async function addWeapon() {
   const token = getCharacterById(activeTokenId);
@@ -6669,14 +6857,13 @@ async function addWeapon() {
   }
   const name = getActionFieldValue('[data-weapon-field="new-name"]').trim() || "New Weapon";
   const damage = clamp(Number(getActionFieldValue('[data-weapon-field="new-damage"]')) || 0, -99, 99);
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
     next.odyssey.weapons.melee.push({ name, damage });
     return next;
   });
-  await syncState();
   syncAttackWeaponInputs(token.id, name, damage);
   setStatus(`Weapon "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
@@ -6692,7 +6879,7 @@ async function setWeaponDamage(index, value) {
   }
   const currentWeaponName = getOdysseyData(token).weapons?.melee?.[index]?.name ?? "Default";
   const nextDamage = clamp(Number(value) || 0, -99, 99);
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
@@ -6702,7 +6889,6 @@ async function setWeaponDamage(index, value) {
     next.odyssey.weapons.melee[index].damage = nextDamage;
     return next;
   });
-  await syncState();
   const currentDraft = attackFormDrafts.get(token.id) ?? {};
   if (currentDraft.weaponName === currentWeaponName) {
     syncAttackWeaponInputs(token.id, currentWeaponName, nextDamage);
@@ -6720,7 +6906,7 @@ async function setWeaponName(index, value) {
   }
   const previousWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0 };
   const nextWeaponName = String(value || "").trim() || "Default";
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
     (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
@@ -6730,7 +6916,6 @@ async function setWeaponName(index, value) {
     next.odyssey.weapons.melee[index].name = nextWeaponName;
     return next;
   });
-  await syncState();
   const currentDraft = attackFormDrafts.get(token.id) ?? {};
   if (currentDraft.weaponName === previousWeapon.name) {
     syncAttackWeaponInputs(token.id, nextWeaponName, previousWeapon.damage);
@@ -6752,14 +6937,13 @@ async function removeWeapon(index) {
     setStatus("Weapon not found.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     next.odyssey.weapons.melee = (next.odyssey.weapons.melee ?? []).filter(
       (_weapon, weaponIndex) => weaponIndex !== index
     );
     return next;
   });
-  await syncState();
   const refreshedToken = getCharacterById(token.id);
   const fallbackWeapon = refreshedToken ? getDefaultAttackWeapon(refreshedToken) : { name: UNARMED_WEAPON_NAME, damage: 0 };
   syncAttackWeaponInputs(token.id, fallbackWeapon.name, fallbackWeapon.damage);
@@ -6768,7 +6952,7 @@ async function removeWeapon(index) {
 async function autosaveDraftField(draft2) {
   const token = getCharacterById(draft2.tokenId);
   if (!token) return;
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a, _b;
     const next = structuredClone(current2);
     if (draft2.action === "set-odyssey-skill") {
@@ -6956,7 +7140,7 @@ async function performAttack({ manualDefense = false } = {}) {
   const specialBeforeHp = specialWasActive ? Number(specialPartState?.current) || 0 : null;
   const strengthBonus = getSkillStrengthBonusFlag(attackerOdyssey, skillName) ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
-  const baseTargetParry = skillName === MELEE_SKILL_NAME ? target ? targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0 : manualParry : 0;
+  const baseTargetParry = target ? targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0 : manualParry;
   const targetParry = parryDivisor <= 0 ? 0 : Math.max(Math.floor(baseTargetParry / parryDivisor), 0);
   const result = resolveAttack({
     attackSkill: attackerOdyssey.skills[skillName] ?? 0,
@@ -6992,7 +7176,7 @@ async function performAttack({ manualDefense = false } = {}) {
   const specialAfterHp = specialWasActive ? projectedSpecialState?.current ?? specialBeforeHp : null;
   const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
   const resolvedAttackSummary = specialResolution.specialActive && result.hit && specialResolution.damageAppliedLabel !== "No Damage" ? `${result.summary} Applied: ${specialResolution.damageAppliedLabel}.` : result.summary;
-  await updateTrackerData(attacker.id, (current2) => {
+  await updateTrackerData2(attacker.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
@@ -7008,7 +7192,7 @@ async function performAttack({ manualDefense = false } = {}) {
     return next;
   });
   if (target) {
-    await updateTrackerData(target.id, (current2) => {
+    await updateTrackerData2(target.id, (current2) => {
       const next = structuredClone(current2);
       if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
         next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
@@ -7074,7 +7258,6 @@ async function performAttack({ manualDefense = false } = {}) {
     }),
     result.hit ? "success" : "info"
   );
-  await syncState();
   setStatus(`${getCharacterName(attacker)} -> ${resolvedTargetName}: ${resolvedAttackSummary}`, result.hit ? "success" : "info");
 }
 async function performRollDice() {
@@ -7093,7 +7276,7 @@ async function performRollDice() {
   const result = rollDice(dice, modifier, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
@@ -7113,7 +7296,6 @@ async function performRollDice() {
     tokenName: getCharacterName(token),
     result
   }), "success");
-  await syncState();
   setStatus(summary, "success");
 }
 async function addOdysseySkill() {
@@ -7137,7 +7319,7 @@ async function addOdysseySkill() {
     return;
   }
   const category = name === MELEE_SKILL_NAME || name === PARRY_SKILL_NAME ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : getActionFieldValue('[data-skill-field="new-category"]') === ABILITIES_SKILL_CATEGORY ? ABILITIES_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     var _a, _b;
     const next = structuredClone(current2);
     next.odyssey.skills[name] = value;
@@ -7147,7 +7329,6 @@ async function addOdysseySkill() {
     next.odyssey.skillStrengthBonuses[name] = name === MELEE_SKILL_NAME ? true : name === PARRY_SKILL_NAME ? false : Boolean(addStrengthBonus);
     return next;
   });
-  await syncState();
   setStatus(`Skill "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
 async function removeOdysseySkill(skillName) {
@@ -7164,14 +7345,13 @@ async function removeOdysseySkill(skillName) {
     setStatus("Select a character first.", "error");
     return;
   }
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     delete next.odyssey.skills[skillName];
     delete next.odyssey.skillCategories?.[skillName];
     delete next.odyssey.skillStrengthBonuses?.[skillName];
     return next;
   });
-  await syncState();
   setStatus(`Skill "${skillName}" removed.`, "success");
 }
 async function performRollChar() {
@@ -7190,7 +7370,7 @@ async function performRollChar() {
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
   const summary = `${getResolvedCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
@@ -7214,7 +7394,6 @@ async function performRollChar() {
     }),
     isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info"
   );
-  await syncState();
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 async function performRollSkill() {
@@ -7236,7 +7415,7 @@ async function performRollSkill() {
   const odyssey = getOdysseyData(token);
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
-  await updateTrackerData(token.id, (current2) => {
+  await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
@@ -7260,7 +7439,6 @@ async function performRollSkill() {
     }),
     isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info"
   );
-  await syncState();
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 async function performPrivateGmRoll() {
@@ -7281,7 +7459,7 @@ async function performPrivateGmRoll() {
       result
     })
   );
-  render();
+  scheduleRender();
   setStatus(`Private GM roll. ${summary}`, "success");
 }
 function bindUiEvents() {
@@ -7588,7 +7766,12 @@ lib_default.onReady(async () => {
   try {
     bindUiEvents();
     await removeAttackTargetContextMenu();
-    await loadSharedDebugConsole();
+    await Promise.all([
+      loadSharedDebugConsole(),
+      lib_default.scene.local.getItems().then((items) => {
+        setLocalSceneItems(items);
+      })
+    ]);
     await syncState(true);
     startSelectionPolling();
     setStatus(
@@ -7596,36 +7779,29 @@ lib_default.onReady(async () => {
       "info"
     );
     lib_default.scene.items.onChange((items) => {
-      sceneItems = items;
-      render();
-      void syncLocalOwnedHiddenTokenViews(items).catch((error) => {
-        console.warn("[Body HP] Unable to sync local hidden-token views", error);
-      });
-      void syncTargetHighlight().catch((error) => {
-        console.warn("[Body HP] Unable to sync target highlight", error);
-      });
-      scheduleOverlayMaintenance();
+      setSceneItems(items);
+      scheduleRender();
+      scheduleSceneSideEffects(items);
+    });
+    lib_default.scene.local.onChange((items) => {
+      setLocalSceneItems(items);
     });
     lib_default.player.onChange((player) => {
       playerRole = player.role;
       playerId = player.id ?? playerId;
       playerName = player.name ?? playerName;
       playerColor = player.color ?? playerColor;
-      selectionIds = player.selection ?? [];
-      const selectedCharacterId = selectionIds.find(
-        (selectionId) => sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
-      );
-      if (selectedCharacterId) {
-        activeTokenId = selectedCharacterId;
-      }
-      void syncState().catch((error) => {
+      void handleSelectionChange(player.selection ?? []).then(() => {
+        scheduleRender();
+        return syncLocalOwnedHiddenTokenViews(sceneItems);
+      }).catch((error) => {
         console.warn("[Body HP] Player state sync failed", error);
-        render();
+        scheduleRender();
       });
     });
     lib_default.party.onChange((players) => {
-      partyPlayers = players ?? [];
-      render();
+      setPartyPlayersState(players);
+      scheduleRender();
     });
     lib_default.broadcast.onMessage(DEBUG_BROADCAST_CHANNEL, (event) => {
       const payload = event?.data;

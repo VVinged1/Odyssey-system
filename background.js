@@ -17,17 +17,17 @@ let lastBridgeEventId = 0;
 let bridgePollTimer = null;
 let pushStateTimer = null;
 
-async function updateBadge() {
+async function updateBadge(items) {
   try {
-    const items = await OBR.scene.items.getItems();
-    const trackedCount = items.filter(isTrackedCharacter).length;
+    const sceneItems = items ?? (await OBR.scene.items.getItems());
+    const trackedCount = sceneItems.filter(isTrackedCharacter).length;
     await OBR.action.setBadgeText(trackedCount ? String(trackedCount) : undefined);
   } catch (error) {
     console.warn("[Body HP] Unable to update badge", error);
   }
 }
 
-function scheduleTokenSync(delayMs = 800) {
+function scheduleTokenSync(delayMs = 800, itemsSnapshot = null) {
   if (pushStateTimer) {
     clearTimeout(pushStateTimer);
   }
@@ -36,8 +36,11 @@ function scheduleTokenSync(delayMs = 800) {
     pushStateTimer = null;
     if (currentRole !== "GM") return;
 
-    void OBR.scene.items
-      .getItems()
+    const pushPromise = itemsSnapshot
+      ? Promise.resolve(itemsSnapshot)
+      : OBR.scene.items.getItems();
+
+    void pushPromise
       .then((items) => pushTokenSnapshots(extractTrackedTokens(items)))
       .catch((error) => {
         console.warn("[Body HP] Unable to push token snapshots", error);
@@ -97,9 +100,9 @@ OBR.onReady(async () => {
       void restartBridgePolling();
     }
 
-    OBR.scene.items.onChange(() => {
-      void updateBadge();
-      scheduleTokenSync();
+    OBR.scene.items.onChange((items) => {
+      void updateBadge(items);
+      scheduleTokenSync(800, items);
     });
 
     OBR.player.onChange(async () => {

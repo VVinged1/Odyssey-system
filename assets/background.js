@@ -3481,61 +3481,119 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
-var PathBuilder = class extends GenericItemBuilder {
-  constructor(player) {
+// node_modules/@owlbear-rodeo/sdk/lib/builders/ImageBuilder.js
+var ImageBuilder = class extends GenericItemBuilder {
+  constructor(player, image, grid) {
     super(player);
-    this._commands = [];
-    this._fillRule = "nonzero";
-    this._style = {
-      fillColor: "black",
-      fillOpacity: 1,
-      strokeColor: "white",
-      strokeOpacity: 1,
-      strokeWidth: 5,
-      strokeDash: []
+    this._image = image;
+    this._grid = grid;
+    this._item.name = "Image";
+    this._text = {
+      richText: [
+        {
+          type: "paragraph",
+          children: [{ text: "" }]
+        }
+      ],
+      plainText: "",
+      style: {
+        padding: 8,
+        fontFamily: "Roboto",
+        fontSize: 24,
+        fontWeight: 400,
+        textAlign: "CENTER",
+        textAlignVertical: "BOTTOM",
+        fillColor: "white",
+        fillOpacity: 1,
+        strokeColor: "white",
+        strokeOpacity: 1,
+        strokeWidth: 0,
+        lineHeight: 1.5
+      },
+      type: "PLAIN",
+      width: "AUTO",
+      height: "AUTO"
     };
-    this._item.name = "Path";
-    this._item.layer = "DRAWING";
+    this._textItemType = "LABEL";
   }
-  commands(commands) {
-    this._commands = commands;
+  text(text) {
+    this._text = text;
     return this.self();
   }
-  fillRule(fillRule) {
-    this._fillRule = fillRule;
+  textItemType(textItemType) {
+    this._textItemType = textItemType;
     return this.self();
   }
-  style(style) {
-    this._style = style;
+  textWidth(width) {
+    this._text.width = width;
     return this.self();
   }
-  fillColor(fillColor) {
-    this._style.fillColor = fillColor;
+  textHeight(height) {
+    this._text.height = height;
     return this.self();
   }
-  fillOpacity(fillOpacity) {
-    this._style.fillOpacity = fillOpacity;
+  richText(richText) {
+    this._text.richText = richText;
     return this.self();
   }
-  strokeColor(strokeColor) {
-    this._style.strokeColor = strokeColor;
+  plainText(plainText) {
+    this._text.plainText = plainText;
     return this.self();
   }
-  strokeOpacity(strokeOpacity) {
-    this._style.strokeOpacity = strokeOpacity;
+  textType(textType) {
+    this._text.type = textType;
     return this.self();
   }
-  strokeWidth(strokeWidth) {
-    this._style.strokeWidth = strokeWidth;
+  textPadding(padding) {
+    this._text.style.padding = padding;
     return this.self();
   }
-  strokeDash(strokeDash) {
-    this._style.strokeDash = strokeDash;
+  fontFamily(fontFamily) {
+    this._text.style.fontFamily = fontFamily;
+    return this.self();
+  }
+  fontSize(fontSize) {
+    this._text.style.fontSize = fontSize;
+    return this.self();
+  }
+  fontWeight(fontWeight) {
+    this._text.style.fontWeight = fontWeight;
+    return this.self();
+  }
+  textAlign(textAlign) {
+    this._text.style.textAlign = textAlign;
+    return this.self();
+  }
+  textAlignVertical(textAlignVertical) {
+    this._text.style.textAlignVertical = textAlignVertical;
+    return this.self();
+  }
+  textFillColor(fillColor) {
+    this._text.style.fillColor = fillColor;
+    return this.self();
+  }
+  textFillOpacity(fillOpacity) {
+    this._text.style.fillOpacity = fillOpacity;
+    return this.self();
+  }
+  textStrokeColor(strokeColor) {
+    this._text.style.strokeColor = strokeColor;
+    return this.self();
+  }
+  textStrokeOpacity(strokeOpacity) {
+    this._text.style.strokeOpacity = strokeOpacity;
+    return this.self();
+  }
+  textStrokeWidth(strokeWidth) {
+    this._text.style.strokeWidth = strokeWidth;
+    return this.self();
+  }
+  textLineHeight(lineHeight) {
+    this._text.style.lineHeight = lineHeight;
     return this.self();
   }
   build() {
-    return Object.assign(Object.assign({}, this._item), { type: "PATH", commands: this._commands, fillRule: this._fillRule, style: this._style });
+    return Object.assign(Object.assign({}, this._item), { type: "IMAGE", image: this._image, grid: this._grid, text: this._text, textItemType: this._textItemType });
   }
 };
 
@@ -3672,8 +3730,8 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildPath() {
-  return new PathBuilder(playerApi);
+function buildImage(image, grid) {
+  return new ImageBuilder(playerApi, image, grid);
 }
 var lib_default = OBR;
 
@@ -3693,7 +3751,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 7;
+var VISUAL_VERSION = 8;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3714,6 +3772,13 @@ var OUTER_SEGMENTS = [
   { part: "L.Arm", angle: 198, span: 30 }
 ];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
+var OVERLAY_IMAGE_KIND = "overlay-image";
+var OVERLAY_STROKE_WIDTH = 0.75;
+var OVERLAY_IMAGE_GRID = {
+  offset: { x: 0, y: 0 },
+  dpi: 150
+};
+var cachedGridDpi = null;
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -3941,12 +4006,7 @@ async function getTokenMetrics(token) {
   const center = token.position;
   const width = effectiveSize.width;
   const height = effectiveSize.height;
-  let gridDpi = 150;
-  try {
-    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
-  } catch (error) {
-    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
-  }
+  const gridDpi = await getCachedGridDpi();
   const scaleFactor = Math.max(
     Math.abs(token.scale?.x ?? 1),
     Math.abs(token.scale?.y ?? 1),
@@ -3989,6 +4049,19 @@ async function getTokenMetrics(token) {
     shieldInnerRadius,
     shieldOffsetY
   };
+}
+async function getCachedGridDpi(forceRefresh = false) {
+  if (!forceRefresh && Number.isFinite(cachedGridDpi) && cachedGridDpi > 0) {
+    return cachedGridDpi;
+  }
+  let gridDpi = 150;
+  try {
+    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
+  } catch (error) {
+    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
+  }
+  cachedGridDpi = Math.max(1, Number(gridDpi) || 150);
+  return cachedGridDpi;
 }
 function polar(radius, angle) {
   const radians = angle * Math.PI / 180;
@@ -4091,12 +4164,151 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind,
-    visualVersion: VISUAL_VERSION
-  }).build();
+function roundMetric(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+function commandsToSvgPath(commands) {
+  return commands.map((command) => {
+    const [type, x = 0, y = 0] = command;
+    if (type === Command.MOVE) {
+      return `M ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.LINE) {
+      return `L ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.CLOSE) {
+      return "Z";
+    }
+    return "";
+  }).filter(Boolean).join(" ");
+}
+function buildOverlayBounds(metrics, data) {
+  const specialActive = hasConfiguredSpecial(data);
+  const shieldActive = hasConfiguredShield(data);
+  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
+  const horizontalExtent = Math.max(
+    ringRadius,
+    shieldActive ? metrics.shieldOuterRadius : 0
+  );
+  const topExtent = Math.max(
+    ringRadius,
+    shieldActive ? Math.abs(metrics.shieldOffsetY) + metrics.shieldOuterRadius : 0
+  );
+  const bottomExtent = ringRadius;
+  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
+  return {
+    minX: -horizontalExtent - padding,
+    maxX: horizontalExtent + padding,
+    minY: -topExtent - padding,
+    maxY: bottomExtent + padding
+  };
+}
+function buildOverlaySignature(token, data, metrics) {
+  const bodySignature = BODY_ORDER.map((partName) => {
+    const part = data.body?.[partName] ?? {};
+    return [
+      partName,
+      Number(part.current) || 0,
+      Number(part.max) || 0,
+      Number(part.armor) || 0
+    ].join(":");
+  }).join("|");
+  return [
+    VISUAL_VERSION,
+    roundMetric(metrics.visibleDiameter),
+    roundMetric(metrics.outerRadius),
+    roundMetric(metrics.outerInnerRadius),
+    roundMetric(metrics.torsoOuterRadius),
+    roundMetric(metrics.torsoInnerRadius),
+    roundMetric(metrics.specialOuterRadius),
+    roundMetric(metrics.specialInnerRadius),
+    roundMetric(metrics.shieldOuterRadius),
+    roundMetric(metrics.shieldInnerRadius),
+    roundMetric(metrics.shieldOffsetY),
+    bodySignature
+  ].join(";");
+}
+function buildOverlaySvgMarkup(token, data, metrics) {
+  const layers = [
+    {
+      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
+      fill: RING_COLORS.base,
+      fillRule: "evenodd"
+    },
+    ...OUTER_SEGMENTS.map((segment) => ({
+      d: commandsToSvgPath(
+        buildSectorCommands(
+          metrics.outerRadius,
+          metrics.outerInnerRadius,
+          segment.angle,
+          segment.span
+        )
+      ),
+      fill: getPartColor(data.body[segment.part]),
+      fillRule: "nonzero"
+    })),
+    {
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
+      ),
+      fill: getPartColor(data.body.Torso),
+      fillRule: "evenodd"
+    }
+  ];
+  if (hasConfiguredSpecial(data)) {
+    layers.push({
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
+      ),
+      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+      fillRule: "evenodd"
+    });
+  }
+  if (hasConfiguredShield(data)) {
+    layers.push({
+      d: commandsToSvgPath(
+        buildAnnulusCommands(
+          metrics.shieldOuterRadius,
+          metrics.shieldInnerRadius,
+          0,
+          metrics.shieldOffsetY
+        )
+      ),
+      fill: getPartColor(data.body[SHIELD_PART_NAME]),
+      fillRule: "evenodd"
+    });
+  }
+  const bounds = buildOverlayBounds(metrics, data);
+  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
+  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
+    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
+  ).join("")}</svg>`;
+  return {
+    svg,
+    width,
+    height,
+    signature: buildOverlaySignature(token, data, metrics)
+  };
+}
+async function buildOverlayImageItem(token, data, metrics) {
+  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
+  const dpi = await getCachedGridDpi();
+  const image = {
+    width: Math.max(1, Math.ceil(width)),
+    height: Math.max(1, Math.ceil(height)),
+    mime: "image/svg+xml",
+    url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  };
+  return {
+    item: buildImage(image, { ...OVERLAY_IMAGE_GRID, dpi }).name(`Overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).scale({ x: 1, y: 1 }).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+      [OVERLAY_KEY]: token.id,
+      kind: OVERLAY_IMAGE_KIND,
+      visualVersion: VISUAL_VERSION,
+      signature
+    }).build(),
+    signature
+  };
 }
 function applyBodyEffects(body, bodyEffects) {
   if (!bodyEffects || typeof bodyEffects !== "object") return;
@@ -4174,90 +4386,6 @@ function applyRollEventToData(current2, event) {
   }
   return next;
 }
-function buildOverlayItems(token, data, metrics) {
-  const items = [];
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd"
-    )
-  );
-  for (const segment of OUTER_SEGMENTS) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `segment-${segment.part}`,
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span
-        ),
-        getPartColor(data.body[segment.part]),
-        1
-      )
-    );
-  }
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd"
-    )
-  );
-  if (hasConfiguredSpecial(data)) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        "special-ring",
-        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-        getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-        3,
-        "evenodd"
-      )
-    );
-  }
-  if (hasConfiguredShield(data)) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        "shield-ring",
-        buildAnnulusCommands(
-          metrics.shieldOuterRadius,
-          metrics.shieldInnerRadius,
-          0,
-          metrics.shieldOffsetY
-        ),
-        getPartColor(data.body[SHIELD_PART_NAME]),
-        4,
-        "evenodd"
-      )
-    );
-  }
-  return items;
-}
-function getExpectedOverlayKinds(data) {
-  const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
-  if (hasConfiguredSpecial(data)) {
-    expected.push("special-ring");
-  }
-  if (hasConfiguredShield(data)) {
-    expected.push("shield-ring");
-  }
-  return expected;
-}
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -4268,23 +4396,52 @@ async function updateTrackerData(tokenId, updater) {
     );
   });
 }
-async function removeOverlaysForToken(tokenId, items) {
-  const sceneItems = items ?? await lib_default.scene.items.getItems();
-  const overlayIds = sceneItems.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId).map((item) => item.id);
-  if (overlayIds.length) {
-    await lib_default.scene.items.deleteItems(overlayIds);
-  }
-}
 async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems = items ?? await lib_default.scene.items.getItems();
   const token = sceneItems.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
-  await removeOverlaysForToken(tokenId, sceneItems);
-  if (!isTrackedCharacter(token) || token.visible === false) return;
+  const overlayItems = sceneItems.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId);
+  if (!isTrackedCharacter(token) || token.visible === false) {
+    if (overlayItems.length) {
+      await lib_default.scene.items.deleteItems(overlayItems.map((item) => item.id));
+    }
+    return;
+  }
   const metrics = await getTokenMetrics(token);
-  await lib_default.scene.items.addItems(
-    buildOverlayItems(token, getTrackerData(token), metrics)
+  const data = getTrackerData(token);
+  const { item: nextOverlayItem, signature } = await buildOverlayImageItem(token, data, metrics);
+  const currentOverlay = overlayItems.find(
+    (item) => String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND
   );
+  const staleOverlayIds = overlayItems.filter((item) => item.id !== currentOverlay?.id).map((item) => item.id);
+  if (currentOverlay) {
+    const signatureMatches = String(currentOverlay.metadata?.signature ?? "") === signature;
+    const visuallyValid = currentOverlay.attachedTo === token.id && currentOverlay.visible === true && Number(currentOverlay.metadata?.visualVersion ?? 0) === VISUAL_VERSION;
+    if (!signatureMatches || !visuallyValid) {
+      await lib_default.scene.items.updateItems([currentOverlay.id], (itemsToUpdate) => {
+        const overlay = itemsToUpdate[0];
+        if (!overlay) return;
+        overlay.name = nextOverlayItem.name;
+        overlay.position = nextOverlayItem.position;
+        overlay.rotation = nextOverlayItem.rotation;
+        overlay.scale = nextOverlayItem.scale;
+        overlay.visible = nextOverlayItem.visible;
+        overlay.attachedTo = nextOverlayItem.attachedTo;
+        overlay.layer = nextOverlayItem.layer;
+        overlay.locked = nextOverlayItem.locked;
+        overlay.disableHit = nextOverlayItem.disableHit;
+        overlay.disableAttachmentBehavior = nextOverlayItem.disableAttachmentBehavior;
+        overlay.metadata = nextOverlayItem.metadata;
+        overlay.image = nextOverlayItem.image;
+        overlay.grid = nextOverlayItem.grid;
+      });
+    }
+  } else {
+    await lib_default.scene.items.addItems([nextOverlayItem]);
+  }
+  if (staleOverlayIds.length) {
+    await lib_default.scene.items.deleteItems(staleOverlayIds);
+  }
 }
 async function ensureOverlayForToken(tokenId, items) {
   const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
@@ -4321,7 +4478,7 @@ async function syncTrackedOverlays() {
   }
   const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
     const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
+    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION || String(item.metadata?.kind ?? "") !== OVERLAY_IMAGE_KIND;
   }).map((item) => item.id);
   if (staleOverlayIds.length) {
     await lib_default.scene.items.deleteItems(staleOverlayIds);
@@ -4329,14 +4486,12 @@ async function syncTrackedOverlays() {
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
     const overlayItems = overlaysByTokenId.get(token.id) ?? [];
-    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
-    const seenKinds = /* @__PURE__ */ new Set();
-    const needsRebuild = overlayItems.length !== expectedKinds.length || overlayItems.some((item) => {
-      const kind = String(item.metadata?.kind ?? "");
-      const invalid = item.attachedTo !== token.id || item.visible !== true || !expectedKinds.includes(kind) || seenKinds.has(kind);
-      seenKinds.add(kind);
-      return invalid;
-    });
+    const currentOverlay = overlayItems.find(
+      (item) => String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND
+    );
+    const metrics = await getTokenMetrics(token);
+    const expectedSignature = buildOverlaySignature(token, getTrackerData(token), metrics);
+    const needsRebuild = overlayItems.length !== 1 || !currentOverlay || currentOverlay.attachedTo !== token.id || currentOverlay.visible !== true || String(currentOverlay.metadata?.signature ?? "") !== expectedSignature;
     if (needsRebuild) {
       await ensureOverlayForToken(token.id);
     }
@@ -4447,23 +4602,24 @@ var currentRole = "PLAYER";
 var lastBridgeEventId = 0;
 var bridgePollTimer = null;
 var pushStateTimer = null;
-async function updateBadge() {
+async function updateBadge(items) {
   try {
-    const items = await lib_default.scene.items.getItems();
-    const trackedCount = items.filter(isTrackedCharacter).length;
+    const sceneItems = items ?? await lib_default.scene.items.getItems();
+    const trackedCount = sceneItems.filter(isTrackedCharacter).length;
     await lib_default.action.setBadgeText(trackedCount ? String(trackedCount) : void 0);
   } catch (error) {
     console.warn("[Body HP] Unable to update badge", error);
   }
 }
-function scheduleTokenSync(delayMs = 800) {
+function scheduleTokenSync(delayMs = 800, itemsSnapshot = null) {
   if (pushStateTimer) {
     clearTimeout(pushStateTimer);
   }
   pushStateTimer = setTimeout(() => {
     pushStateTimer = null;
     if (currentRole !== "GM") return;
-    void lib_default.scene.items.getItems().then((items) => pushTokenSnapshots(extractTrackedTokens(items))).catch((error) => {
+    const pushPromise = itemsSnapshot ? Promise.resolve(itemsSnapshot) : lib_default.scene.items.getItems();
+    void pushPromise.then((items) => pushTokenSnapshots(extractTrackedTokens(items))).catch((error) => {
       console.warn("[Body HP] Unable to push token snapshots", error);
     });
   }, delayMs);
@@ -4512,9 +4668,9 @@ lib_default.onReady(async () => {
       scheduleTokenSync(100);
       void restartBridgePolling();
     }
-    lib_default.scene.items.onChange(() => {
-      void updateBadge();
-      scheduleTokenSync();
+    lib_default.scene.items.onChange((items) => {
+      void updateBadge(items);
+      scheduleTokenSync(800, items);
     });
     lib_default.player.onChange(async () => {
       const nextRole = await lib_default.player.getRole();

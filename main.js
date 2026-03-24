@@ -6,6 +6,7 @@ import {
   COMBAT_SKILL_CATEGORY,
   DEFAULT_ODYSSEY_SKILLS,
   MELEE_SKILL_NAME,
+  META_KEY,
   OBR,
   PARRY_SKILL_NAME,
   canPlayerControlToken,
@@ -27,7 +28,7 @@ import {
   removeOverlaysForToken,
   sortCharacters,
   syncTrackedOverlays,
-  updateTrackerData,
+  updateTrackerData as persistTrackerData,
 } from "./shared.js";
 import {
   formatAttackOutcomeLabel,
@@ -102,10 +103,15 @@ let playerId = "";
 let playerName = "";
 let playerColor = "#facc15";
 let sceneItems = [];
+let localSceneItems = [];
 let selectionIds = [];
 let activeTokenId = null;
 let debugEntries = [];
 let partyPlayers = [];
+let sortedPartyPlayersCache = [];
+let characterListCache = [];
+let trackedCharacterListCache = [];
+let charactersByIdCache = new Map();
 let gmPrivateEntries = [];
 const pendingLocalDebugEntryIds = new Set();
 let pendingLocalDebugClear = false;
@@ -113,7 +119,8 @@ const collapsibleSectionState = new Map();
 const attackFormDrafts = new Map();
 const inputAutosaveTimers = new Map();
 let selectionPollTimer = null;
-let overlayMaintenanceTimer = null;
+let renderScheduled = false;
+let sceneSideEffectsTimer = null;
 const targetPickState = {
   active: false,
   attackerTokenId: null,
@@ -122,6 +129,72 @@ const targetPickState = {
   toolReady: false,
   restoring: false,
 };
+
+function rebuildSceneCaches() {
+  characterListCache = sortCharacters(sceneItems.filter(isCharacterToken));
+  trackedCharacterListCache = characterListCache.filter(isTrackedCharacter);
+  charactersByIdCache = new Map(characterListCache.map((item) => [item.id, item]));
+}
+
+function setSceneItems(items) {
+  sceneItems = Array.isArray(items) ? items : [];
+  rebuildSceneCaches();
+}
+
+function setLocalSceneItems(items) {
+  localSceneItems = Array.isArray(items) ? items : [];
+}
+
+function setSelectionState(selection) {
+  selectionIds = selection ?? [];
+}
+
+function setPartyPlayersState(players) {
+  partyPlayers = players ?? [];
+  sortedPartyPlayersCache = [...partyPlayers].sort((left, right) =>
+    String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
+  );
+}
+
+function removeLocalItemsFromCache(ids) {
+  if (!ids.length) return;
+  const removeSet = new Set(ids);
+  setLocalSceneItems(localSceneItems.filter((item) => !removeSet.has(item.id)));
+}
+
+function upsertLocalItemsInCache(items) {
+  if (!items.length) return;
+  const byId = new Map(localSceneItems.map((item) => [item.id, item]));
+  for (const item of items) {
+    byId.set(item.id, item);
+  }
+  setLocalSceneItems([...byId.values()]);
+}
+
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  window.requestAnimationFrame(() => {
+    renderScheduled = false;
+    render();
+  });
+}
+
+function scheduleSceneSideEffects(items = sceneItems) {
+  if (sceneSideEffectsTimer) {
+    clearTimeout(sceneSideEffectsTimer);
+  }
+
+  sceneSideEffectsTimer = window.setTimeout(() => {
+    sceneSideEffectsTimer = null;
+    void syncLocalOwnedHiddenTokenViews(items).catch((error) => {
+      console.warn("[Body HP] Unable to sync local hidden-token views", error);
+    });
+    void syncTargetHighlight().catch((error) => {
+      console.warn("[Body HP] Unable to sync target highlight", error);
+    });
+  }, 60);
+}
 
 function sanitizeDebugEntries(raw) {
   if (!Array.isArray(raw)) return [];
@@ -382,17 +455,15 @@ function restoreSelectedPanelState(panelState) {
 }
 
 function getSortedPartyPlayers() {
-  return [...partyPlayers].sort((left, right) =>
-    String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
-  );
+  return sortedPartyPlayersCache;
 }
 
 function getCharacters() {
-  return sortCharacters(sceneItems.filter(isCharacterToken));
+  return characterListCache;
 }
 
 function getTrackedCharacters() {
-  return getCharacters().filter(isTrackedCharacter);
+  return trackedCharacterListCache;
 }
 
 function getControllableCharacters() {
@@ -402,7 +473,7 @@ function getControllableCharacters() {
 }
 
 function getCharacterById(tokenId) {
-  return getCharacters().find((item) => item.id === tokenId) ?? null;
+  return charactersByIdCache.get(tokenId) ?? null;
 }
 
 function resolveActiveTokenId() {
@@ -453,6 +524,30 @@ function canViewDiceBlock(token) {
 
 function canViewOverlayPreview(token) {
   return canUseToken(token);
+}
+
+function applyLocalTrackerDataUpdate(tokenId, updater) {
+  const nextItems = sceneItems.map((item) => {
+    if (item.id !== tokenId) return item;
+    const nextItem = structuredClone(item);
+    nextItem.metadata ??= {};
+    nextItem.metadata[META_KEY] = updater(getTrackerData(item));
+    return nextItem;
+  });
+
+  setSceneItems(nextItems);
+}
+
+async function updateTrackerData(tokenId, updater) {
+  applyLocalTrackerDataUpdate(tokenId, updater);
+  scheduleRender();
+  try {
+    await persistTrackerData(tokenId, updater);
+  } catch (error) {
+    setSceneItems(await OBR.scene.items.getItems());
+    scheduleRender();
+    throw error;
+  }
 }
 
 async function initializeCharacterToken(tokenId) {
@@ -561,6 +656,26 @@ function arraysEqual(left, right) {
   return left.every((value, index) => value === right[index]);
 }
 
+async function handleSelectionChange(selection, allowInitialize = true) {
+  const nextSelection = selection ?? [];
+  setSelectionState(nextSelection);
+
+  const selectedCharacterId = nextSelection.find((id) => charactersByIdCache.has(id));
+  if (selectedCharacterId) {
+    activeTokenId = selectedCharacterId;
+    if (allowInitialize) {
+      await initializeCharacterToken(selectedCharacterId);
+    }
+  } else if (activeTokenId && !charactersByIdCache.has(activeTokenId)) {
+    activeTokenId = null;
+  } else {
+    activeTokenId = resolveActiveTokenId();
+  }
+
+  scheduleRender();
+  await syncTargetHighlight();
+}
+
 function startSelectionPolling() {
   if (selectionPollTimer) {
     clearInterval(selectionPollTimer);
@@ -572,14 +687,14 @@ function startSelectionPolling() {
       .then((selection) => selection ?? [])
       .then((selection) => {
         if (!arraysEqual(selectionIds, selection)) {
-          return syncState();
+          return handleSelectionChange(selection);
         }
         return null;
       })
       .catch((error) => {
         console.warn("[Body HP] Selection polling failed", error);
       });
-  }, 200);
+  }, 1500);
 }
 
 function formatAttackDebug({
@@ -1163,7 +1278,7 @@ async function assignAttackTarget(attacker, target, successMessage) {
   saveAttackDraftValue(attacker.id, "targetTokenName", getCharacterName(target));
   await persistAttackTargetToken(attacker.id, target.id);
   activeTokenId = attacker.id;
-  render();
+  scheduleRender();
 
   const targetField = ui.selectedTokenPanel.querySelector('[data-attack-field="targetTokenId"]');
   if (targetField instanceof HTMLInputElement || targetField instanceof HTMLSelectElement) {
@@ -1200,13 +1315,13 @@ function isLocalTargetHighlight(item) {
 }
 
 async function clearTargetHighlight() {
-  const localItems = await OBR.scene.local.getItems();
-  const highlightIds = localItems
+  const highlightIds = localSceneItems
     .filter(isLocalTargetHighlight)
     .map((item) => item.id);
 
   if (highlightIds.length) {
     await OBR.scene.local.deleteItems(highlightIds);
+    removeLocalItemsFromCache(highlightIds);
   }
 }
 
@@ -1270,12 +1385,13 @@ async function syncTargetHighlight() {
   );
   const draft = getAttackDraft(attacker, getTrackerData(attacker), targetCharacters);
   const target = getCharacterById(draft.targetTokenId);
-  const localItems = await OBR.scene.local.getItems();
-  const existingHighlights = localItems.filter(isLocalTargetHighlight);
+  const existingHighlights = localSceneItems.filter(isLocalTargetHighlight);
 
   if (!target || !isCharacterToken(target) || target.visible === false || target.id === attacker.id) {
     if (existingHighlights.length) {
-      await OBR.scene.local.deleteItems(existingHighlights.map((item) => item.id));
+      const highlightIds = existingHighlights.map((item) => item.id);
+      await OBR.scene.local.deleteItems(highlightIds);
+      removeLocalItemsFromCache(highlightIds);
     }
     return;
   }
@@ -1289,10 +1405,14 @@ async function syncTargetHighlight() {
   }
 
   if (existingHighlights.length) {
-    await OBR.scene.local.deleteItems(existingHighlights.map((item) => item.id));
+    const highlightIds = existingHighlights.map((item) => item.id);
+    await OBR.scene.local.deleteItems(highlightIds);
+    removeLocalItemsFromCache(highlightIds);
   }
 
-  await OBR.scene.local.addItems([await buildTargetHighlightItem(target)]);
+  const nextHighlight = await buildTargetHighlightItem(target);
+  await OBR.scene.local.addItems([nextHighlight]);
+  upsertLocalItemsInCache([nextHighlight]);
 }
 
 function isLocalSelfViewItem(item) {
@@ -1333,10 +1453,10 @@ async function buildLocalSelfViewItem(token) {
 }
 
 async function clearLocalSelfViews() {
-  const localItems = await OBR.scene.local.getItems();
-  const localViewIds = localItems.filter(isLocalSelfViewItem).map((item) => item.id);
+  const localViewIds = localSceneItems.filter(isLocalSelfViewItem).map((item) => item.id);
   if (localViewIds.length) {
     await OBR.scene.local.deleteItems(localViewIds);
+    removeLocalItemsFromCache(localViewIds);
   }
 }
 
@@ -1350,18 +1470,17 @@ async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
     (item) => isCharacterToken(item) && item.visible === false && canUseToken(item),
   );
   const desiredTokenIds = new Set(desiredTokens.map((token) => token.id));
-  const localItems = await OBR.scene.local.getItems();
-  const existingViews = localItems.filter(isLocalSelfViewItem);
+  const existingViews = localSceneItems.filter(isLocalSelfViewItem);
   const staleViewIds = existingViews
     .filter((item) => !desiredTokenIds.has(String(item.metadata?.[LOCAL_SELF_VIEW_KEY]?.tokenId ?? "")))
     .map((item) => item.id);
 
   if (staleViewIds.length) {
     await OBR.scene.local.deleteItems(staleViewIds);
+    removeLocalItemsFromCache(staleViewIds);
   }
 
-  const currentLocalItems = staleViewIds.length ? await OBR.scene.local.getItems() : localItems;
-  const currentViews = currentLocalItems.filter(isLocalSelfViewItem);
+  const currentViews = localSceneItems.filter(isLocalSelfViewItem);
   const viewIdsToReplace = [];
   const itemsToAdd = [];
 
@@ -1381,23 +1500,12 @@ async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
 
   if (viewIdsToReplace.length) {
     await OBR.scene.local.deleteItems(viewIdsToReplace);
+    removeLocalItemsFromCache(viewIdsToReplace);
   }
   if (itemsToAdd.length) {
     await OBR.scene.local.addItems(itemsToAdd);
+    upsertLocalItemsInCache(itemsToAdd);
   }
-}
-
-function scheduleOverlayMaintenance() {
-  if (playerRole !== "GM") return;
-  if (overlayMaintenanceTimer) {
-    clearTimeout(overlayMaintenanceTimer);
-  }
-  overlayMaintenanceTimer = window.setTimeout(() => {
-    overlayMaintenanceTimer = null;
-    void syncTrackedOverlays().catch((error) => {
-      console.warn("[Body HP] Overlay maintenance failed", error);
-    });
-  }, 120);
 }
 
 async function teardownTargetPickerTool() {
@@ -1442,7 +1550,7 @@ async function stopTargetPick(statusMessage = "", statusKind = "info") {
   const wasActive = targetPickState.active;
   targetPickState.active = false;
   targetPickState.attackerTokenId = null;
-  render();
+  scheduleRender();
 
   if (wasActive) {
     await restorePreviousTool();
@@ -1556,7 +1664,7 @@ async function startTargetPick() {
   await ensureTargetPickerTool();
   await OBR.tool.activateTool(TARGET_PICK_TOOL_ID);
   await OBR.tool.activateMode(TARGET_PICK_TOOL_ID, TARGET_PICK_MODE_ID);
-  render();
+  scheduleRender();
   setStatus("Click a visible target token on the map to assign it.", "info");
 }
 
@@ -2646,7 +2754,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           : "No visible target tokens found. You can still keep a saved target or use No Target Attack below."
       }</div>
       <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
-      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is added to defense only for melee attacks.</div>
+      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is always added to defense unless Parry Mode is set to Do Not Count Parry.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-attack" ${attackDisabledAttr}>Attack</button>
       </div>
@@ -3064,25 +3172,25 @@ async function syncState(showToast = false) {
   playerId = id;
   playerName = name;
   playerColor = color;
-  partyPlayers = players ?? [];
-  sceneItems = items;
-  selectionIds = selection ?? [];
+  setPartyPlayersState(players);
+  setSceneItems(items);
+  setSelectionState(selection);
 
   const selectedCharacterId = selectionIds.find((selectionId) =>
-    sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
+    charactersByIdCache.has(selectionId)
   );
   if (selectedCharacterId) {
     activeTokenId = selectedCharacterId;
     const initialized = await initializeCharacterToken(selectedCharacterId);
     if (initialized) {
-      sceneItems = await OBR.scene.items.getItems();
+      setSceneItems(await OBR.scene.items.getItems());
     }
-  } else if (activeTokenId && !sceneItems.some((item) => item.id === activeTokenId)) {
-    activeTokenId = null;
+  } else if (activeTokenId && !charactersByIdCache.has(activeTokenId)) {
+    activeTokenId = resolveActiveTokenId();
   }
 
   await syncLocalOwnedHiddenTokenViews(sceneItems);
-  render();
+  scheduleRender();
   await syncTargetHighlight();
 
   if (showToast) {
@@ -3097,8 +3205,7 @@ async function selectCharacter(tokenId) {
   activeTokenId = tokenId;
   await OBR.player.select([tokenId], true);
   await initializeCharacterToken(tokenId);
-  sceneItems = await OBR.scene.items.getItems();
-  render();
+  scheduleRender();
   await syncTargetHighlight();
 }
 
@@ -3122,9 +3229,9 @@ async function reloadTokenVisuals() {
     await ensureOverlayForToken(token.id);
   }
 
-  sceneItems = await OBR.scene.items.getItems();
+  setSceneItems(await OBR.scene.items.getItems());
   await syncLocalOwnedHiddenTokenViews(sceneItems);
-  render();
+  scheduleRender();
   await syncTargetHighlight();
   setStatus(`${getCharacterName(token)} visuals reloaded.`, "success");
 }
@@ -3153,7 +3260,6 @@ async function healLimbs() {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
   setStatus(`${getCharacterName(token)} healed.`, "success");
 }
 
@@ -3185,7 +3291,6 @@ async function changeBodyField(partName, field, delta) {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
 }
 
 async function setBodyField(partName, field, value) {
@@ -3217,7 +3322,6 @@ async function setBodyField(partName, field, value) {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
 }
 
 async function setOwnerPlayer(ownerPlayerId) {
@@ -3243,7 +3347,6 @@ async function setOwnerPlayer(ownerPlayerId) {
     return next;
   });
   await ensureOverlayForToken(token.id);
-  await syncState();
 }
 
 async function setOdysseySkill(skill, value) {
@@ -3262,7 +3365,6 @@ async function setOdysseySkill(skill, value) {
     next.odyssey.skills[skill] = clamp(Number(value) || 0, 0, 10);
     return next;
   });
-  await syncState();
 }
 
 async function setOdysseySkillStrengthBonus(skill, enabled) {
@@ -3282,7 +3384,6 @@ async function setOdysseySkillStrengthBonus(skill, enabled) {
     next.odyssey.skillStrengthBonuses[skill] = Boolean(enabled);
     return next;
   });
-  await syncState();
 }
 
 async function setOdysseyAttribute(attribute, value) {
@@ -3301,7 +3402,6 @@ async function setOdysseyAttribute(attribute, value) {
     next.odyssey.attributes[attribute] = clamp(Number(value) || 0, 0, 20);
     return next;
   });
-  await syncState();
 }
 
 async function addWeapon() {
@@ -3324,7 +3424,6 @@ async function addWeapon() {
     next.odyssey.weapons.melee.push({ name, damage });
     return next;
   });
-  await syncState();
   syncAttackWeaponInputs(token.id, name, damage);
   setStatus(`Weapon "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
@@ -3352,7 +3451,6 @@ async function setWeaponDamage(index, value) {
     next.odyssey.weapons.melee[index].damage = nextDamage;
     return next;
   });
-  await syncState();
   const currentDraft = attackFormDrafts.get(token.id) ?? {};
   if (currentDraft.weaponName === currentWeaponName) {
     syncAttackWeaponInputs(token.id, currentWeaponName, nextDamage);
@@ -3382,7 +3480,6 @@ async function setWeaponName(index, value) {
     next.odyssey.weapons.melee[index].name = nextWeaponName;
     return next;
   });
-  await syncState();
   const currentDraft = attackFormDrafts.get(token.id) ?? {};
   if (currentDraft.weaponName === previousWeapon.name) {
     syncAttackWeaponInputs(token.id, nextWeaponName, previousWeapon.damage);
@@ -3414,7 +3511,6 @@ async function removeWeapon(index) {
     );
     return next;
   });
-  await syncState();
   const refreshedToken = getCharacterById(token.id);
   const fallbackWeapon = refreshedToken
     ? getDefaultAttackWeapon(refreshedToken)
@@ -3661,12 +3757,9 @@ async function performAttack({ manualDefense = false } = {}) {
     ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0)
     : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
-  const baseTargetParry =
-    skillName === MELEE_SKILL_NAME
-      ? target
-        ? (targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0)
-        : manualParry
-      : 0;
+  const baseTargetParry = target
+    ? (targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0)
+    : manualParry;
   const targetParry =
     parryDivisor <= 0
       ? 0
@@ -3799,7 +3892,6 @@ async function performAttack({ manualDefense = false } = {}) {
     }),
     result.hit ? "success" : "info",
   );
-  await syncState();
   setStatus(`${getCharacterName(attacker)} -> ${resolvedTargetName}: ${resolvedAttackSummary}`, result.hit ? "success" : "info");
 }
 
@@ -3842,7 +3934,6 @@ async function performRollDice() {
     tokenName: getCharacterName(token),
     result,
   }), "success");
-  await syncState();
   setStatus(summary, "success");
 }
 
@@ -3892,7 +3983,6 @@ async function addOdysseySkill() {
           : Boolean(addStrengthBonus);
     return next;
   });
-  await syncState();
   setStatus(`Skill "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
 
@@ -3919,7 +4009,6 @@ async function removeOdysseySkill(skillName) {
     delete next.odyssey.skillStrengthBonuses?.[skillName];
     return next;
   });
-  await syncState();
   setStatus(`Skill "${skillName}" removed.`, "success");
 }
 
@@ -3967,7 +4056,6 @@ async function performRollChar() {
     }),
     isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info",
   );
-  await syncState();
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 
@@ -4018,7 +4106,6 @@ async function performRollSkill() {
     }),
     isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info",
   );
-  await syncState();
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 
@@ -4042,7 +4129,7 @@ async function performPrivateGmRoll() {
       result,
     }),
   );
-  render();
+  scheduleRender();
   setStatus(`Private GM roll. ${summary}`, "success");
 }
 
@@ -4397,7 +4484,12 @@ OBR.onReady(async () => {
   try {
     bindUiEvents();
     await removeAttackTargetContextMenu();
-    await loadSharedDebugConsole();
+    await Promise.all([
+      loadSharedDebugConsole(),
+      OBR.scene.local.getItems().then((items) => {
+        setLocalSceneItems(items);
+      }),
+    ]);
     await syncState(true);
     startSelectionPolling();
     setStatus(
@@ -4406,15 +4498,13 @@ OBR.onReady(async () => {
     );
 
     OBR.scene.items.onChange((items) => {
-      sceneItems = items;
-      render();
-      void syncLocalOwnedHiddenTokenViews(items).catch((error) => {
-        console.warn("[Body HP] Unable to sync local hidden-token views", error);
-      });
-      void syncTargetHighlight().catch((error) => {
-        console.warn("[Body HP] Unable to sync target highlight", error);
-      });
-      scheduleOverlayMaintenance();
+      setSceneItems(items);
+      scheduleRender();
+      scheduleSceneSideEffects(items);
+    });
+
+    OBR.scene.local.onChange((items) => {
+      setLocalSceneItems(items);
     });
 
     OBR.player.onChange((player) => {
@@ -4422,23 +4512,18 @@ OBR.onReady(async () => {
       playerId = player.id ?? playerId;
       playerName = player.name ?? playerName;
       playerColor = player.color ?? playerColor;
-      selectionIds = player.selection ?? [];
-      const selectedCharacterId = selectionIds.find((selectionId) =>
-        sceneItems.some((item) => item.id === selectionId && isCharacterToken(item))
-      );
-      if (selectedCharacterId) {
-        activeTokenId = selectedCharacterId;
-      }
-
-      void syncState().catch((error) => {
+      void handleSelectionChange(player.selection ?? []).then(() => {
+        scheduleRender();
+        return syncLocalOwnedHiddenTokenViews(sceneItems);
+      }).catch((error) => {
         console.warn("[Body HP] Player state sync failed", error);
-        render();
+        scheduleRender();
       });
     });
 
     OBR.party.onChange((players) => {
-      partyPlayers = players ?? [];
-      render();
+      setPartyPlayersState(players);
+      scheduleRender();
     });
 
     OBR.broadcast.onMessage(DEBUG_BROADCAST_CHANNEL, (event) => {

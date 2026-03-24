@@ -1,4 +1,4 @@
-import { Command, buildPath } from "@owlbear-rodeo/sdk";
+import { Command, buildImage, buildPath } from "@owlbear-rodeo/sdk";
 import {
   ABILITIES_SKILL_CATEGORY,
   APPLIED_SKILL_CATEGORY,
@@ -39,6 +39,7 @@ const DEBUG_ENTRY_LIMIT = 50;
 const TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 const TARGET_PICK_MODE_ID = "pick-target";
 const TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
+const LOCAL_SELF_VIEW_KEY = "com.codex.body-hp/local-self-view";
 const ATTACK_TARGET_CONTEXT_MENU_ID = "com.codex.body-hp/set-attack-target";
 const SHOW_EMBEDDED_PUBLIC_LOG = false;
 const EXTENSION_ICON_URL = new URL("./icon.svg", window.location.href).href;
@@ -109,6 +110,7 @@ const collapsibleSectionState = new Map();
 const attackFormDrafts = new Map();
 const inputAutosaveTimers = new Map();
 let selectionPollTimer = null;
+let overlayMaintenanceTimer = null;
 const targetPickState = {
   active: false,
   attackerTokenId: null,
@@ -409,6 +411,11 @@ function resolveActiveTokenId() {
   if (selectedCharacterId) return selectedCharacterId;
   if (activeTokenId && characters.some((character) => character.id === activeTokenId)) {
     return activeTokenId;
+  }
+
+  if (playerRole !== "GM") {
+    const firstControllable = getControllableCharacters()[0];
+    if (firstControllable) return firstControllable.id;
   }
 
   const firstTracked = getTrackedCharacters()[0];
@@ -1114,6 +1121,111 @@ async function syncTargetHighlight() {
   }
 
   await OBR.scene.local.addItems([await buildTargetHighlightItem(target)]);
+}
+
+function isLocalSelfViewItem(item) {
+  return Boolean(item?.metadata?.[LOCAL_SELF_VIEW_KEY]);
+}
+
+function buildLocalSelfViewSignature(token) {
+  return [
+    token.lastModified,
+    token.position?.x ?? 0,
+    token.position?.y ?? 0,
+    token.rotation ?? 0,
+    token.scale?.x ?? 1,
+    token.scale?.y ?? 1,
+    token.zIndex ?? 0,
+  ].join("|");
+}
+
+async function buildLocalSelfViewItem(token) {
+  return buildImage(token.image, token.grid)
+    .name(`${getCharacterName(token)} (Local View)`)
+    .position(token.position)
+    .rotation(token.rotation ?? 0)
+    .scale(token.scale ?? { x: 1, y: 1 })
+    .zIndex((token.zIndex ?? 0) + 1)
+    .visible(true)
+    .layer("CHARACTER")
+    .locked(true)
+    .disableHit(true)
+    .metadata({
+      [LOCAL_SELF_VIEW_KEY]: {
+        tokenId: token.id,
+        ownerPlayerId: playerId,
+        signature: buildLocalSelfViewSignature(token),
+      },
+    })
+    .build();
+}
+
+async function clearLocalSelfViews() {
+  const localItems = await OBR.scene.local.getItems();
+  const localViewIds = localItems.filter(isLocalSelfViewItem).map((item) => item.id);
+  if (localViewIds.length) {
+    await OBR.scene.local.deleteItems(localViewIds);
+  }
+}
+
+async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
+  if (playerRole === "GM" || !playerId) {
+    await clearLocalSelfViews();
+    return;
+  }
+
+  const desiredTokens = items.filter(
+    (item) => isCharacterToken(item) && item.visible === false && canUseToken(item),
+  );
+  const desiredTokenIds = new Set(desiredTokens.map((token) => token.id));
+  const localItems = await OBR.scene.local.getItems();
+  const existingViews = localItems.filter(isLocalSelfViewItem);
+  const staleViewIds = existingViews
+    .filter((item) => !desiredTokenIds.has(String(item.metadata?.[LOCAL_SELF_VIEW_KEY]?.tokenId ?? "")))
+    .map((item) => item.id);
+
+  if (staleViewIds.length) {
+    await OBR.scene.local.deleteItems(staleViewIds);
+  }
+
+  const currentLocalItems = staleViewIds.length ? await OBR.scene.local.getItems() : localItems;
+  const currentViews = currentLocalItems.filter(isLocalSelfViewItem);
+  const viewIdsToReplace = [];
+  const itemsToAdd = [];
+
+  for (const token of desiredTokens) {
+    const existingView = currentViews.find(
+      (item) => item.metadata?.[LOCAL_SELF_VIEW_KEY]?.tokenId === token.id,
+    );
+    const nextSignature = buildLocalSelfViewSignature(token);
+    if (existingView?.metadata?.[LOCAL_SELF_VIEW_KEY]?.signature === nextSignature) {
+      continue;
+    }
+    if (existingView) {
+      viewIdsToReplace.push(existingView.id);
+    }
+    itemsToAdd.push(await buildLocalSelfViewItem(token));
+  }
+
+  if (viewIdsToReplace.length) {
+    await OBR.scene.local.deleteItems(viewIdsToReplace);
+  }
+  if (itemsToAdd.length) {
+    await OBR.scene.local.addItems(itemsToAdd);
+  }
+}
+
+function scheduleOverlayMaintenance() {
+  if (playerRole !== "GM") return;
+  if (overlayMaintenanceTimer) {
+    clearTimeout(overlayMaintenanceTimer);
+  }
+  overlayMaintenanceTimer = window.setTimeout(() => {
+    overlayMaintenanceTimer = null;
+    void syncTrackedOverlays().catch((error) => {
+      console.warn("[Body HP] Overlay maintenance failed", error);
+    });
+  }, 120);
 }
 
 async function teardownTargetPickerTool() {
@@ -2737,6 +2849,7 @@ async function syncState(showToast = false) {
     activeTokenId = null;
   }
 
+  await syncLocalOwnedHiddenTokenViews(sceneItems);
   render();
   await syncTargetHighlight();
 
@@ -3904,9 +4017,13 @@ OBR.onReady(async () => {
     OBR.scene.items.onChange((items) => {
       sceneItems = items;
       render();
+      void syncLocalOwnedHiddenTokenViews(items).catch((error) => {
+        console.warn("[Body HP] Unable to sync local hidden-token views", error);
+      });
       void syncTargetHighlight().catch((error) => {
         console.warn("[Body HP] Unable to sync target highlight", error);
       });
+      scheduleOverlayMaintenance();
     });
 
     OBR.player.onChange((player) => {

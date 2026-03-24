@@ -3692,7 +3692,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 5;
+var VISUAL_VERSION = 6;
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -3711,6 +3711,7 @@ var OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 }
 ];
+var overlayEnsureQueue = /* @__PURE__ */ new Map();
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -3928,19 +3929,9 @@ function getEffectiveSize(token) {
 }
 async function getTokenMetrics(token) {
   const effectiveSize = getEffectiveSize(token);
-  let center = token.position;
-  let width = effectiveSize.width;
-  let height = effectiveSize.height;
-  try {
-    const bounds = await lib_default.scene.items.getItemBounds([token.id]);
-    if (bounds?.width > 0 && bounds?.height > 0) {
-      center = bounds.center;
-      width = bounds.width;
-      height = bounds.height;
-    }
-  } catch (error) {
-    console.warn("[Body HP] Unable to read token bounds, using fallback size", error);
-  }
+  const center = token.position;
+  const width = effectiveSize.width;
+  const height = effectiveSize.height;
   let gridDpi = 150;
   try {
     gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
@@ -4083,7 +4074,7 @@ function getPartColor(part) {
   return getHpColor(part.current / part.max);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
     [OVERLAY_KEY]: token.id,
     kind,
     visualVersion: VISUAL_VERSION
@@ -4226,6 +4217,13 @@ function buildOverlayItems(token, data, metrics) {
   }
   return items;
 }
+function getExpectedOverlayKinds(data) {
+  const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
+  if (hasConfiguredShield(data)) {
+    expected.push("shield-ring");
+  }
+  return expected;
+}
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -4243,16 +4241,29 @@ async function removeOverlaysForToken(tokenId, items) {
     await lib_default.scene.items.deleteItems(overlayIds);
   }
 }
-async function ensureOverlayForToken(tokenId, items) {
+async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems = items ?? await lib_default.scene.items.getItems();
   const token = sceneItems.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
   await removeOverlaysForToken(tokenId, sceneItems);
-  if (!isTrackedCharacter(token)) return;
+  if (!isTrackedCharacter(token) || token.visible === false) return;
   const metrics = await getTokenMetrics(token);
   await lib_default.scene.items.addItems(
     buildOverlayItems(token, getTrackerData(token), metrics)
   );
+}
+async function ensureOverlayForToken(tokenId, items) {
+  const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
+  const next = previous.catch(() => {
+  }).then(() => ensureOverlayForTokenInternal(tokenId, items));
+  overlayEnsureQueue.set(tokenId, next);
+  try {
+    await next;
+  } finally {
+    if (overlayEnsureQueue.get(tokenId) === next) {
+      overlayEnsureQueue.delete(tokenId);
+    }
+  }
 }
 async function applyRemoteRollEvent(event) {
   if (!event?.token_id) return false;
@@ -4266,16 +4277,35 @@ async function applyRemoteRollEvent(event) {
 async function syncTrackedOverlays() {
   const items = await lib_default.scene.items.getItems();
   const byId = new Map(items.map((item) => [item.id, item]));
+  const overlaysByTokenId = /* @__PURE__ */ new Map();
+  for (const item of items.filter(isOverlayItem)) {
+    const tokenId = String(item.metadata?.[OVERLAY_KEY] ?? "");
+    if (!tokenId) continue;
+    const bucket = overlaysByTokenId.get(tokenId) ?? [];
+    bucket.push(item);
+    overlaysByTokenId.set(tokenId, bucket);
+  }
   const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
     const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token) || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
+    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
   }).map((item) => item.id);
   if (staleOverlayIds.length) {
     await lib_default.scene.items.deleteItems(staleOverlayIds);
   }
-  const trackedTokens = items.filter(isTrackedCharacter);
+  const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
-    await ensureOverlayForToken(token.id, items);
+    const overlayItems = overlaysByTokenId.get(token.id) ?? [];
+    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
+    const seenKinds = /* @__PURE__ */ new Set();
+    const needsRebuild = overlayItems.length !== expectedKinds.length || overlayItems.some((item) => {
+      const kind = String(item.metadata?.kind ?? "");
+      const invalid = item.attachedTo !== token.id || item.visible !== true || !expectedKinds.includes(kind) || seenKinds.has(kind);
+      seenKinds.add(kind);
+      return invalid;
+    });
+    if (needsRebuild) {
+      await ensureOverlayForToken(token.id);
+    }
   }
 }
 

@@ -16,7 +16,7 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 5;
+const VISUAL_VERSION = 6;
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -35,6 +35,7 @@ const OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 },
 ];
+const overlayEnsureQueue = new Map();
 export const DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0,
@@ -390,20 +391,9 @@ function getEffectiveSize(token) {
 
 async function getTokenMetrics(token) {
   const effectiveSize = getEffectiveSize(token);
-  let center = token.position;
-  let width = effectiveSize.width;
-  let height = effectiveSize.height;
-
-  try {
-    const bounds = await OBR.scene.items.getItemBounds([token.id]);
-    if (bounds?.width > 0 && bounds?.height > 0) {
-      center = bounds.center;
-      width = bounds.width;
-      height = bounds.height;
-    }
-  } catch (error) {
-    console.warn("[Body HP] Unable to read token bounds, using fallback size", error);
-  }
+  const center = token.position;
+  const width = effectiveSize.width;
+  const height = effectiveSize.height;
 
   let gridDpi = 150;
   try {
@@ -591,6 +581,7 @@ function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fi
     .position(metrics.center)
     .rotation(0)
     .zIndex(Date.now() + zIndex)
+    .visible(token.visible !== false)
     .attachedTo(token.id)
     .disableAttachmentBehavior(["ROTATION"])
     .layer("ATTACHMENT")
@@ -766,6 +757,14 @@ export function buildOverlayItems(token, data, metrics) {
   return items;
 }
 
+function getExpectedOverlayKinds(data) {
+  const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
+  if (hasConfiguredShield(data)) {
+    expected.push("shield-ring");
+  }
+  return expected;
+}
+
 export async function updateTrackerData(tokenId, updater) {
   await OBR.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -788,19 +787,36 @@ export async function removeOverlaysForToken(tokenId, items) {
   }
 }
 
-export async function ensureOverlayForToken(tokenId, items) {
+async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems = items ?? (await OBR.scene.items.getItems());
   const token = sceneItems.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
 
   await removeOverlaysForToken(tokenId, sceneItems);
 
-  if (!isTrackedCharacter(token)) return;
+  if (!isTrackedCharacter(token) || token.visible === false) return;
 
   const metrics = await getTokenMetrics(token);
   await OBR.scene.items.addItems(
     buildOverlayItems(token, getTrackerData(token), metrics),
   );
+}
+
+export async function ensureOverlayForToken(tokenId, items) {
+  const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(() => ensureOverlayForTokenInternal(tokenId, items));
+
+  overlayEnsureQueue.set(tokenId, next);
+
+  try {
+    await next;
+  } finally {
+    if (overlayEnsureQueue.get(tokenId) === next) {
+      overlayEnsureQueue.delete(tokenId);
+    }
+  }
 }
 
 export async function setTrackedState(tokenId, enabled) {
@@ -838,6 +854,15 @@ export async function applyRemoteRollEvent(event) {
 export async function syncTrackedOverlays() {
   const items = await OBR.scene.items.getItems();
   const byId = new Map(items.map((item) => [item.id, item]));
+  const overlaysByTokenId = new Map();
+
+  for (const item of items.filter(isOverlayItem)) {
+    const tokenId = String(item.metadata?.[OVERLAY_KEY] ?? "");
+    if (!tokenId) continue;
+    const bucket = overlaysByTokenId.get(tokenId) ?? [];
+    bucket.push(item);
+    overlaysByTokenId.set(tokenId, bucket);
+  }
 
   const staleOverlayIds = items
     .filter(isOverlayItem)
@@ -846,6 +871,7 @@ export async function syncTrackedOverlays() {
       return (
         !token ||
         !isTrackedCharacter(token) ||
+        token.visible === false ||
         Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION
       );
     })
@@ -855,8 +881,26 @@ export async function syncTrackedOverlays() {
     await OBR.scene.items.deleteItems(staleOverlayIds);
   }
 
-  const trackedTokens = items.filter(isTrackedCharacter);
+  const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
-    await ensureOverlayForToken(token.id, items);
+    const overlayItems = overlaysByTokenId.get(token.id) ?? [];
+    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
+    const seenKinds = new Set();
+    const needsRebuild =
+      overlayItems.length !== expectedKinds.length ||
+      overlayItems.some((item) => {
+        const kind = String(item.metadata?.kind ?? "");
+        const invalid =
+          item.attachedTo !== token.id ||
+          item.visible !== true ||
+          !expectedKinds.includes(kind) ||
+          seenKinds.has(kind);
+        seenKinds.add(kind);
+        return invalid;
+      });
+
+    if (needsRebuild) {
+      await ensureOverlayForToken(token.id);
+    }
   }
 }

@@ -3481,6 +3481,122 @@ var GenericItemBuilder = class {
   }
 };
 
+// node_modules/@owlbear-rodeo/sdk/lib/builders/ImageBuilder.js
+var ImageBuilder = class extends GenericItemBuilder {
+  constructor(player, image, grid) {
+    super(player);
+    this._image = image;
+    this._grid = grid;
+    this._item.name = "Image";
+    this._text = {
+      richText: [
+        {
+          type: "paragraph",
+          children: [{ text: "" }]
+        }
+      ],
+      plainText: "",
+      style: {
+        padding: 8,
+        fontFamily: "Roboto",
+        fontSize: 24,
+        fontWeight: 400,
+        textAlign: "CENTER",
+        textAlignVertical: "BOTTOM",
+        fillColor: "white",
+        fillOpacity: 1,
+        strokeColor: "white",
+        strokeOpacity: 1,
+        strokeWidth: 0,
+        lineHeight: 1.5
+      },
+      type: "PLAIN",
+      width: "AUTO",
+      height: "AUTO"
+    };
+    this._textItemType = "LABEL";
+  }
+  text(text) {
+    this._text = text;
+    return this.self();
+  }
+  textItemType(textItemType) {
+    this._textItemType = textItemType;
+    return this.self();
+  }
+  textWidth(width) {
+    this._text.width = width;
+    return this.self();
+  }
+  textHeight(height) {
+    this._text.height = height;
+    return this.self();
+  }
+  richText(richText) {
+    this._text.richText = richText;
+    return this.self();
+  }
+  plainText(plainText) {
+    this._text.plainText = plainText;
+    return this.self();
+  }
+  textType(textType) {
+    this._text.type = textType;
+    return this.self();
+  }
+  textPadding(padding) {
+    this._text.style.padding = padding;
+    return this.self();
+  }
+  fontFamily(fontFamily) {
+    this._text.style.fontFamily = fontFamily;
+    return this.self();
+  }
+  fontSize(fontSize) {
+    this._text.style.fontSize = fontSize;
+    return this.self();
+  }
+  fontWeight(fontWeight) {
+    this._text.style.fontWeight = fontWeight;
+    return this.self();
+  }
+  textAlign(textAlign) {
+    this._text.style.textAlign = textAlign;
+    return this.self();
+  }
+  textAlignVertical(textAlignVertical) {
+    this._text.style.textAlignVertical = textAlignVertical;
+    return this.self();
+  }
+  textFillColor(fillColor) {
+    this._text.style.fillColor = fillColor;
+    return this.self();
+  }
+  textFillOpacity(fillOpacity) {
+    this._text.style.fillOpacity = fillOpacity;
+    return this.self();
+  }
+  textStrokeColor(strokeColor) {
+    this._text.style.strokeColor = strokeColor;
+    return this.self();
+  }
+  textStrokeOpacity(strokeOpacity) {
+    this._text.style.strokeOpacity = strokeOpacity;
+    return this.self();
+  }
+  textStrokeWidth(strokeWidth) {
+    this._text.style.strokeWidth = strokeWidth;
+    return this.self();
+  }
+  textLineHeight(lineHeight) {
+    this._text.style.lineHeight = lineHeight;
+    return this.self();
+  }
+  build() {
+    return Object.assign(Object.assign({}, this._item), { type: "IMAGE", image: this._image, grid: this._grid, text: this._text, textItemType: this._textItemType });
+  }
+};
+
 // node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
 var PathBuilder = class extends GenericItemBuilder {
   constructor(player) {
@@ -3672,6 +3788,9 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
+function buildImage(image, grid) {
+  return new ImageBuilder(playerApi, image, grid);
+}
 function buildPath() {
   return new PathBuilder(playerApi);
 }
@@ -3692,7 +3811,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 5;
+var VISUAL_VERSION = 6;
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -3711,6 +3830,7 @@ var OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 }
 ];
+var overlayEnsureQueue = /* @__PURE__ */ new Map();
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -3977,19 +4097,9 @@ function getEffectiveSize(token) {
 }
 async function getTokenMetrics(token) {
   const effectiveSize = getEffectiveSize(token);
-  let center = token.position;
-  let width = effectiveSize.width;
-  let height = effectiveSize.height;
-  try {
-    const bounds = await lib_default.scene.items.getItemBounds([token.id]);
-    if (bounds?.width > 0 && bounds?.height > 0) {
-      center = bounds.center;
-      width = bounds.width;
-      height = bounds.height;
-    }
-  } catch (error) {
-    console.warn("[Body HP] Unable to read token bounds, using fallback size", error);
-  }
+  const center = token.position;
+  const width = effectiveSize.width;
+  const height = effectiveSize.height;
   let gridDpi = 150;
   try {
     gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
@@ -4132,7 +4242,7 @@ function getPartColor(part) {
   return getHpColor(part.current / part.max);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
     [OVERLAY_KEY]: token.id,
     kind,
     visualVersion: VISUAL_VERSION
@@ -4199,6 +4309,13 @@ function buildOverlayItems(token, data, metrics) {
   }
   return items;
 }
+function getExpectedOverlayKinds(data) {
+  const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
+  if (hasConfiguredShield(data)) {
+    expected.push("shield-ring");
+  }
+  return expected;
+}
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -4216,30 +4333,62 @@ async function removeOverlaysForToken(tokenId, items) {
     await lib_default.scene.items.deleteItems(overlayIds);
   }
 }
-async function ensureOverlayForToken(tokenId, items) {
+async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems2 = items ?? await lib_default.scene.items.getItems();
   const token = sceneItems2.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
   await removeOverlaysForToken(tokenId, sceneItems2);
-  if (!isTrackedCharacter(token)) return;
+  if (!isTrackedCharacter(token) || token.visible === false) return;
   const metrics = await getTokenMetrics(token);
   await lib_default.scene.items.addItems(
     buildOverlayItems(token, getTrackerData(token), metrics)
   );
 }
+async function ensureOverlayForToken(tokenId, items) {
+  const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
+  const next = previous.catch(() => {
+  }).then(() => ensureOverlayForTokenInternal(tokenId, items));
+  overlayEnsureQueue.set(tokenId, next);
+  try {
+    await next;
+  } finally {
+    if (overlayEnsureQueue.get(tokenId) === next) {
+      overlayEnsureQueue.delete(tokenId);
+    }
+  }
+}
 async function syncTrackedOverlays() {
   const items = await lib_default.scene.items.getItems();
   const byId = new Map(items.map((item) => [item.id, item]));
+  const overlaysByTokenId = /* @__PURE__ */ new Map();
+  for (const item of items.filter(isOverlayItem)) {
+    const tokenId = String(item.metadata?.[OVERLAY_KEY] ?? "");
+    if (!tokenId) continue;
+    const bucket = overlaysByTokenId.get(tokenId) ?? [];
+    bucket.push(item);
+    overlaysByTokenId.set(tokenId, bucket);
+  }
   const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
     const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token) || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
+    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
   }).map((item) => item.id);
   if (staleOverlayIds.length) {
     await lib_default.scene.items.deleteItems(staleOverlayIds);
   }
-  const trackedTokens = items.filter(isTrackedCharacter);
+  const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
-    await ensureOverlayForToken(token.id, items);
+    const overlayItems = overlaysByTokenId.get(token.id) ?? [];
+    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
+    const seenKinds = /* @__PURE__ */ new Set();
+    const needsRebuild = overlayItems.length !== expectedKinds.length || overlayItems.some((item) => {
+      const kind = String(item.metadata?.kind ?? "");
+      const invalid = item.attachedTo !== token.id || item.visible !== true || !expectedKinds.includes(kind) || seenKinds.has(kind);
+      seenKinds.add(kind);
+      return invalid;
+    });
+    if (needsRebuild) {
+      await ensureOverlayForToken(token.id);
+    }
   }
 }
 
@@ -4421,6 +4570,7 @@ var DEBUG_ENTRY_LIMIT = 50;
 var TARGET_PICK_TOOL_ID = "com.codex.body-hp/attack-target-picker";
 var TARGET_PICK_MODE_ID = "pick-target";
 var TARGET_HIGHLIGHT_KEY = "com.codex.body-hp/local-attack-target";
+var LOCAL_SELF_VIEW_KEY = "com.codex.body-hp/local-self-view";
 var ATTACK_TARGET_CONTEXT_MENU_ID = "com.codex.body-hp/set-attack-target";
 var SHOW_EMBEDDED_PUBLIC_LOG = false;
 var EXTENSION_ICON_URL = new URL("./icon.svg", window.location.href).href;
@@ -4477,6 +4627,7 @@ var collapsibleSectionState = /* @__PURE__ */ new Map();
 var attackFormDrafts = /* @__PURE__ */ new Map();
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
 var selectionPollTimer = null;
+var overlayMaintenanceTimer = null;
 var targetPickState = {
   active: false,
   attackerTokenId: null,
@@ -4673,6 +4824,11 @@ function getCharacters() {
 function getTrackedCharacters() {
   return getCharacters().filter(isTrackedCharacter);
 }
+function getControllableCharacters() {
+  return getTrackedCharacters().filter(
+    (token) => canPlayerControlToken(playerRole, playerId, token)
+  );
+}
 function getCharacterById(tokenId) {
   return getCharacters().find((item) => item.id === tokenId) ?? null;
 }
@@ -4684,6 +4840,10 @@ function resolveActiveTokenId() {
   if (selectedCharacterId) return selectedCharacterId;
   if (activeTokenId && characters.some((character) => character.id === activeTokenId)) {
     return activeTokenId;
+  }
+  if (playerRole !== "GM") {
+    const firstControllable = getControllableCharacters()[0];
+    if (firstControllable) return firstControllable.id;
   }
   const firstTracked = getTrackedCharacters()[0];
   if (firstTracked) return firstTracked.id;
@@ -5231,6 +5391,87 @@ async function syncTargetHighlight() {
     await lib_default.scene.local.deleteItems(existingHighlights.map((item) => item.id));
   }
   await lib_default.scene.local.addItems([await buildTargetHighlightItem(target)]);
+}
+function isLocalSelfViewItem(item) {
+  return Boolean(item?.metadata?.[LOCAL_SELF_VIEW_KEY]);
+}
+function buildLocalSelfViewSignature(token) {
+  return [
+    token.lastModified,
+    token.position?.x ?? 0,
+    token.position?.y ?? 0,
+    token.rotation ?? 0,
+    token.scale?.x ?? 1,
+    token.scale?.y ?? 1,
+    token.zIndex ?? 0
+  ].join("|");
+}
+async function buildLocalSelfViewItem(token) {
+  return buildImage(token.image, token.grid).name(`${getCharacterName(token)} (Local View)`).position(token.position).rotation(token.rotation ?? 0).scale(token.scale ?? { x: 1, y: 1 }).zIndex((token.zIndex ?? 0) + 1).visible(true).layer("CHARACTER").locked(true).disableHit(true).metadata({
+    [LOCAL_SELF_VIEW_KEY]: {
+      tokenId: token.id,
+      ownerPlayerId: playerId,
+      signature: buildLocalSelfViewSignature(token)
+    }
+  }).build();
+}
+async function clearLocalSelfViews() {
+  const localItems = await lib_default.scene.local.getItems();
+  const localViewIds = localItems.filter(isLocalSelfViewItem).map((item) => item.id);
+  if (localViewIds.length) {
+    await lib_default.scene.local.deleteItems(localViewIds);
+  }
+}
+async function syncLocalOwnedHiddenTokenViews(items = sceneItems) {
+  if (playerRole === "GM" || !playerId) {
+    await clearLocalSelfViews();
+    return;
+  }
+  const desiredTokens = items.filter(
+    (item) => isCharacterToken(item) && item.visible === false && canUseToken(item)
+  );
+  const desiredTokenIds = new Set(desiredTokens.map((token) => token.id));
+  const localItems = await lib_default.scene.local.getItems();
+  const existingViews = localItems.filter(isLocalSelfViewItem);
+  const staleViewIds = existingViews.filter((item) => !desiredTokenIds.has(String(item.metadata?.[LOCAL_SELF_VIEW_KEY]?.tokenId ?? ""))).map((item) => item.id);
+  if (staleViewIds.length) {
+    await lib_default.scene.local.deleteItems(staleViewIds);
+  }
+  const currentLocalItems = staleViewIds.length ? await lib_default.scene.local.getItems() : localItems;
+  const currentViews = currentLocalItems.filter(isLocalSelfViewItem);
+  const viewIdsToReplace = [];
+  const itemsToAdd = [];
+  for (const token of desiredTokens) {
+    const existingView = currentViews.find(
+      (item) => item.metadata?.[LOCAL_SELF_VIEW_KEY]?.tokenId === token.id
+    );
+    const nextSignature = buildLocalSelfViewSignature(token);
+    if (existingView?.metadata?.[LOCAL_SELF_VIEW_KEY]?.signature === nextSignature) {
+      continue;
+    }
+    if (existingView) {
+      viewIdsToReplace.push(existingView.id);
+    }
+    itemsToAdd.push(await buildLocalSelfViewItem(token));
+  }
+  if (viewIdsToReplace.length) {
+    await lib_default.scene.local.deleteItems(viewIdsToReplace);
+  }
+  if (itemsToAdd.length) {
+    await lib_default.scene.local.addItems(itemsToAdd);
+  }
+}
+function scheduleOverlayMaintenance() {
+  if (playerRole !== "GM") return;
+  if (overlayMaintenanceTimer) {
+    clearTimeout(overlayMaintenanceTimer);
+  }
+  overlayMaintenanceTimer = window.setTimeout(() => {
+    overlayMaintenanceTimer = null;
+    void syncTrackedOverlays().catch((error) => {
+      console.warn("[Body HP] Overlay maintenance failed", error);
+    });
+  }, 120);
 }
 async function teardownTargetPickerTool() {
   if (!targetPickState.toolReady) return;
@@ -6013,6 +6254,7 @@ async function syncState(showToast = false) {
   } else if (activeTokenId && !sceneItems.some((item) => item.id === activeTokenId)) {
     activeTokenId = null;
   }
+  await syncLocalOwnedHiddenTokenViews(sceneItems);
   render();
   await syncTargetHighlight();
   if (showToast) {
@@ -7028,9 +7270,13 @@ lib_default.onReady(async () => {
     lib_default.scene.items.onChange((items) => {
       sceneItems = items;
       render();
+      void syncLocalOwnedHiddenTokenViews(items).catch((error) => {
+        console.warn("[Body HP] Unable to sync local hidden-token views", error);
+      });
       void syncTargetHighlight().catch((error) => {
         console.warn("[Body HP] Unable to sync target highlight", error);
       });
+      scheduleOverlayMaintenance();
     });
     lib_default.player.onChange((player) => {
       playerRole = player.role;

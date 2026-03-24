@@ -3801,8 +3801,9 @@ var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
 var SHIELD_PART_NAME = "Shield";
+var SPECIAL_PART_NAME = "Special";
 var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
-var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME];
+var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
@@ -3811,7 +3812,8 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 6;
+var VISUAL_VERSION = 7;
+var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -3850,7 +3852,8 @@ var BODY_DEFAULTS = {
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
   "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
+  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
+  [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
 var DEFAULT_TRACKER_DATA = {
   enabled: true,
@@ -4039,15 +4042,23 @@ function sortCharacters(items) {
 }
 function formatOverlayText(data) {
   const body = data.body;
-  const lines = [
-    `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`,
-    `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
-  ];
+  const lines = [];
   if (hasConfiguredShield(data)) {
-    lines.unshift(
+    lines.push(
       `${SHIELD_PART_NAME} ${body[SHIELD_PART_NAME].current}/${body[SHIELD_PART_NAME].max}(${body[SHIELD_PART_NAME].armor})`
     );
   }
+  if (hasConfiguredSpecial(data)) {
+    lines.push(
+      `${SPECIAL_PART_NAME} ${body[SPECIAL_PART_NAME].current}/${body[SPECIAL_PART_NAME].max}(${body[SPECIAL_PART_NAME].armor})`
+    );
+  }
+  lines.push(
+    `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`
+  );
+  lines.push(
+    `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
+  );
   return lines.join("\n");
 }
 function getOdysseyData(item) {
@@ -4082,9 +4093,15 @@ function hasConfiguredShield(dataOrBody) {
   if (!shield || typeof shield !== "object") return false;
   return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0 || (Number(shield.minor) || 0) > 0 || (Number(shield.serious) || 0) > 0;
 }
+function hasConfiguredSpecial(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody;
+  const special = body?.[SPECIAL_PART_NAME];
+  if (!special || typeof special !== "object") return false;
+  return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0 || (Number(special.minor) || 0) > 0 || (Number(special.serious) || 0) > 0;
+}
 function getTargetableBodyParts(dataOrBody) {
   return BODY_ORDER.filter(
-    (partName) => partName !== SHIELD_PART_NAME || hasConfiguredShield(dataOrBody)
+    (partName) => partName !== SPECIAL_PART_NAME && (partName !== SHIELD_PART_NAME || hasConfiguredShield(dataOrBody))
   );
 }
 function getEffectiveSize(token) {
@@ -4128,10 +4145,13 @@ async function getTokenMetrics(token) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const specialThickness = Math.max(4, visibleDiameter * 0.03);
+  const specialInnerRadius = outerRadius;
+  const specialOuterRadius = specialInnerRadius + specialThickness;
   const shieldThickness = Math.max(4, visibleDiameter * 0.028);
   const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
   const shieldInnerRadius = Math.max(4, shieldOuterRadius - shieldThickness);
-  const shieldOffsetY = -(outerRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
+  const shieldOffsetY = -(specialOuterRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
   return {
     center,
     visibleDiameter,
@@ -4139,6 +4159,8 @@ async function getTokenMetrics(token) {
     outerInnerRadius,
     torsoOuterRadius,
     torsoInnerRadius,
+    specialOuterRadius,
+    specialInnerRadius,
     shieldOuterRadius,
     shieldInnerRadius,
     shieldOffsetY
@@ -4241,6 +4263,10 @@ function getPartColor(part) {
   }
   return getHpColor(part.current / part.max);
 }
+function getSpecialPartColor(part) {
+  const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
+  return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
+}
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
   return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
     [OVERLAY_KEY]: token.id,
@@ -4289,6 +4315,19 @@ function buildOverlayItems(token, data, metrics) {
       "evenodd"
     )
   );
+  if (hasConfiguredSpecial(data)) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        "special-ring",
+        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
+        getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+        3,
+        "evenodd"
+      )
+    );
+  }
   if (hasConfiguredShield(data)) {
     items.push(
       buildRingItem(
@@ -4302,7 +4341,7 @@ function buildOverlayItems(token, data, metrics) {
           metrics.shieldOffsetY
         ),
         getPartColor(data.body[SHIELD_PART_NAME]),
-        3,
+        4,
         "evenodd"
       )
     );
@@ -4311,6 +4350,9 @@ function buildOverlayItems(token, data, metrics) {
 }
 function getExpectedOverlayKinds(data) {
   const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
+  if (hasConfiguredSpecial(data)) {
+    expected.push("special-ring");
+  }
   if (hasConfiguredShield(data)) {
     expected.push("shield-ring");
   }
@@ -4492,7 +4534,7 @@ function resolveAttack({
   targetPart = "Torso",
   targetArmor = 0
 }) {
-  const part = BODY_ORDER.includes(targetPart) ? targetPart : "Torso";
+  const part = BODY_ORDER.includes(targetPart) && targetPart !== SPECIAL_PART_NAME ? targetPart : "Torso";
   const accuracy = calculateAccuracy(
     attackSkill,
     attackBonuses,
@@ -4985,14 +5027,19 @@ function formatAttackDebug({
   targetParry,
   parryMode,
   targetArmor,
+  specialArmor,
+  specialActive,
   result,
   beforeHp,
   afterHp,
+  specialBeforeHp,
+  specialAfterHp,
   beforeMinor,
   afterMinor,
   beforeSerious,
   afterSerious,
-  critApplied
+  critApplied,
+  damageAppliedLabel
 }) {
   const accuracyTable = formatTextTable(
     ["Side", "Attacking", "Defending"],
@@ -5014,29 +5061,36 @@ function formatAttackDebug({
       ]
     ]
   );
+  const damageRows = [
+    ["Attacker", attackerName],
+    ["Target", `${targetName} -> ${targetPart}`],
+    ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
+    ["Strength Bonus", strengthBonus],
+    ["Manual Attack Penalty", manualAttackPenalties],
+    ["Auto Target Penalty", automaticTargetPenalty],
+    ["Parry Mode", getParryModeLabel(parryMode)],
+    ["Base Parry", baseTargetParry],
+    ["Effective Parry", targetParry],
+    ["Armor", targetArmor]
+  ];
+  if (specialActive) {
+    damageRows.push(["Special Armor", specialArmor]);
+    damageRows.push(["Special HP", formatStateTransition(specialBeforeHp, specialAfterHp)]);
+  }
+  damageRows.push(
+    ["Outcome", formatAttackOutcomeLabel(result.outcome)],
+    ["Applied Damage", damageAppliedLabel ?? formatAppliedDamageLabel(result.damage, critApplied)],
+    ["Damage Diff", result.damage?.damageDiff ?? 0],
+    ["Damage Label", result.damage?.label ?? "No damage"],
+    ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
+    ["Converted Crit", critApplied]
+  );
   const damageTable = formatTextTable(
     ["Parameter", "Value"],
-    [
-      ["Attacker", attackerName],
-      ["Target", `${targetName} -> ${targetPart}`],
-      ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
-      ["Strength Bonus", strengthBonus],
-      ["Manual Attack Penalty", manualAttackPenalties],
-      ["Auto Target Penalty", automaticTargetPenalty],
-      ["Parry Mode", getParryModeLabel(parryMode)],
-      ["Base Parry", baseTargetParry],
-      ["Effective Parry", targetParry],
-      ["Armor", targetArmor],
-      ["Outcome", formatAttackOutcomeLabel(result.outcome)],
-      ["Applied Damage", formatAppliedDamageLabel(result.damage, critApplied)],
-      ["Damage Diff", result.damage?.damageDiff ?? 0],
-      ["Damage Label", result.damage?.label ?? "No damage"],
-      ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
-      ["Converted Crit", critApplied]
-    ]
+    damageRows
   );
   return [
-    `Damage Applied: ${formatAppliedDamageLabel(result.damage, critApplied)}`,
+    `Damage Applied: ${damageAppliedLabel ?? formatAppliedDamageLabel(result.damage, critApplied)}`,
     `Result: ${formatAttackOutcomeLabel(result.outcome)}`,
     "",
     accuracyTable,
@@ -5065,6 +5119,79 @@ function projectPartDamage(part, damage) {
   return {
     ...next,
     critApplied: totalCrit
+  };
+}
+function getNormalizedPartState(part) {
+  return {
+    current: Number(part?.current) || 0,
+    max: Number(part?.max) || 0,
+    armor: Number(part?.armor) || 0,
+    minor: Number(part?.minor) || 0,
+    serious: Number(part?.serious) || 0
+  };
+}
+function projectDamageWithSpecialProtection({
+  specialPart,
+  targetPart,
+  damage,
+  targetPartName
+}) {
+  const normalizedSpecial = getNormalizedPartState(specialPart);
+  const normalizedTarget = getNormalizedPartState(targetPart);
+  if (!damage) {
+    return {
+      specialProjectedState: normalizedSpecial,
+      projectedTargetState: {
+        ...normalizedTarget,
+        critApplied: 0
+      },
+      specialActive: false,
+      specialArmor: 0,
+      damageAppliedLabel: "No Damage"
+    };
+  }
+  const specialActive = hasConfiguredSpecial({ body: { [SPECIAL_PART_NAME]: normalizedSpecial } }) && normalizedSpecial.max > 0 && normalizedSpecial.current > 0;
+  if (!specialActive) {
+    const projectedTargetState2 = projectPartDamage(normalizedTarget, damage);
+    return {
+      specialProjectedState: normalizedSpecial,
+      projectedTargetState: projectedTargetState2,
+      specialActive: false,
+      specialArmor: 0,
+      damageAppliedLabel: formatAppliedDamageLabel(damage, projectedTargetState2.critApplied ?? 0)
+    };
+  }
+  const specialProjectedState = projectPartDamage(normalizedSpecial, damage);
+  const absorbedHp = Math.max(0, normalizedSpecial.current - specialProjectedState.current);
+  const totalSpecialCrit = Math.max(0, Number(specialProjectedState.critApplied) || 0);
+  const specialCritApplied = Math.min(totalSpecialCrit, absorbedHp);
+  const overflowCrit = Math.max(0, totalSpecialCrit - specialCritApplied);
+  const overflowDamage = overflowCrit > 0 ? { crit: overflowCrit, serious: 0, minor: 0 } : null;
+  const projectedTargetState = overflowDamage ? projectPartDamage(normalizedTarget, overflowDamage) : {
+    ...normalizedTarget,
+    critApplied: 0
+  };
+  const specialAppliedLabel = formatAppliedDamageLabel(
+    {
+      serious: damage.serious,
+      minor: damage.minor
+    },
+    specialCritApplied
+  );
+  const targetAppliedLabel = overflowDamage ? formatAppliedDamageLabel(overflowDamage, projectedTargetState.critApplied ?? 0) : "No Damage";
+  let damageAppliedLabel = "No Damage";
+  if (specialAppliedLabel !== "No Damage") {
+    damageAppliedLabel = `Special ${specialAppliedLabel}`;
+  }
+  if (targetAppliedLabel !== "No Damage") {
+    damageAppliedLabel = damageAppliedLabel === "No Damage" ? `${targetPartName} ${targetAppliedLabel}` : `${damageAppliedLabel}; ${targetPartName} ${targetAppliedLabel}`;
+  }
+  return {
+    specialProjectedState,
+    projectedTargetState,
+    specialActive: true,
+    specialArmor: normalizedSpecial.armor,
+    damageAppliedLabel
   };
 }
 function formatRawDiceRolls(result) {
@@ -5132,6 +5259,10 @@ function formatAppliedDamageLabel(damage, critApplied = 0) {
     parts.push(`${minor} Minor`);
   }
   return parts.length ? parts.join(", ") : "No Damage";
+}
+function formatStateTransition(before, after) {
+  if (before == null || after == null) return "-";
+  return `${before} -> ${after}`;
 }
 function getResolvedCheckResultIcon(resultLabel) {
   const normalized = String(resultLabel).trim();
@@ -5213,7 +5344,7 @@ function getAttackDraft(token, data, targetCharacters) {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
     targetTokenId,
     targetTokenName: resolvedTarget ? getCharacterName(resolvedTarget) : draftTargetTokenName,
-    targetPart: BODY_ORDER.includes(stored.targetPart) ? stored.targetPart : "Torso",
+    targetPart: BODY_ORDER.includes(stored.targetPart) && stored.targetPart !== SPECIAL_PART_NAME ? stored.targetPart : "Torso",
     weaponName: selectedWeapon?.name ?? defaultWeapon.name,
     weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
     attackBonuses: stored.attackBonuses ?? "0",
@@ -6751,7 +6882,7 @@ async function performAttack({ manualDefense = false } = {}) {
   const targetOdyssey = target ? getOdysseyData(target) : null;
   const skillName = manualDefense ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]') : getActionFieldValue('[data-attack-field="skill"]');
   const weaponName = manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]') : getActionFieldValue('[data-attack-field="weaponName"]');
-  const targetPart = getActionFieldValue('[data-attack-field="targetPart"]');
+  const requestedTargetPart = getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]') : getActionFieldValue('[data-attack-field="weaponDamage"]')
   ) || 0;
@@ -6788,6 +6919,8 @@ async function performAttack({ manualDefense = false } = {}) {
     saveAttackDraftValue(attacker.id, "targetTokenName", target ? getCharacterName(target) : "");
     await persistAttackTargetToken(attacker.id, targetTokenId);
   }
+  const availableTargetParts = getTargetableBodyParts(targetData);
+  const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
   saveAttackDraftValue(attacker.id, "weaponDamage", String(weaponDamage));
   saveAttackDraftValue(
@@ -6813,11 +6946,14 @@ async function performAttack({ manualDefense = false } = {}) {
     manualDefense ? getActionFieldValue('[data-manual-attack-field="manualParry"]') : getActionFieldValue('[data-attack-field="manualParry"]')
   );
   saveAttackDraftValue(attacker.id, "parryMode", parryMode);
-  const targetArmor = target ? targetData?.body?.[targetPart]?.armor ?? 0 : manualArmor;
+  const specialPartState = targetData?.body?.[SPECIAL_PART_NAME] ?? null;
+  const specialWasActive = Boolean(target) && hasConfiguredSpecial(targetData) && (Number(specialPartState?.max) || 0) > 0 && (Number(specialPartState?.current) || 0) > 0;
+  const targetArmor = target ? (Number(targetData?.body?.[targetPart]?.armor) || 0) + (specialWasActive ? Number(specialPartState?.armor) || 0 : 0) : manualArmor;
   const targetPartState = targetData?.body?.[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
   const beforeHp = target ? targetPartState.current ?? 0 : null;
   const beforeMinor = target ? targetPartState.minor ?? 0 : null;
   const beforeSerious = target ? targetPartState.serious ?? 0 : null;
+  const specialBeforeHp = specialWasActive ? Number(specialPartState?.current) || 0 : null;
   const strengthBonus = getSkillStrengthBonusFlag(attackerOdyssey, skillName) ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
   const finalWeaponDamage = weaponDamage + strengthBonus;
   const baseTargetParry = skillName === MELEE_SKILL_NAME ? target ? targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0 : manualParry : 0;
@@ -6833,20 +6969,35 @@ async function performAttack({ manualDefense = false } = {}) {
     targetPart,
     targetArmor
   });
-  const projectedPartState = target && result.hit && result.damage ? projectPartDamage(targetPartState, result.damage) : {
-    ...target ? targetPartState : {},
-    critApplied: 0
+  const specialResolution = target && result.hit && result.damage ? projectDamageWithSpecialProtection({
+    specialPart: specialPartState,
+    targetPart: targetPartState,
+    damage: result.damage,
+    targetPartName: targetPart
+  }) : {
+    specialProjectedState: specialPartState ? getNormalizedPartState(specialPartState) : null,
+    projectedTargetState: {
+      ...target ? getNormalizedPartState(targetPartState) : {},
+      critApplied: 0
+    },
+    specialActive: false,
+    specialArmor: 0,
+    damageAppliedLabel: "No Damage"
   };
+  const projectedPartState = specialResolution.projectedTargetState;
+  const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = target ? projectedPartState.current ?? beforeHp : null;
   const afterMinor = target ? projectedPartState.minor ?? beforeMinor : null;
   const afterSerious = target ? projectedPartState.serious ?? beforeSerious : null;
+  const specialAfterHp = specialWasActive ? projectedSpecialState?.current ?? specialBeforeHp : null;
   const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
+  const resolvedAttackSummary = specialResolution.specialActive && result.hit && specialResolution.damageAppliedLabel !== "No Damage" ? `${result.summary} Applied: ${specialResolution.damageAppliedLabel}.` : result.summary;
   await updateTrackerData(attacker.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
       eventId: 0,
       actorName: playerName || "Owlbear Player",
-      summary: `${getCharacterName(attacker)} -> ${resolvedTargetName}: ${result.summary}`,
+      summary: `${getCharacterName(attacker)} -> ${resolvedTargetName}: ${resolvedAttackSummary}`,
       outcome: result.outcome,
       total: result.attackTotal,
       targetPart: result.targetPart,
@@ -6859,6 +7010,11 @@ async function performAttack({ manualDefense = false } = {}) {
   if (target) {
     await updateTrackerData(target.id, (current2) => {
       const next = structuredClone(current2);
+      if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
+        next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
+        next.body[SPECIAL_PART_NAME].minor = projectedSpecialState.minor;
+        next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
+      }
       if (result.hit && next.body[result.targetPart]) {
         next.body[result.targetPart].current = projectedPartState.current;
         next.body[result.targetPart].minor = projectedPartState.minor;
@@ -6867,7 +7023,7 @@ async function performAttack({ manualDefense = false } = {}) {
       next.lastRoll = {
         eventId: 0,
         actorName: getCharacterName(attacker),
-        summary: result.summary,
+        summary: resolvedAttackSummary,
         outcome: result.outcome,
         total: result.attackTotal,
         targetPart: result.targetPart,
@@ -6902,19 +7058,24 @@ async function performAttack({ manualDefense = false } = {}) {
       targetParry,
       parryMode,
       targetArmor,
+      specialArmor: specialResolution.specialArmor,
+      specialActive: specialResolution.specialActive,
       result,
       beforeHp,
       afterHp,
+      specialBeforeHp,
+      specialAfterHp,
       beforeMinor,
       afterMinor,
       beforeSerious,
       afterSerious,
-      critApplied: projectedPartState.critApplied ?? 0
+      critApplied: projectedPartState.critApplied ?? 0,
+      damageAppliedLabel: specialResolution.damageAppliedLabel
     }),
     result.hit ? "success" : "info"
   );
   await syncState();
-  setStatus(`${getCharacterName(attacker)} -> ${resolvedTargetName}: ${result.summary}`, result.hit ? "success" : "info");
+  setStatus(`${getCharacterName(attacker)} -> ${resolvedTargetName}: ${resolvedAttackSummary}`, result.hit ? "success" : "info");
 }
 async function performRollDice() {
   const token = getCharacterById(activeTokenId);

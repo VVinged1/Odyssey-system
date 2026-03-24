@@ -1,4 +1,4 @@
-import { BODY_ORDER, clamp } from "./shared.js";
+import { BODY_ORDER, SPECIAL_PART_NAME, clamp } from "./shared.js";
 
 export function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
@@ -126,7 +126,8 @@ export function resolveAttack({
   targetPart = "Torso",
   targetArmor = 0,
 }) {
-  const part = BODY_ORDER.includes(targetPart) ? targetPart : "Torso";
+  const part =
+    BODY_ORDER.includes(targetPart) && targetPart !== SPECIAL_PART_NAME ? targetPart : "Torso";
   const accuracy = calculateAccuracy(
     attackSkill,
     attackBonuses,

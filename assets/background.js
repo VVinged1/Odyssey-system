@@ -3682,8 +3682,9 @@ var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
 var SHIELD_PART_NAME = "Shield";
+var SPECIAL_PART_NAME = "Special";
 var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
-var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME];
+var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
@@ -3692,7 +3693,8 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 6;
+var VISUAL_VERSION = 7;
+var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
   { ratio: 0.75, color: "#FFF243" },
@@ -3731,7 +3733,8 @@ var BODY_DEFAULTS = {
   Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
   "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
   "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
+  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
+  [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
 var DEFAULT_TRACKER_DATA = {
   enabled: true,
@@ -3919,6 +3922,12 @@ function hasConfiguredShield(dataOrBody) {
   if (!shield || typeof shield !== "object") return false;
   return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0 || (Number(shield.minor) || 0) > 0 || (Number(shield.serious) || 0) > 0;
 }
+function hasConfiguredSpecial(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody;
+  const special = body?.[SPECIAL_PART_NAME];
+  if (!special || typeof special !== "object") return false;
+  return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0 || (Number(special.minor) || 0) > 0 || (Number(special.serious) || 0) > 0;
+}
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
@@ -3960,10 +3969,13 @@ async function getTokenMetrics(token) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const specialThickness = Math.max(4, visibleDiameter * 0.03);
+  const specialInnerRadius = outerRadius;
+  const specialOuterRadius = specialInnerRadius + specialThickness;
   const shieldThickness = Math.max(4, visibleDiameter * 0.028);
   const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
   const shieldInnerRadius = Math.max(4, shieldOuterRadius - shieldThickness);
-  const shieldOffsetY = -(outerRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
+  const shieldOffsetY = -(specialOuterRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
   return {
     center,
     visibleDiameter,
@@ -3971,6 +3983,8 @@ async function getTokenMetrics(token) {
     outerInnerRadius,
     torsoOuterRadius,
     torsoInnerRadius,
+    specialOuterRadius,
+    specialInnerRadius,
     shieldOuterRadius,
     shieldInnerRadius,
     shieldOffsetY
@@ -4072,6 +4086,10 @@ function getPartColor(part) {
     return (Number(part?.armor) || 0) > 0 ? getHpColor(1) : getHpColor(0);
   }
   return getHpColor(part.current / part.max);
+}
+function getSpecialPartColor(part) {
+  const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
+  return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
   return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
@@ -4197,6 +4215,19 @@ function buildOverlayItems(token, data, metrics) {
       "evenodd"
     )
   );
+  if (hasConfiguredSpecial(data)) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        "special-ring",
+        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
+        getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+        3,
+        "evenodd"
+      )
+    );
+  }
   if (hasConfiguredShield(data)) {
     items.push(
       buildRingItem(
@@ -4210,7 +4241,7 @@ function buildOverlayItems(token, data, metrics) {
           metrics.shieldOffsetY
         ),
         getPartColor(data.body[SHIELD_PART_NAME]),
-        3,
+        4,
         "evenodd"
       )
     );
@@ -4219,6 +4250,9 @@ function buildOverlayItems(token, data, metrics) {
 }
 function getExpectedOverlayKinds(data) {
   const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
+  if (hasConfiguredSpecial(data)) {
+    expected.push("special-ring");
+  }
   if (hasConfiguredShield(data)) {
     expected.push("shield-ring");
   }

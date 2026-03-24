@@ -3576,6 +3576,8 @@ async function performAttack({ manualDefense = false } = {}) {
       ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]')
       : getActionFieldValue('[data-attack-field="attackPenalties"]')
   ) || 0;
+  const availableTargetParts = getTargetableBodyParts(targetData);
+  const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
   const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
@@ -3607,8 +3609,6 @@ async function performAttack({ manualDefense = false } = {}) {
     saveAttackDraftValue(attacker.id, "targetTokenName", target ? getCharacterName(target) : "");
     await persistAttackTargetToken(attacker.id, targetTokenId);
   }
-  const availableTargetParts = getTargetableBodyParts(targetData);
-  const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
   saveAttackDraftValue(attacker.id, "weaponDamage", String(weaponDamage));
   saveAttackDraftValue(

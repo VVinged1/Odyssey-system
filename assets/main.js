@@ -4861,6 +4861,9 @@ function canEditTokenData(token) {
 function canViewAttackBlock(token) {
   return canUseToken(token);
 }
+function canViewOverlayPreview(token) {
+  return canUseToken(token);
+}
 async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
   if (!token || !isCharacterToken(token)) return false;
@@ -5019,16 +5022,21 @@ function formatAttackDebug({
       ["Effective Parry", targetParry],
       ["Armor", targetArmor],
       ["Outcome", formatAttackOutcomeLabel(result.outcome)],
+      ["Applied Damage", formatAppliedDamageLabel(result.damage, critApplied)],
       ["Damage Diff", result.damage?.damageDiff ?? 0],
       ["Damage Label", result.damage?.label ?? "No damage"],
       ["Applied Min/Sir/Crit", `${result.damage?.minor ?? 0} / ${result.damage?.serious ?? 0} / ${result.damage?.crit ?? 0}`],
-      ["Converted Crit", critApplied],
-      ["Crit State", formatStateTransition(beforeHp, afterHp)],
-      ["Minor State", formatStateTransition(beforeMinor, afterMinor)],
-      ["Serious State", formatStateTransition(beforeSerious, afterSerious)]
+      ["Converted Crit", critApplied]
     ]
   );
-  return [`Result: ${formatAttackOutcomeLabel(result.outcome)}`, "", accuracyTable, "", damageTable].join("\n");
+  return [
+    `Damage Applied: ${formatAppliedDamageLabel(result.damage, critApplied)}`,
+    `Result: ${formatAttackOutcomeLabel(result.outcome)}`,
+    "",
+    accuracyTable,
+    "",
+    damageTable
+  ].join("\n");
 }
 function projectPartDamage(part, damage) {
   const next = {
@@ -5103,22 +5111,42 @@ function getParryModeLabel(mode) {
   const divisor = getParryDivisor(mode);
   return `${divisor} Opponent${divisor === 1 ? "" : "s"}`;
 }
-function formatStateTransition(before, after) {
-  if (before == null || after == null) return "-";
-  return `${before} -> ${after}`;
+function formatAppliedDamageLabel(damage, critApplied = 0) {
+  const parts = [];
+  const totalCrit = Math.max(0, Number(critApplied) || 0);
+  const serious = Math.max(0, Number(damage?.serious) || 0);
+  const minor = Math.max(0, Number(damage?.minor) || 0);
+  if (totalCrit > 0) {
+    parts.push(`${totalCrit} Crit`);
+  }
+  if (serious > 0) {
+    parts.push(`${serious} Serious`);
+  }
+  if (minor > 0) {
+    parts.push(`${minor} Minor`);
+  }
+  return parts.length ? parts.join(", ") : "No Damage";
 }
-function getCheckResultIcon(resultLabel) {
-  return String(resultLabel).trim() === "Check Passed" ? "\u2705" : "\u274C";
+function getResolvedCheckResultIcon(resultLabel) {
+  const normalized = String(resultLabel).trim();
+  if (normalized === "Critical Success") return "\u{1F3AF}";
+  if (normalized === "Critical Failure") return "\u{1F480}";
+  if (normalized === "Check Passed") return "\u2705";
+  return "\u274C";
 }
-function formatCheckResultLabel(resultLabel) {
+function isResolvedCheckResultSuccess(resultLabel) {
+  const normalized = String(resultLabel).trim();
+  return normalized === "Check Passed" || normalized === "Critical Success";
+}
+function formatResolvedCheckResultLabel(resultLabel) {
   const normalized = String(resultLabel).trim() || "Check Failed";
-  return `${getCheckResultIcon(normalized)} ${normalized}`;
+  return `${getResolvedCheckResultIcon(normalized)} ${normalized}`;
 }
 function formatRollCharDebug({ tokenName, attributeLabel, result }) {
   return [
     `Character: ${tokenName}`,
     `Characteristic: ${attributeLabel}`,
-    `${formatCheckResultLabel(result.result)}`,
+    `${formatResolvedCheckResultLabel(result.result)}`,
     "",
     formatTextTable(
       ["Roll", "Base Attribute", "Modifier", "Final Attribute"],
@@ -5130,7 +5158,7 @@ function formatRollSkillDebug({ tokenName, skillName, result }) {
   return [
     `Character: ${tokenName}`,
     `Skill: ${skillName}`,
-    `${formatCheckResultLabel(result.result)}`,
+    `${formatResolvedCheckResultLabel(result.result)}`,
     "",
     formatTextTable(
       ["Parameter", "Value"],
@@ -5184,6 +5212,8 @@ function getAttackDraft(token, data, targetCharacters) {
     weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
     attackBonuses: stored.attackBonuses ?? "0",
     attackPenalties: stored.attackPenalties ?? "0",
+    manualAttackBonuses: stored.manualAttackBonuses ?? stored.attackBonuses ?? "0",
+    manualAttackPenalties: stored.manualAttackPenalties ?? stored.attackPenalties ?? "0",
     defenseBonuses: stored.defenseBonuses ?? "0",
     defensePenalties: stored.defensePenalties ?? "0",
     manualArmor: stored.manualArmor ?? "0",
@@ -5203,6 +5233,10 @@ function getSharedAttackDraftField(manualField) {
   if (manualField === "skill") return "skill";
   if (manualField === "weaponName") return "weaponName";
   if (manualField === "weaponDamage") return "weaponDamage";
+  if (manualField === "attackBonuses") return "manualAttackBonuses";
+  if (manualField === "attackPenalties") return "manualAttackPenalties";
+  if (manualField === "manualArmor") return "manualArmor";
+  if (manualField === "manualParry") return "manualParry";
   return "";
 }
 function buildWeaponOptions(weapons, selectedWeaponName = "") {
@@ -5636,13 +5670,22 @@ function rollCharacterCheck(attributeValue, modifier = 0) {
   const baseAttribute = Number(attributeValue) || 0;
   const finalAttribute = Math.max(0, baseAttribute + (Number(modifier) || 0));
   const roll = Math.floor(Math.random() * 20) + 1;
-  const result = roll <= finalAttribute ? "Check Passed" : "Check Failed";
+  let result = roll <= finalAttribute ? "Check Passed" : "Check Failed";
+  let outcome = result === "Check Passed" ? "success" : "failure";
+  if (roll === 1) {
+    result = "Critical Success";
+    outcome = "critical-success";
+  } else if (roll === 20) {
+    result = "Critical Failure";
+    outcome = "critical-failure";
+  }
   return {
     roll,
     baseAttribute,
     modifier: Number(modifier) || 0,
     finalAttribute,
-    result
+    result,
+    outcome
   };
 }
 function rollSkillCheck(skillValue, modifier = 0) {
@@ -5651,7 +5694,15 @@ function rollSkillCheck(skillValue, modifier = 0) {
   const rollSecondary = Math.floor(Math.random() * 100) + 1;
   const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier) || 0);
   const totalSecondary = rollSecondary;
-  const result = totalPrimary > totalSecondary ? "Check Passed" : "Check Failed";
+  let result = totalPrimary > totalSecondary ? "Check Passed" : "Check Failed";
+  let outcome = result === "Check Passed" ? "success" : "failure";
+  if (rollPrimary >= 95) {
+    result = "Critical Success";
+    outcome = "critical-success";
+  } else if (rollPrimary <= 5) {
+    result = "Critical Failure";
+    outcome = "critical-failure";
+  }
   return {
     rollPrimary,
     rollSecondary,
@@ -5659,7 +5710,8 @@ function rollSkillCheck(skillValue, modifier = 0) {
     modifier: Number(modifier) || 0,
     totalPrimary,
     totalSecondary,
-    result
+    result,
+    outcome
   };
 }
 function renderOwnerFields(data, disabledAttr) {
@@ -5938,15 +5990,23 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
           <input type="number" value="${draft2.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">Manual Armor</span>
-          <input type="number" min="0" max="99" value="${draft2.manualArmor}" data-attack-field="manualArmor" ${disabledAttr}>
+          <span class="field-label">Attack Bonus</span>
+          <input type="number" value="${draft2.manualAttackBonuses}" data-manual-attack-field="attackBonuses" ${disabledAttr}>
         </label>
         <label class="field-stack">
-          <span class="field-label">Manual Parry</span>
-          <input type="number" min="0" max="10" value="${draft2.manualParry}" data-attack-field="manualParry" ${disabledAttr}>
+          <span class="field-label">Attack Penalty</span>
+          <input type="number" value="${draft2.manualAttackPenalties}" data-manual-attack-field="attackPenalties" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Armor</span>
+          <input type="number" min="0" max="99" value="${draft2.manualArmor}" data-manual-attack-field="manualArmor" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Parry</span>
+          <input type="number" min="0" max="10" value="${draft2.manualParry}" data-manual-attack-field="manualParry" ${disabledAttr}>
         </label>
       </div>
-      <div class="muted">Uses the attack settings above, but ignores the saved Pick On Map target.</div>
+      <div class="muted">Uses the manual attack values below and the defense settings above, but ignores the saved Pick On Map target.</div>
       <div class="muted">Saved target for this token stays unchanged.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-manual-attack" ${disabledAttr}>No Target Attack</button>
@@ -6081,6 +6141,7 @@ function renderSelectedToken() {
         </div>
         <div class="row row-gap">
           <button type="button" data-action="focus-token" class="secondary">Select On Map</button>
+          <button type="button" data-action="reload-token-visuals" class="secondary" ${tokenLocked ? "disabled" : ""}>Reload Token</button>
         </div>
       </div>
 
@@ -6113,6 +6174,9 @@ function renderSelectedToken() {
       ${showPartBlock ? renderCollapsibleSection(
     "Body Parts",
     `
+                <div class="row row-gap">
+                  <button type="button" class="secondary" data-action="heal-limbs" ${bodyFieldDisabled}>Heal Limbs</button>
+                </div>
                 <div class="body-table-wrap">
                   <table class="body-table">
                     <thead>
@@ -6161,11 +6225,11 @@ function renderSelectedToken() {
               `,
     true
   ) : ""}
-      ${renderCollapsibleSection(
+      ${canViewOverlayPreview(token) ? renderCollapsibleSection(
     "Overlay Preview",
     `<pre class="console-output">${escapeHtml(formatOverlayPreviewText(data))}</pre>`,
     false
-  )}
+  ) : ""}
     </div>`;
   restoreSelectedPanelState(panelState);
 }
@@ -6271,6 +6335,56 @@ async function selectCharacter(tokenId) {
   sceneItems = await lib_default.scene.items.getItems();
   render();
   await syncTargetHighlight();
+}
+async function reloadTokenVisuals() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!canUseToken(token)) {
+    setStatus("You cannot reload this token.", "error");
+    return;
+  }
+  const currentItems = await lib_default.scene.items.getItems();
+  const liveToken = currentItems.find((item) => item.id === token.id) ?? token;
+  if (liveToken.visible === false) {
+    await syncLocalOwnedHiddenTokenViews(currentItems);
+  } else {
+    await removeOverlaysForToken(token.id, currentItems);
+    await ensureOverlayForToken(token.id);
+  }
+  sceneItems = await lib_default.scene.items.getItems();
+  await syncLocalOwnedHiddenTokenViews(sceneItems);
+  render();
+  await syncTargetHighlight();
+  setStatus(`${getCharacterName(token)} visuals reloaded.`, "success");
+}
+async function healLimbs() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!canEditTokenData(token)) {
+    setStatus("Only the GM or assigned player can heal this token.", "error");
+    return;
+  }
+  const limbParts = ["L.Arm", "R.Arm", "L.Leg", "R.Leg"];
+  await updateTrackerData(token.id, (current2) => {
+    const next = structuredClone(current2);
+    for (const partName of limbParts) {
+      const part = next.body?.[partName];
+      if (!part) continue;
+      part.current = part.max;
+      part.minor = 0;
+      part.serious = 0;
+    }
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+  await syncState();
+  setStatus(`${getCharacterName(token)} limbs fully healed.`, "success");
 }
 async function changeBodyField(partName, field, delta) {
   const token = getCharacterById(activeTokenId);
@@ -6632,14 +6746,30 @@ async function performAttack({ manualDefense = false } = {}) {
   const weaponDamage = Number(
     manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]') : getActionFieldValue('[data-attack-field="weaponDamage"]')
   ) || 0;
-  const attackBonuses = Number(getActionFieldValue('[data-attack-field="attackBonuses"]')) || 0;
-  const manualAttackPenalties = Number(getActionFieldValue('[data-attack-field="attackPenalties"]')) || 0;
+  const attackBonuses = Number(
+    manualDefense ? getActionFieldValue('[data-manual-attack-field="attackBonuses"]') || getActionFieldValue('[data-attack-field="attackBonuses"]') : getActionFieldValue('[data-attack-field="attackBonuses"]')
+  ) || 0;
+  const manualAttackPenalties = Number(
+    manualDefense ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]') : getActionFieldValue('[data-attack-field="attackPenalties"]')
+  ) || 0;
   const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
-  const manualArmor = clamp(Number(getActionFieldValue('[data-attack-field="manualArmor"]')) || 0, 0, 99);
-  const manualParry = clamp(Number(getActionFieldValue('[data-attack-field="manualParry"]')) || 0, 0, 10);
+  const manualArmor = clamp(
+    Number(
+      manualDefense ? getActionFieldValue('[data-manual-attack-field="manualArmor"]') || getActionFieldValue('[data-attack-field="manualArmor"]') : getActionFieldValue('[data-attack-field="manualArmor"]')
+    ) || 0,
+    0,
+    99
+  );
+  const manualParry = clamp(
+    Number(
+      manualDefense ? getActionFieldValue('[data-manual-attack-field="manualParry"]') || getActionFieldValue('[data-attack-field="manualParry"]') : getActionFieldValue('[data-attack-field="manualParry"]')
+    ) || 0,
+    0,
+    10
+  );
   const parryMode = getActionFieldValue('[data-attack-field="parryMode"]') || "1";
   const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
@@ -6651,12 +6781,28 @@ async function performAttack({ manualDefense = false } = {}) {
   }
   saveAttackDraftValue(attacker.id, "targetPart", targetPart);
   saveAttackDraftValue(attacker.id, "weaponDamage", String(weaponDamage));
-  saveAttackDraftValue(attacker.id, "attackBonuses", getActionFieldValue('[data-attack-field="attackBonuses"]'));
-  saveAttackDraftValue(attacker.id, "attackPenalties", getActionFieldValue('[data-attack-field="attackPenalties"]'));
+  saveAttackDraftValue(
+    attacker.id,
+    manualDefense ? "manualAttackBonuses" : "attackBonuses",
+    manualDefense ? getActionFieldValue('[data-manual-attack-field="attackBonuses"]') : getActionFieldValue('[data-attack-field="attackBonuses"]')
+  );
+  saveAttackDraftValue(
+    attacker.id,
+    manualDefense ? "manualAttackPenalties" : "attackPenalties",
+    manualDefense ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') : getActionFieldValue('[data-attack-field="attackPenalties"]')
+  );
   saveAttackDraftValue(attacker.id, "defenseBonuses", getActionFieldValue('[data-attack-field="defenseBonuses"]'));
   saveAttackDraftValue(attacker.id, "defensePenalties", getActionFieldValue('[data-attack-field="defensePenalties"]'));
-  saveAttackDraftValue(attacker.id, "manualArmor", getActionFieldValue('[data-attack-field="manualArmor"]'));
-  saveAttackDraftValue(attacker.id, "manualParry", getActionFieldValue('[data-attack-field="manualParry"]'));
+  saveAttackDraftValue(
+    attacker.id,
+    "manualArmor",
+    manualDefense ? getActionFieldValue('[data-manual-attack-field="manualArmor"]') : getActionFieldValue('[data-attack-field="manualArmor"]')
+  );
+  saveAttackDraftValue(
+    attacker.id,
+    "manualParry",
+    manualDefense ? getActionFieldValue('[data-manual-attack-field="manualParry"]') : getActionFieldValue('[data-attack-field="manualParry"]')
+  );
   saveAttackDraftValue(attacker.id, "parryMode", parryMode);
   const targetArmor = target ? targetData?.body?.[targetPart]?.armor ?? 0 : manualArmor;
   const targetPartState = targetData?.body?.[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
@@ -6873,7 +7019,7 @@ async function performRollChar() {
   const odyssey = getOdysseyData(token);
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
-  const summary = `${getCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
+  const summary = `${getResolvedCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
@@ -6890,16 +7036,16 @@ async function performRollChar() {
     return next;
   });
   await pushDebugEntry(
-    `${getCheckResultIcon(result.result)} ${getCharacterName(token)} rolls characteristic`,
+    `${getResolvedCheckResultIcon(result.result)} ${getCharacterName(token)} rolls characteristic`,
     formatRollCharDebug({
       tokenName: getCharacterName(token),
       attributeLabel,
       result
     }),
-    result.result.includes("Failed") ? "info" : "success"
+    isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info"
   );
   await syncState();
-  setStatus(summary, result.result.includes("Failed") ? "error" : "success");
+  setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 async function performRollSkill() {
   const token = getCharacterById(activeTokenId);
@@ -6919,7 +7065,7 @@ async function performRollSkill() {
   const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
-  const summary = `${getCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
+  const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
     next.lastRoll = {
@@ -6936,16 +7082,16 @@ async function performRollSkill() {
     return next;
   });
   await pushDebugEntry(
-    `${getCheckResultIcon(result.result)} ${getCharacterName(token)} checks skill`,
+    `${getResolvedCheckResultIcon(result.result)} ${getCharacterName(token)} checks skill`,
     formatRollSkillDebug({
       tokenName: getCharacterName(token),
       skillName,
       result
     }),
-    result.result === "Check Passed" ? "success" : "info"
+    isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info"
   );
   await syncState();
-  setStatus(summary, result.result === "Check Passed" ? "success" : "error");
+  setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 async function performPrivateGmRoll() {
   if (!isEditable()) {
@@ -7015,6 +7161,18 @@ function bindUiEvents() {
       void selectCharacter(activeTokenId).catch((error) => {
         setStatus(error?.message ?? "Unable to focus token.", "error");
       });
+    }
+    if (action === "reload-token-visuals") {
+      void reloadTokenVisuals().catch((error) => {
+        setStatus(error?.message ?? "Unable to reload token visuals.", "error");
+      });
+      return;
+    }
+    if (action === "heal-limbs") {
+      void healLimbs().catch((error) => {
+        setStatus(error?.message ?? "Unable to heal limbs.", "error");
+      });
+      return;
     }
     if (action === "pick-attack-target") {
       void startTargetPick().catch((error) => {

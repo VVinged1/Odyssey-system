@@ -4861,6 +4861,12 @@ function canEditTokenData(token) {
 function canViewAttackBlock(token) {
   return canUseToken(token);
 }
+function canViewBodyHpSummary(token) {
+  return canUseToken(token);
+}
+function canViewDiceBlock(token) {
+  return canUseToken(token);
+}
 function canViewOverlayPreview(token) {
   return canUseToken(token);
 }
@@ -6016,6 +6022,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   );
 }
 function renderEnglishDiceBlock(token, data, tokenLocked) {
+  if (!canViewDiceBlock(token)) return "";
   const attributeOptions = ATTRIBUTE_UI_FIELDS.map(
     ([key, label]) => `<option value="${escapeHtml(key)}">${escapeHtml(label)} (${data.odyssey.attributes[key] ?? 0})</option>`
   ).join("");
@@ -6146,10 +6153,12 @@ function renderSelectedToken() {
       </div>
 
       <div class="summary-strip">
-        <div class="stat-chip">
-          <span class="chip-label">Body HP</span>
-          <span class="chip-value">${totals.current}/${totals.max}</span>
-        </div>
+        ${canViewBodyHpSummary(token) ? `
+              <div class="stat-chip">
+                <span class="chip-label">Body HP</span>
+                <span class="chip-value">${totals.current}/${totals.max}</span>
+              </div>
+            ` : ""}
         <div class="stat-chip">
           <span class="chip-label">Assigned Player</span>
           <span class="chip-value">${escapeHtml(odyssey.owner.playerName || odyssey.owner.playerId || "Unassigned")}</span>
@@ -6175,15 +6184,15 @@ function renderSelectedToken() {
     "Body Parts",
     `
                 <div class="row row-gap">
-                  <button type="button" class="secondary" data-action="heal-limbs" ${bodyFieldDisabled}>Heal Limbs</button>
+                  <button type="button" class="secondary" data-action="heal-limbs" ${bodyFieldDisabled}>Heal</button>
                 </div>
                 <div class="body-table-wrap">
                   <table class="body-table">
                     <thead>
                       <tr>
                         <th>Body Part</th>
-                        <th>Crit</th>
-                        <th>Max</th>
+                        <th>Current HP</th>
+                        <th>Max HP</th>
                         <th>Armor</th>
                       </tr>
                     </thead>
@@ -6370,10 +6379,10 @@ async function healLimbs() {
     setStatus("Only the GM or assigned player can heal this token.", "error");
     return;
   }
-  const limbParts = ["L.Arm", "R.Arm", "L.Leg", "R.Leg"];
+  const healedParts = ["L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
   await updateTrackerData(token.id, (current2) => {
     const next = structuredClone(current2);
-    for (const partName of limbParts) {
+    for (const partName of healedParts) {
       const part = next.body?.[partName];
       if (!part) continue;
       part.current = part.max;
@@ -6384,7 +6393,7 @@ async function healLimbs() {
   });
   await ensureOverlayForToken(token.id);
   await syncState();
-  setStatus(`${getCharacterName(token)} limbs fully healed.`, "success");
+  setStatus(`${getCharacterName(token)} healed.`, "success");
 }
 async function changeBodyField(partName, field, delta) {
   const token = getCharacterById(activeTokenId);

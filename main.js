@@ -3800,10 +3800,6 @@ async function performAttack({ manualDefense = false } = {}) {
   const afterMinor = target ? (projectedPartState.minor ?? beforeMinor) : null;
   const afterSerious = target ? (projectedPartState.serious ?? beforeSerious) : null;
   const specialAfterHp = specialWasActive ? (projectedSpecialState?.current ?? specialBeforeHp) : null;
-  const targetOverlayNeedsUpdate = Boolean(target) && (
-    afterHp !== beforeHp ||
-    (specialWasActive && specialAfterHp !== specialBeforeHp)
-  );
   const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
   const resolvedAttackSummary =
     specialResolution.specialActive &&
@@ -3856,7 +3852,7 @@ async function performAttack({ manualDefense = false } = {}) {
     });
   }
 
-  if (targetOverlayNeedsUpdate) {
+  if (target) {
     await ensureOverlayForToken(target.id);
   }
   await pushDebugEntry(

@@ -4121,12 +4121,10 @@ function applyOverlayItemState(target, source) {
   target.rotation = source.rotation;
   target.zIndex = source.zIndex;
   target.visible = source.visible;
-  target.attachedTo = source.attachedTo;
-  target.disableAttachmentBehavior = source.disableAttachmentBehavior;
-  target.layer = source.layer;
-  target.locked = source.locked;
-  target.disableHit = source.disableHit;
-  target.metadata = source.metadata;
+  target.metadata = {
+    ...target.metadata ?? {},
+    ...source.metadata ?? {}
+  };
 }
 function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
   if (overlayItems.length !== expectedKinds.length) {
@@ -4367,30 +4365,34 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const overlaySignature = buildOverlaySignature(token, data, metrics);
   const expectedKinds = getExpectedOverlayKinds(data);
   if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
-    const currentSignature = String(overlayItems[0]?.metadata?.signature ?? "");
-    if (currentSignature === overlaySignature) {
+    const signaturesMatch = overlayItems.every(
+      (item) => String(item.metadata?.signature ?? "") === overlaySignature
+    );
+    if (signaturesMatch) {
       return;
     }
     const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
     const nextOverlayByKind = new Map(
       nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item])
     );
-    await lib_default.scene.items.updateItems(
-      overlayItems.map((item) => item.id),
-      (itemsToUpdate) => {
-        for (const overlayItem of itemsToUpdate) {
-          const kind = String(overlayItem.metadata?.kind ?? "");
-          const nextItem = nextOverlayByKind.get(kind);
-          if (!nextItem) continue;
-          applyOverlayItemState(overlayItem, nextItem);
+    try {
+      await lib_default.scene.items.updateItems(
+        overlayItems.map((item) => item.id),
+        (itemsToUpdate) => {
+          for (const overlayItem of itemsToUpdate) {
+            const kind = String(overlayItem.metadata?.kind ?? "");
+            const nextItem = nextOverlayByKind.get(kind);
+            if (!nextItem) continue;
+            applyOverlayItemState(overlayItem, nextItem);
+          }
         }
-      }
-    );
-    return;
+      );
+      return;
+    } catch (error) {
+      console.warn("[Body HP] Overlay patch failed, falling back to rebuild", error);
+    }
   }
-  if (overlayItems.length) {
-    await removeOverlaysForToken(tokenId, sceneItems);
-  }
+  await removeOverlaysForToken(tokenId);
   await lib_default.scene.items.addItems(
     buildOverlayItems(token, data, metrics, overlaySignature)
   );

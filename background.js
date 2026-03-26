@@ -1,6 +1,7 @@
 import {
   OBR,
   applyRemoteRollEvent,
+  ensureOverlayRuntimeReady,
   isTrackedCharacter,
   syncTrackedOverlays,
 } from "./shared.js";
@@ -92,6 +93,7 @@ async function restartBridgePolling() {
 OBR.onReady(async () => {
   try {
     currentRole = await OBR.player.getRole();
+    await ensureOverlayRuntimeReady();
     await updateBadge();
 
     if (currentRole === "GM") {

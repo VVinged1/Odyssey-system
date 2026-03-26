@@ -3816,6 +3816,9 @@ var VISUAL_VERSION = 13;
 var OVERLAY_RENDER_MODE = "image";
 var OVERLAY_IMAGE_KIND = "overlay-image";
 var OVERLAY_STROKE_WIDTH = 0.75;
+var OVERLAY_RUNTIME_CACHE = `${EXTENSION_ID}/overlay-runtime`;
+var OVERLAY_RUNTIME_SW_PATH = "./overlay-runtime-sw.js";
+var OVERLAY_RUNTIME_PATH_SEGMENT = "__overlay_runtime__";
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3843,7 +3846,9 @@ var FIXED_OVERLAY_KINDS = [
   "shield-ring"
 ];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
+var overlayRuntimeUrlByTokenId = /* @__PURE__ */ new Map();
 var cachedGridDpi = null;
+var overlayRuntimeReadyPromise = null;
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -4479,6 +4484,57 @@ function buildOverlaySvgMarkup(token, data, metrics) {
     signature: buildOverlaySignature(token, data, metrics)
   };
 }
+function hashOverlaySignature(signature) {
+  let hash = 0;
+  for (let index = 0; index < signature.length; index += 1) {
+    hash = hash * 31 + signature.charCodeAt(index) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+function buildOverlayRuntimeUrl(tokenId, signature) {
+  const runtimePath = `${OVERLAY_RUNTIME_PATH_SEGMENT}/${encodeURIComponent(tokenId)}-${hashOverlaySignature(signature)}.svg`;
+  return new URL(`./${runtimePath}`, window.location.href).href;
+}
+async function cacheOverlaySvg(url, svg) {
+  if (!("caches" in globalThis)) return false;
+  const cache = await caches.open(OVERLAY_RUNTIME_CACHE);
+  await cache.put(
+    url,
+    new Response(svg, {
+      headers: {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "no-store"
+      }
+    })
+  );
+  return true;
+}
+async function deleteCachedOverlaySvg(url) {
+  if (!url || !("caches" in globalThis)) return;
+  const cache = await caches.open(OVERLAY_RUNTIME_CACHE);
+  await cache.delete(url);
+}
+async function ensureOverlayRuntimeReady() {
+  if (OVERLAY_RENDER_MODE !== "image") return false;
+  if (typeof window === "undefined") return false;
+  if (!("serviceWorker" in navigator) || !("caches" in globalThis)) return false;
+  if (!overlayRuntimeReadyPromise) {
+    overlayRuntimeReadyPromise = (async () => {
+      try {
+        const swUrl = new URL(`${OVERLAY_RUNTIME_SW_PATH}?v=${VISUAL_VERSION}`, window.location.href);
+        await navigator.serviceWorker.register(swUrl, {
+          scope: new URL("./", window.location.href).pathname
+        });
+        await navigator.serviceWorker.ready;
+        return true;
+      } catch (error) {
+        console.warn("[Body HP] Overlay runtime registration failed", error);
+        return false;
+      }
+    })();
+  }
+  return overlayRuntimeReadyPromise;
+}
 function encodeSvgDataUrl(svg) {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
@@ -4486,11 +4542,23 @@ async function buildOverlayImageItem(token, data, metrics) {
   const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
   const bounds = buildOverlayBounds(metrics, data);
   const dpi = await getCachedGridDpi();
+  const runtimeReady = await ensureOverlayRuntimeReady();
+  let url = encodeSvgDataUrl(svg);
+  if (runtimeReady) {
+    const runtimeUrl = buildOverlayRuntimeUrl(token.id, signature);
+    await cacheOverlaySvg(runtimeUrl, svg);
+    const previousUrl = overlayRuntimeUrlByTokenId.get(token.id);
+    if (previousUrl && previousUrl !== runtimeUrl) {
+      await deleteCachedOverlaySvg(previousUrl);
+    }
+    overlayRuntimeUrlByTokenId.set(token.id, runtimeUrl);
+    url = runtimeUrl;
+  }
   const image = {
     width: Math.max(1, Math.ceil(width)),
     height: Math.max(1, Math.ceil(height)),
     mime: "image/svg+xml",
-    url: encodeSvgDataUrl(svg)
+    url
   };
   const grid = {
     dpi,
@@ -4499,7 +4567,7 @@ async function buildOverlayImageItem(token, data, metrics) {
       y: Math.max(0, roundMetric(-bounds.minY))
     }
   };
-  return buildImage(image, grid).name(`Overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).scale({ x: 1, y: 1 }).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+  return buildImage(image, grid).name(`Overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).scale({ x: 1, y: 1 }).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).disableAutoZIndex(true).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
     [OVERLAY_KEY]: token.id,
     kind: OVERLAY_IMAGE_KIND,
     visualVersion: VISUAL_VERSION,
@@ -4610,6 +4678,11 @@ async function removeOverlaysForToken(tokenId, items) {
   const overlayIds = sceneItems2.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId).map((item) => item.id);
   if (overlayIds.length) {
     await lib_default.scene.items.deleteItems(overlayIds);
+  }
+  const cachedUrl = overlayRuntimeUrlByTokenId.get(tokenId);
+  if (cachedUrl) {
+    overlayRuntimeUrlByTokenId.delete(tokenId);
+    await deleteCachedOverlaySvg(cachedUrl);
   }
 }
 async function ensureOverlayForTokenInternal(tokenId, items) {
@@ -7955,6 +8028,7 @@ lib_default.onReady(async () => {
     bindUiEvents();
     await removeAttackTargetContextMenu();
     await Promise.all([
+      ensureOverlayRuntimeReady(),
       loadSharedDebugConsole(),
       lib_default.scene.local.getItems().then((items) => {
         setLocalSceneItems(items);

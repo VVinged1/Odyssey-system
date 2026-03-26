@@ -3812,13 +3812,10 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 13;
+var VISUAL_VERSION = 14;
 var OVERLAY_RENDER_MODE = "image";
 var OVERLAY_IMAGE_KIND = "overlay-image";
 var OVERLAY_STROKE_WIDTH = 0.75;
-var OVERLAY_RUNTIME_CACHE = `${EXTENSION_ID}/overlay-runtime`;
-var OVERLAY_RUNTIME_SW_PATH = "./overlay-runtime-sw.js";
-var OVERLAY_RUNTIME_PATH_SEGMENT = "__overlay_runtime__";
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3846,9 +3843,7 @@ var FIXED_OVERLAY_KINDS = [
   "shield-ring"
 ];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
-var overlayRuntimeUrlByTokenId = /* @__PURE__ */ new Map();
 var cachedGridDpi = null;
-var overlayRuntimeReadyPromise = null;
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
   [PARRY_SKILL_NAME]: 0
@@ -4427,80 +4422,46 @@ function buildOverlaySvgMarkup(token, data, metrics) {
     signature: buildOverlaySignature(token, data, metrics)
   };
 }
-function hashOverlaySignature(signature) {
-  let hash = 0;
-  for (let index = 0; index < signature.length; index += 1) {
-    hash = hash * 31 + signature.charCodeAt(index) | 0;
+function encodeSvgDataUrl(svg) {
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+}
+async function svgDataUrlToPngDataUrl(svgDataUrl, width, height) {
+  if (typeof document === "undefined") {
+    return svgDataUrl;
   }
-  return Math.abs(hash).toString(36);
-}
-function buildOverlayRuntimeUrl(tokenId, signature) {
-  const runtimePath = `${OVERLAY_RUNTIME_PATH_SEGMENT}/${encodeURIComponent(tokenId)}-${hashOverlaySignature(signature)}.svg`;
-  return new URL(`./${runtimePath}`, window.location.href).href;
-}
-async function cacheOverlaySvg(url, svg) {
-  if (!("caches" in globalThis)) return false;
-  const cache = await caches.open(OVERLAY_RUNTIME_CACHE);
-  await cache.put(
-    url,
-    new Response(svg, {
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "Cache-Control": "no-store"
-      }
-    })
-  );
-  return true;
-}
-async function deleteCachedOverlaySvg(url) {
-  if (!url || !("caches" in globalThis)) return;
-  const cache = await caches.open(OVERLAY_RUNTIME_CACHE);
-  await cache.delete(url);
+  const safeWidth = Math.max(1, Math.ceil(width));
+  const safeHeight = Math.max(1, Math.ceil(height));
+  const image = new Image();
+  const loadPromise = new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = reject;
+  });
+  image.src = svgDataUrl;
+  await loadPromise;
+  const canvas = document.createElement("canvas");
+  canvas.width = safeWidth;
+  canvas.height = safeHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return svgDataUrl;
+  }
+  context.clearRect(0, 0, safeWidth, safeHeight);
+  context.drawImage(image, 0, 0, safeWidth, safeHeight);
+  return canvas.toDataURL("image/png");
 }
 async function ensureOverlayRuntimeReady() {
-  if (OVERLAY_RENDER_MODE !== "image") return false;
-  if (typeof window === "undefined") return false;
-  if (!("serviceWorker" in navigator) || !("caches" in globalThis)) return false;
-  if (!overlayRuntimeReadyPromise) {
-    overlayRuntimeReadyPromise = (async () => {
-      try {
-        const swUrl = new URL(`${OVERLAY_RUNTIME_SW_PATH}?v=${VISUAL_VERSION}`, window.location.href);
-        await navigator.serviceWorker.register(swUrl, {
-          scope: new URL("./", window.location.href).pathname
-        });
-        await navigator.serviceWorker.ready;
-        return true;
-      } catch (error) {
-        console.warn("[Body HP] Overlay runtime registration failed", error);
-        return false;
-      }
-    })();
-  }
-  return overlayRuntimeReadyPromise;
-}
-function encodeSvgDataUrl(svg) {
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
+  return OVERLAY_RENDER_MODE === "image";
 }
 async function buildOverlayImageItem(token, data, metrics) {
   const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
   const bounds = buildOverlayBounds(metrics, data);
   const dpi = await getCachedGridDpi();
-  const runtimeReady = await ensureOverlayRuntimeReady();
-  let url = encodeSvgDataUrl(svg);
-  if (runtimeReady) {
-    const runtimeUrl = buildOverlayRuntimeUrl(token.id, signature);
-    await cacheOverlaySvg(runtimeUrl, svg);
-    const previousUrl = overlayRuntimeUrlByTokenId.get(token.id);
-    if (previousUrl && previousUrl !== runtimeUrl) {
-      await deleteCachedOverlaySvg(previousUrl);
-    }
-    overlayRuntimeUrlByTokenId.set(token.id, runtimeUrl);
-    url = runtimeUrl;
-  }
+  const svgDataUrl = encodeSvgDataUrl(svg);
+  const url = await svgDataUrlToPngDataUrl(svgDataUrl, width, height);
   const image = {
     width: Math.max(1, Math.ceil(width)),
     height: Math.max(1, Math.ceil(height)),
-    mime: "image/svg+xml",
+    mime: url.startsWith("data:image/png") ? "image/png" : "image/svg+xml",
     url
   };
   const grid = {
@@ -4697,11 +4658,6 @@ async function removeOverlaysForToken(tokenId, items) {
   const overlayIds = sceneItems.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId).map((item) => item.id);
   if (overlayIds.length) {
     await lib_default.scene.items.deleteItems(overlayIds);
-  }
-  const cachedUrl = overlayRuntimeUrlByTokenId.get(tokenId);
-  if (cachedUrl) {
-    overlayRuntimeUrlByTokenId.delete(tokenId);
-    await deleteCachedOverlaySvg(cachedUrl);
   }
 }
 async function ensureOverlayForTokenInternal(tokenId, items) {

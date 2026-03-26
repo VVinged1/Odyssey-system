@@ -1,4 +1,4 @@
-import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildImage, buildPath, isImage } from "@owlbear-rodeo/sdk";
 
 export { OBR };
 
@@ -17,7 +17,9 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 9;
+const VISUAL_VERSION = 10;
+const OVERLAY_IMAGE_KIND = "overlay-image";
+const OVERLAY_STROKE_WIDTH = 0.75;
 const SPECIAL_RING_COLOR = "#57D8FF";
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -662,41 +664,41 @@ function buildRingItem(
 }
 
 function applyOverlayItemState(target, source) {
+  if (isImage(target) && isImage(source)) {
+    target.image = source.image;
+    target.grid = source.grid;
+  }
   target.name = source.name;
-  target.commands = source.commands;
-  target.fillRule = source.fillRule;
-  target.fillColor = source.fillColor;
-  target.fillOpacity = source.fillOpacity;
-  target.strokeColor = source.strokeColor;
-  target.strokeOpacity = source.strokeOpacity;
-  target.strokeWidth = source.strokeWidth;
   target.position = source.position;
   target.rotation = source.rotation;
+  target.scale = source.scale;
   target.zIndex = source.zIndex;
   target.visible = source.visible;
+  target.attachedTo = source.attachedTo;
+  target.disableAttachmentBehavior = source.disableAttachmentBehavior;
+  target.disableAutoZIndex = source.disableAutoZIndex;
+  target.layer = source.layer;
+  target.locked = source.locked;
+  target.disableHit = source.disableHit;
   target.metadata = {
     ...(target.metadata ?? {}),
     ...(source.metadata ?? {}),
   };
 }
 
-function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
-  if (overlayItems.length !== expectedKinds.length) {
+function hasPatchableOverlaySet(token, overlayItems) {
+  if (overlayItems.length !== 1) {
     return false;
   }
 
-  const seenKinds = new Set();
-  return overlayItems.every((item) => {
-    const kind = String(item.metadata?.kind ?? "");
-    const valid =
-      item.attachedTo === token.id &&
-      item.visible === true &&
-      Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION &&
-      expectedKinds.includes(kind) &&
-      !seenKinds.has(kind);
-    seenKinds.add(kind);
-    return valid;
-  });
+  const [item] = overlayItems;
+  return (
+    isImage(item) &&
+    item.attachedTo === token.id &&
+    item.visible === true &&
+    String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND &&
+    Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION
+  );
 }
 
 function roundMetric(value) {
@@ -846,6 +848,7 @@ function buildOverlaySvgMarkup(token, data, metrics) {
 
 async function buildOverlayImageItem(token, data, metrics) {
   const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
+  const bounds = buildOverlayBounds(metrics, data);
   const dpi = await getCachedGridDpi();
   const image = {
     width: Math.max(1, Math.ceil(width)),
@@ -853,16 +856,25 @@ async function buildOverlayImageItem(token, data, metrics) {
     mime: "image/svg+xml",
     url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
   };
+  const grid = {
+    dpi,
+    offset: {
+      x: Math.max(0, roundMetric(-bounds.minX)),
+      y: Math.max(0, roundMetric(-bounds.minY)),
+    },
+  };
 
   return {
-    item: buildImage(image, { ...OVERLAY_IMAGE_GRID, dpi })
+    item: buildImage(image, grid)
       .name(`Overlay: ${getCharacterName(token)}`)
       .position(metrics.center)
       .rotation(0)
       .scale({ x: 1, y: 1 })
+      .zIndex((token.zIndex ?? 0) + 1)
       .visible(token.visible !== false)
       .attachedTo(token.id)
       .disableAttachmentBehavior(["ROTATION"])
+      .disableAutoZIndex(true)
       .layer("ATTACHMENT")
       .locked(true)
       .disableHit(true)
@@ -972,104 +984,6 @@ export function applyRollEventToData(current, event) {
   return next;
 }
 
-export function buildOverlayItems(token, data, metrics, signature = "") {
-  const items = [];
-
-  items.push(
-    buildRingItem(
-        token,
-        metrics,
-        "outer-base",
-        buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-        RING_COLORS.base,
-        0,
-        "evenodd",
-        signature,
-      ),
-    );
-
-  for (const segment of OUTER_SEGMENTS) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `segment-${segment.part}`,
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span,
-        ),
-        getPartColor(data.body[segment.part]),
-        1,
-        "nonzero",
-        signature,
-      ),
-    );
-  }
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd",
-      signature,
-    ),
-  );
-
-  if (hasConfiguredSpecial(data)) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        "special-ring",
-        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-        getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-        3,
-        "evenodd",
-        signature,
-      ),
-    );
-  }
-
-  if (hasConfiguredShield(data)) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        "shield-ring",
-        buildAnnulusCommands(
-          metrics.shieldOuterRadius,
-          metrics.shieldInnerRadius,
-          0,
-          metrics.shieldOffsetY,
-        ),
-        getPartColor(data.body[SHIELD_PART_NAME]),
-        4,
-        "evenodd",
-        signature,
-      ),
-    );
-  }
-
-  return items;
-}
-
-function getExpectedOverlayKinds(data) {
-  const expected = ["outer-base", ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`), "torso-ring"];
-  if (hasConfiguredSpecial(data)) {
-    expected.push("special-ring");
-  }
-  if (hasConfiguredShield(data)) {
-    expected.push("shield-ring");
-  }
-  return expected;
-}
-
 export async function updateTrackerData(tokenId, updater) {
   await OBR.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -1108,9 +1022,8 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const data = getTrackerData(token);
   const metrics = await getTokenMetrics(token);
   const overlaySignature = buildOverlaySignature(token, data, metrics);
-  const expectedKinds = getExpectedOverlayKinds(data);
 
-  if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
+  if (hasPatchableOverlaySet(token, overlayItems)) {
     const signaturesMatch = overlayItems.every(
       (item) => String(item.metadata?.signature ?? "") === overlaySignature,
     );
@@ -1118,19 +1031,13 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
       return;
     }
 
-    const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
-    const nextOverlayByKind = new Map(
-      nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item]),
-    );
+    const nextOverlayItem = await buildOverlayImageItem(token, data, metrics);
     try {
       await OBR.scene.items.updateItems(
         overlayItems.map((item) => item.id),
         (itemsToUpdate) => {
           for (const overlayItem of itemsToUpdate) {
-            const kind = String(overlayItem.metadata?.kind ?? "");
-            const nextItem = nextOverlayByKind.get(kind);
-            if (!nextItem) continue;
-            applyOverlayItemState(overlayItem, nextItem);
+            applyOverlayItemState(overlayItem, nextOverlayItem.item);
           }
         },
       );
@@ -1142,8 +1049,9 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
 
   await removeOverlaysForToken(tokenId);
 
+  const nextOverlayItem = await buildOverlayImageItem(token, data, metrics);
   await OBR.scene.items.addItems(
-    buildOverlayItems(token, data, metrics, overlaySignature),
+    [nextOverlayItem.item],
   );
 }
 
@@ -1230,8 +1138,7 @@ export async function syncTrackedOverlays() {
   for (const token of trackedTokens) {
     const overlayItems = overlaysByTokenId.get(token.id) ?? [];
     const data = getTrackerData(token);
-    const expectedKinds = getExpectedOverlayKinds(data);
-    const patchable = hasPatchableOverlaySet(token, overlayItems, expectedKinds);
+    const patchable = hasPatchableOverlaySet(token, overlayItems);
     let needsRebuild = !patchable;
 
     if (!needsRebuild && overlayItems.length) {

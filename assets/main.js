@@ -4099,13 +4099,13 @@ function hasConfiguredShield(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
   const shield = body?.[SHIELD_PART_NAME];
   if (!shield || typeof shield !== "object") return false;
-  return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0 || (Number(shield.minor) || 0) > 0 || (Number(shield.serious) || 0) > 0;
+  return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0;
 }
 function hasConfiguredSpecial(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
   const special = body?.[SPECIAL_PART_NAME];
   if (!special || typeof special !== "object") return false;
-  return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0 || (Number(special.minor) || 0) > 0 || (Number(special.serious) || 0) > 0;
+  return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0;
 }
 function getTargetableBodyParts(dataOrBody) {
   return BODY_ORDER.filter(

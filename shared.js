@@ -389,9 +389,7 @@ export function hasConfiguredShield(dataOrBody) {
   return (
     (Number(shield.max) || 0) > 0 ||
     (Number(shield.current) || 0) > 0 ||
-    (Number(shield.armor) || 0) > 0 ||
-    (Number(shield.minor) || 0) > 0 ||
-    (Number(shield.serious) || 0) > 0
+    (Number(shield.armor) || 0) > 0
   );
 }
 
@@ -403,9 +401,7 @@ export function hasConfiguredSpecial(dataOrBody) {
   return (
     (Number(special.max) || 0) > 0 ||
     (Number(special.current) || 0) > 0 ||
-    (Number(special.armor) || 0) > 0 ||
-    (Number(special.minor) || 0) > 0 ||
-    (Number(special.serious) || 0) > 0
+    (Number(special.armor) || 0) > 0
   );
 }
 

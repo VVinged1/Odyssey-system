@@ -11,7 +11,6 @@ import {
   PARRY_SKILL_NAME,
   canPlayerControlToken,
   clamp,
-  ensureOverlayRuntimeReady,
   ensureOverlayForToken,
   formatOverlayText,
   getArmorTotal,
@@ -4484,7 +4483,6 @@ OBR.onReady(async () => {
     bindUiEvents();
     await removeAttackTargetContextMenu();
     await Promise.all([
-      ensureOverlayRuntimeReady(),
       loadSharedDebugConsole(),
       OBR.scene.local.getItems().then((items) => {
         setLocalSceneItems(items);

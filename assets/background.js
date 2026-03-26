@@ -3481,122 +3481,6 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/ImageBuilder.js
-var ImageBuilder = class extends GenericItemBuilder {
-  constructor(player, image, grid) {
-    super(player);
-    this._image = image;
-    this._grid = grid;
-    this._item.name = "Image";
-    this._text = {
-      richText: [
-        {
-          type: "paragraph",
-          children: [{ text: "" }]
-        }
-      ],
-      plainText: "",
-      style: {
-        padding: 8,
-        fontFamily: "Roboto",
-        fontSize: 24,
-        fontWeight: 400,
-        textAlign: "CENTER",
-        textAlignVertical: "BOTTOM",
-        fillColor: "white",
-        fillOpacity: 1,
-        strokeColor: "white",
-        strokeOpacity: 1,
-        strokeWidth: 0,
-        lineHeight: 1.5
-      },
-      type: "PLAIN",
-      width: "AUTO",
-      height: "AUTO"
-    };
-    this._textItemType = "LABEL";
-  }
-  text(text) {
-    this._text = text;
-    return this.self();
-  }
-  textItemType(textItemType) {
-    this._textItemType = textItemType;
-    return this.self();
-  }
-  textWidth(width) {
-    this._text.width = width;
-    return this.self();
-  }
-  textHeight(height) {
-    this._text.height = height;
-    return this.self();
-  }
-  richText(richText) {
-    this._text.richText = richText;
-    return this.self();
-  }
-  plainText(plainText) {
-    this._text.plainText = plainText;
-    return this.self();
-  }
-  textType(textType) {
-    this._text.type = textType;
-    return this.self();
-  }
-  textPadding(padding) {
-    this._text.style.padding = padding;
-    return this.self();
-  }
-  fontFamily(fontFamily) {
-    this._text.style.fontFamily = fontFamily;
-    return this.self();
-  }
-  fontSize(fontSize) {
-    this._text.style.fontSize = fontSize;
-    return this.self();
-  }
-  fontWeight(fontWeight) {
-    this._text.style.fontWeight = fontWeight;
-    return this.self();
-  }
-  textAlign(textAlign) {
-    this._text.style.textAlign = textAlign;
-    return this.self();
-  }
-  textAlignVertical(textAlignVertical) {
-    this._text.style.textAlignVertical = textAlignVertical;
-    return this.self();
-  }
-  textFillColor(fillColor) {
-    this._text.style.fillColor = fillColor;
-    return this.self();
-  }
-  textFillOpacity(fillOpacity) {
-    this._text.style.fillOpacity = fillOpacity;
-    return this.self();
-  }
-  textStrokeColor(strokeColor) {
-    this._text.style.strokeColor = strokeColor;
-    return this.self();
-  }
-  textStrokeOpacity(strokeOpacity) {
-    this._text.style.strokeOpacity = strokeOpacity;
-    return this.self();
-  }
-  textStrokeWidth(strokeWidth) {
-    this._text.style.strokeWidth = strokeWidth;
-    return this.self();
-  }
-  textLineHeight(lineHeight) {
-    this._text.style.lineHeight = lineHeight;
-    return this.self();
-  }
-  build() {
-    return Object.assign(Object.assign({}, this._item), { type: "IMAGE", image: this._image, grid: this._grid, text: this._text, textItemType: this._textItemType });
-  }
-};
-
 // node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
 var PathBuilder = class extends GenericItemBuilder {
   constructor(player) {
@@ -3788,9 +3672,6 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildImage(image, grid) {
-  return new ImageBuilder(playerApi, image, grid);
-}
 function buildPath() {
   return new PathBuilder(playerApi);
 }
@@ -3812,10 +3693,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 14;
-var OVERLAY_RENDER_MODE = "image";
-var OVERLAY_IMAGE_KIND = "overlay-image";
-var OVERLAY_STROKE_WIDTH = 0.75;
+var VISUAL_VERSION = 12;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -4238,25 +4116,6 @@ function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fi
   }).build();
 }
 function applyOverlayItemState(target, source) {
-  if (isImage(target) && isImage(source)) {
-    target.image = source.image;
-    target.grid = source.grid;
-    target.position = source.position;
-    target.rotation = source.rotation;
-    target.scale = source.scale;
-    target.zIndex = source.zIndex;
-    target.visible = source.visible;
-    target.attachedTo = source.attachedTo;
-    target.disableAttachmentBehavior = source.disableAttachmentBehavior;
-    target.layer = source.layer;
-    target.locked = source.locked;
-    target.disableHit = source.disableHit;
-    target.metadata = {
-      ...target.metadata ?? {},
-      ...source.metadata ?? {}
-    };
-    return;
-  }
   target.name = source.name;
   target.commands = source.commands;
   target.fillRule = source.fillRule;
@@ -4275,13 +4134,6 @@ function applyOverlayItemState(target, source) {
   };
 }
 function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
-  if (OVERLAY_RENDER_MODE === "image") {
-    if (overlayItems.length !== 1) {
-      return false;
-    }
-    const [item] = overlayItems;
-    return isImage(item) && item.attachedTo === token.id && item.visible === true && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND;
-  }
   if (overlayItems.length !== expectedKinds.length) {
     return false;
   }
@@ -4295,42 +4147,6 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
 }
 function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
-}
-function commandsToSvgPath(commands) {
-  return commands.map((command) => {
-    const [type, x = 0, y = 0] = command;
-    if (type === Command.MOVE) {
-      return `M ${roundMetric(x)} ${roundMetric(y)}`;
-    }
-    if (type === Command.LINE) {
-      return `L ${roundMetric(x)} ${roundMetric(y)}`;
-    }
-    if (type === Command.CLOSE) {
-      return "Z";
-    }
-    return "";
-  }).filter(Boolean).join(" ");
-}
-function buildOverlayBounds(metrics, data) {
-  const specialActive = hasConfiguredSpecial(data);
-  const shieldActive = hasConfiguredShield(data);
-  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
-  const horizontalExtent = Math.max(
-    ringRadius,
-    shieldActive ? metrics.shieldOuterRadius : 0
-  );
-  const topExtent = Math.max(
-    ringRadius,
-    shieldActive ? Math.abs(metrics.shieldOffsetY) + metrics.shieldOuterRadius : 0
-  );
-  const bottomExtent = ringRadius;
-  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
-  return {
-    minX: -horizontalExtent - padding,
-    maxX: horizontalExtent + padding,
-    minY: -topExtent - padding,
-    maxY: bottomExtent + padding
-  };
 }
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = BODY_ORDER.map((partName) => {
@@ -4358,125 +4174,6 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.shieldOffsetY),
     bodySignature
   ].join(";");
-}
-function buildOverlaySvgMarkup(token, data, metrics) {
-  const layers = [
-    {
-      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
-      fill: RING_COLORS.base,
-      fillRule: "evenodd"
-    },
-    ...OUTER_SEGMENTS.map((segment) => ({
-      d: commandsToSvgPath(
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span
-        )
-      ),
-      fill: getPartColor(data.body[segment.part]),
-      fillRule: "nonzero"
-    })),
-    {
-      d: commandsToSvgPath(
-        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
-      ),
-      fill: getPartColor(data.body.Torso),
-      fillRule: "evenodd"
-    }
-  ];
-  if (hasConfiguredSpecial(data)) {
-    layers.push({
-      d: commandsToSvgPath(
-        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
-      ),
-      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      fillRule: "evenodd"
-    });
-  }
-  if (hasConfiguredShield(data)) {
-    layers.push({
-      d: commandsToSvgPath(
-        buildAnnulusCommands(
-          metrics.shieldOuterRadius,
-          metrics.shieldInnerRadius,
-          0,
-          metrics.shieldOffsetY
-        )
-      ),
-      fill: getPartColor(data.body[SHIELD_PART_NAME]),
-      fillRule: "evenodd"
-    });
-  }
-  const bounds = buildOverlayBounds(metrics, data);
-  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
-  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
-    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
-  ).join("")}</svg>`;
-  return {
-    svg,
-    width,
-    height,
-    signature: buildOverlaySignature(token, data, metrics)
-  };
-}
-function encodeSvgDataUrl(svg) {
-  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-}
-async function svgDataUrlToPngDataUrl(svgDataUrl, width, height) {
-  if (typeof document === "undefined") {
-    return svgDataUrl;
-  }
-  const safeWidth = Math.max(1, Math.ceil(width));
-  const safeHeight = Math.max(1, Math.ceil(height));
-  const image = new Image();
-  const loadPromise = new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = reject;
-  });
-  image.src = svgDataUrl;
-  await loadPromise;
-  const canvas = document.createElement("canvas");
-  canvas.width = safeWidth;
-  canvas.height = safeHeight;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return svgDataUrl;
-  }
-  context.clearRect(0, 0, safeWidth, safeHeight);
-  context.drawImage(image, 0, 0, safeWidth, safeHeight);
-  return canvas.toDataURL("image/png");
-}
-async function ensureOverlayRuntimeReady() {
-  return OVERLAY_RENDER_MODE === "image";
-}
-async function buildOverlayImageItem(token, data, metrics) {
-  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
-  const bounds = buildOverlayBounds(metrics, data);
-  const dpi = await getCachedGridDpi();
-  const svgDataUrl = encodeSvgDataUrl(svg);
-  const url = await svgDataUrlToPngDataUrl(svgDataUrl, width, height);
-  const image = {
-    width: Math.max(1, Math.ceil(width)),
-    height: Math.max(1, Math.ceil(height)),
-    mime: url.startsWith("data:image/png") ? "image/png" : "image/svg+xml",
-    url
-  };
-  const grid = {
-    dpi,
-    offset: {
-      x: Math.max(0, roundMetric(-bounds.minX)),
-      y: Math.max(0, roundMetric(-bounds.minY))
-    }
-  };
-  return buildImage(image, grid).name(`Overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).scale({ x: 1, y: 1 }).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).disableAutoZIndex(true).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind: OVERLAY_IMAGE_KIND,
-    visualVersion: VISUAL_VERSION,
-    signature
-  }).build();
 }
 function applyBodyEffects(body, bodyEffects) {
   if (!bodyEffects || typeof bodyEffects !== "object") return;
@@ -4648,9 +4345,6 @@ function buildOverlayItems(token, data, metrics, signature = "") {
   return items;
 }
 function getExpectedOverlayKinds(data) {
-  if (OVERLAY_RENDER_MODE === "image") {
-    return [OVERLAY_IMAGE_KIND];
-  }
   return FIXED_OVERLAY_KINDS;
 }
 async function removeOverlaysForToken(tokenId, items) {
@@ -4682,48 +4376,31 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
     if (signaturesMatch) {
       return;
     }
+    const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
+    const nextOverlayByKind = new Map(
+      nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item])
+    );
     try {
-      if (OVERLAY_RENDER_MODE === "image") {
-        const nextOverlayItem = await buildOverlayImageItem(token, data, metrics);
-        await lib_default.scene.items.updateItems(
-          overlayItems.map((item) => item.id),
-          (itemsToUpdate) => {
-            for (const overlayItem of itemsToUpdate) {
-              applyOverlayItemState(overlayItem, nextOverlayItem);
-            }
+      await lib_default.scene.items.updateItems(
+        overlayItems.map((item) => item.id),
+        (itemsToUpdate) => {
+          for (const overlayItem of itemsToUpdate) {
+            const kind = String(overlayItem.metadata?.kind ?? "");
+            const nextItem = nextOverlayByKind.get(kind);
+            if (!nextItem) continue;
+            applyOverlayItemState(overlayItem, nextItem);
           }
-        );
-      } else {
-        const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
-        const nextOverlayByKind = new Map(
-          nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item])
-        );
-        await lib_default.scene.items.updateItems(
-          overlayItems.map((item) => item.id),
-          (itemsToUpdate) => {
-            for (const overlayItem of itemsToUpdate) {
-              const kind = String(overlayItem.metadata?.kind ?? "");
-              const nextItem = nextOverlayByKind.get(kind);
-              if (!nextItem) continue;
-              applyOverlayItemState(overlayItem, nextItem);
-            }
-          }
-        );
-      }
+        }
+      );
       return;
     } catch (error) {
       console.warn("[Body HP] Overlay patch failed, falling back to rebuild", error);
     }
   }
   await removeOverlaysForToken(tokenId);
-  if (OVERLAY_RENDER_MODE === "image") {
-    const overlayItem = await buildOverlayImageItem(token, data, metrics);
-    await lib_default.scene.items.addItems([overlayItem]);
-  } else {
-    await lib_default.scene.items.addItems(
-      buildOverlayItems(token, data, metrics, overlaySignature)
-    );
-  }
+  await lib_default.scene.items.addItems(
+    buildOverlayItems(token, data, metrics, overlaySignature)
+  );
 }
 async function ensureOverlayForToken(tokenId, items) {
   const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
@@ -4949,7 +4626,6 @@ async function restartBridgePolling() {
 lib_default.onReady(async () => {
   try {
     currentRole = await lib_default.player.getRole();
-    await ensureOverlayRuntimeReady();
     await updateBadge();
     if (currentRole === "GM") {
       await syncTrackedOverlays();

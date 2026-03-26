@@ -1,4 +1,4 @@
-import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildImage, buildPath, isImage } from "@owlbear-rodeo/sdk";
 
 export { OBR };
 
@@ -17,7 +17,10 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 12;
+const VISUAL_VERSION = 13;
+const OVERLAY_RENDER_MODE = "image";
+const OVERLAY_IMAGE_KIND = "overlay-image";
+const OVERLAY_STROKE_WIDTH = 0.75;
 const SPECIAL_RING_COLOR = "#57D8FF";
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -670,6 +673,26 @@ function buildRingItem(
 }
 
 function applyOverlayItemState(target, source) {
+  if (isImage(target) && isImage(source)) {
+    target.image = source.image;
+    target.grid = source.grid;
+    target.position = source.position;
+    target.rotation = source.rotation;
+    target.scale = source.scale;
+    target.zIndex = source.zIndex;
+    target.visible = source.visible;
+    target.attachedTo = source.attachedTo;
+    target.disableAttachmentBehavior = source.disableAttachmentBehavior;
+    target.layer = source.layer;
+    target.locked = source.locked;
+    target.disableHit = source.disableHit;
+    target.metadata = {
+      ...(target.metadata ?? {}),
+      ...(source.metadata ?? {}),
+    };
+    return;
+  }
+
   target.name = source.name;
   target.commands = source.commands;
   target.fillRule = source.fillRule;
@@ -689,6 +712,21 @@ function applyOverlayItemState(target, source) {
 }
 
 function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
+  if (OVERLAY_RENDER_MODE === "image") {
+    if (overlayItems.length !== 1) {
+      return false;
+    }
+
+    const [item] = overlayItems;
+    return (
+      isImage(item) &&
+      item.attachedTo === token.id &&
+      item.visible === true &&
+      Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION &&
+      String(item.metadata?.kind ?? "") === OVERLAY_IMAGE_KIND
+    );
+  }
+
   if (overlayItems.length !== expectedKinds.length) {
     return false;
   }
@@ -851,6 +889,49 @@ function buildOverlaySvgMarkup(token, data, metrics) {
     height,
     signature: buildOverlaySignature(token, data, metrics),
   };
+}
+
+function encodeSvgDataUrl(svg) {
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+async function buildOverlayImageItem(token, data, metrics) {
+  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
+  const bounds = buildOverlayBounds(metrics, data);
+  const dpi = await getCachedGridDpi();
+  const image = {
+    width: Math.max(1, Math.ceil(width)),
+    height: Math.max(1, Math.ceil(height)),
+    mime: "image/svg+xml",
+    url: encodeSvgDataUrl(svg),
+  };
+  const grid = {
+    dpi,
+    offset: {
+      x: Math.max(0, roundMetric(-bounds.minX)),
+      y: Math.max(0, roundMetric(-bounds.minY)),
+    },
+  };
+
+  return buildImage(image, grid)
+    .name(`Overlay: ${getCharacterName(token)}`)
+    .position(metrics.center)
+    .rotation(0)
+    .scale({ x: 1, y: 1 })
+    .zIndex((token.zIndex ?? 0) + 100)
+    .visible(token.visible !== false)
+    .attachedTo(token.id)
+    .disableAttachmentBehavior(["ROTATION"])
+    .layer("ATTACHMENT")
+    .locked(true)
+    .disableHit(true)
+    .metadata({
+      [OVERLAY_KEY]: token.id,
+      kind: OVERLAY_IMAGE_KIND,
+      visualVersion: VISUAL_VERSION,
+      signature,
+    })
+    .build();
 }
 
 function applyBodyEffects(body, bodyEffects) {
@@ -1050,6 +1131,9 @@ export function buildOverlayItems(token, data, metrics, signature = "") {
 }
 
 function getExpectedOverlayKinds(data) {
+  if (OVERLAY_RENDER_MODE === "image") {
+    return [OVERLAY_IMAGE_KIND];
+  }
   return FIXED_OVERLAY_KINDS;
 }
 
@@ -1090,22 +1174,34 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
       return;
     }
 
-    const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
-    const nextOverlayByKind = new Map(
-      nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item]),
-    );
     try {
-      await OBR.scene.items.updateItems(
-        overlayItems.map((item) => item.id),
-        (itemsToUpdate) => {
-          for (const overlayItem of itemsToUpdate) {
-            const kind = String(overlayItem.metadata?.kind ?? "");
-            const nextItem = nextOverlayByKind.get(kind);
-            if (!nextItem) continue;
-            applyOverlayItemState(overlayItem, nextItem);
-          }
-        },
-      );
+      if (OVERLAY_RENDER_MODE === "image") {
+        const nextOverlayItem = await buildOverlayImageItem(token, data, metrics);
+        await OBR.scene.items.updateItems(
+          overlayItems.map((item) => item.id),
+          (itemsToUpdate) => {
+            for (const overlayItem of itemsToUpdate) {
+              applyOverlayItemState(overlayItem, nextOverlayItem);
+            }
+          },
+        );
+      } else {
+        const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
+        const nextOverlayByKind = new Map(
+          nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item]),
+        );
+        await OBR.scene.items.updateItems(
+          overlayItems.map((item) => item.id),
+          (itemsToUpdate) => {
+            for (const overlayItem of itemsToUpdate) {
+              const kind = String(overlayItem.metadata?.kind ?? "");
+              const nextItem = nextOverlayByKind.get(kind);
+              if (!nextItem) continue;
+              applyOverlayItemState(overlayItem, nextItem);
+            }
+          },
+        );
+      }
       return;
     } catch (error) {
       console.warn("[Body HP] Overlay patch failed, falling back to rebuild", error);
@@ -1114,9 +1210,14 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
 
   await removeOverlaysForToken(tokenId);
 
-  await OBR.scene.items.addItems(
-    buildOverlayItems(token, data, metrics, overlaySignature),
-  );
+  if (OVERLAY_RENDER_MODE === "image") {
+    const overlayItem = await buildOverlayImageItem(token, data, metrics);
+    await OBR.scene.items.addItems([overlayItem]);
+  } else {
+    await OBR.scene.items.addItems(
+      buildOverlayItems(token, data, metrics, overlaySignature),
+    );
+  }
 }
 
 export async function ensureOverlayForToken(tokenId, items) {

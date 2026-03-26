@@ -3247,7 +3247,7 @@ async function healLimbs() {
     return;
   }
 
-  const healedParts = ["L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+  const healedParts = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     for (const partName of healedParts) {
@@ -3800,6 +3800,10 @@ async function performAttack({ manualDefense = false } = {}) {
   const afterMinor = target ? (projectedPartState.minor ?? beforeMinor) : null;
   const afterSerious = target ? (projectedPartState.serious ?? beforeSerious) : null;
   const specialAfterHp = specialWasActive ? (projectedSpecialState?.current ?? specialBeforeHp) : null;
+  const targetOverlayNeedsUpdate = Boolean(target) && (
+    afterHp !== beforeHp ||
+    (specialWasActive && specialAfterHp !== specialBeforeHp)
+  );
   const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
   const resolvedAttackSummary =
     specialResolution.specialActive &&
@@ -3852,8 +3856,7 @@ async function performAttack({ manualDefense = false } = {}) {
     });
   }
 
-  await ensureOverlayForToken(attacker.id);
-  if (target) {
+  if (targetOverlayNeedsUpdate) {
     await ensureOverlayForToken(target.id);
   }
   await pushDebugEntry(
@@ -3929,7 +3932,6 @@ async function performRollDice() {
     return next;
   });
 
-  await ensureOverlayForToken(token.id);
   await pushDebugEntry(`${getCharacterName(token)} rolls dice`, formatDiceDebug({
     tokenName: getCharacterName(token),
     result,

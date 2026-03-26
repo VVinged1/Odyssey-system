@@ -4276,14 +4276,75 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
+function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "") {
   return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex(Date.now() + zIndex).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
     [OVERLAY_KEY]: token.id,
     kind,
-    visualVersion: VISUAL_VERSION
+    visualVersion: VISUAL_VERSION,
+    signature
   }).build();
 }
-function buildOverlayItems(token, data, metrics) {
+function applyOverlayItemState(target, source) {
+  target.name = source.name;
+  target.commands = source.commands;
+  target.fillRule = source.fillRule;
+  target.fillColor = source.fillColor;
+  target.fillOpacity = source.fillOpacity;
+  target.strokeColor = source.strokeColor;
+  target.strokeOpacity = source.strokeOpacity;
+  target.strokeWidth = source.strokeWidth;
+  target.position = source.position;
+  target.rotation = source.rotation;
+  target.zIndex = source.zIndex;
+  target.visible = source.visible;
+  target.attachedTo = source.attachedTo;
+  target.disableAttachmentBehavior = source.disableAttachmentBehavior;
+  target.layer = source.layer;
+  target.locked = source.locked;
+  target.disableHit = source.disableHit;
+  target.metadata = source.metadata;
+}
+function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
+  if (overlayItems.length !== expectedKinds.length) {
+    return false;
+  }
+  const seenKinds = /* @__PURE__ */ new Set();
+  return overlayItems.every((item) => {
+    const kind = String(item.metadata?.kind ?? "");
+    const valid = item.attachedTo === token.id && item.visible === true && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && expectedKinds.includes(kind) && !seenKinds.has(kind);
+    seenKinds.add(kind);
+    return valid;
+  });
+}
+function roundMetric(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+function buildOverlaySignature(token, data, metrics) {
+  const bodySignature = BODY_ORDER.map((partName) => {
+    const part = data.body?.[partName] ?? {};
+    return [
+      partName,
+      Number(part.current) || 0,
+      Number(part.max) || 0,
+      Number(part.armor) || 0
+    ].join(":");
+  }).join("|");
+  return [
+    VISUAL_VERSION,
+    roundMetric(metrics.visibleDiameter),
+    roundMetric(metrics.outerRadius),
+    roundMetric(metrics.outerInnerRadius),
+    roundMetric(metrics.torsoOuterRadius),
+    roundMetric(metrics.torsoInnerRadius),
+    roundMetric(metrics.specialOuterRadius),
+    roundMetric(metrics.specialInnerRadius),
+    roundMetric(metrics.shieldOuterRadius),
+    roundMetric(metrics.shieldInnerRadius),
+    roundMetric(metrics.shieldOffsetY),
+    bodySignature
+  ].join(";");
+}
+function buildOverlayItems(token, data, metrics, signature = "") {
   const items = [];
   items.push(
     buildRingItem(
@@ -4293,7 +4354,8 @@ function buildOverlayItems(token, data, metrics) {
       buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
       RING_COLORS.base,
       0,
-      "evenodd"
+      "evenodd",
+      signature
     )
   );
   for (const segment of OUTER_SEGMENTS) {
@@ -4309,7 +4371,9 @@ function buildOverlayItems(token, data, metrics) {
           segment.span
         ),
         getPartColor(data.body[segment.part]),
-        1
+        1,
+        "nonzero",
+        signature
       )
     );
   }
@@ -4321,7 +4385,8 @@ function buildOverlayItems(token, data, metrics) {
       buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
       getPartColor(data.body.Torso),
       2,
-      "evenodd"
+      "evenodd",
+      signature
     )
   );
   if (hasConfiguredSpecial(data)) {
@@ -4333,7 +4398,8 @@ function buildOverlayItems(token, data, metrics) {
         buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
         getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
         3,
-        "evenodd"
+        "evenodd",
+        signature
       )
     );
   }
@@ -4351,7 +4417,8 @@ function buildOverlayItems(token, data, metrics) {
         ),
         getPartColor(data.body[SHIELD_PART_NAME]),
         4,
-        "evenodd"
+        "evenodd",
+        signature
       )
     );
   }
@@ -4388,11 +4455,44 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems2 = items ?? await lib_default.scene.items.getItems();
   const token = sceneItems2.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
-  await removeOverlaysForToken(tokenId, sceneItems2);
-  if (!isTrackedCharacter(token) || token.visible === false) return;
+  const overlayItems = sceneItems2.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId);
+  if (!isTrackedCharacter(token) || token.visible === false) {
+    if (overlayItems.length) {
+      await removeOverlaysForToken(tokenId, sceneItems2);
+    }
+    return;
+  }
+  const data = getTrackerData(token);
   const metrics = await getTokenMetrics(token);
+  const overlaySignature = buildOverlaySignature(token, data, metrics);
+  const expectedKinds = getExpectedOverlayKinds(data);
+  if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
+    const currentSignature = String(overlayItems[0]?.metadata?.signature ?? "");
+    if (currentSignature === overlaySignature) {
+      return;
+    }
+    const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
+    const nextOverlayByKind = new Map(
+      nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item])
+    );
+    await lib_default.scene.items.updateItems(
+      overlayItems.map((item) => item.id),
+      (itemsToUpdate) => {
+        for (const overlayItem of itemsToUpdate) {
+          const kind = String(overlayItem.metadata?.kind ?? "");
+          const nextItem = nextOverlayByKind.get(kind);
+          if (!nextItem) continue;
+          applyOverlayItemState(overlayItem, nextItem);
+        }
+      }
+    );
+    return;
+  }
+  if (overlayItems.length) {
+    await removeOverlaysForToken(tokenId, sceneItems2);
+  }
   await lib_default.scene.items.addItems(
-    buildOverlayItems(token, getTrackerData(token), metrics)
+    buildOverlayItems(token, data, metrics, overlaySignature)
   );
 }
 async function ensureOverlayForToken(tokenId, items) {
@@ -4429,14 +4529,17 @@ async function syncTrackedOverlays() {
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
     const overlayItems = overlaysByTokenId.get(token.id) ?? [];
-    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
-    const seenKinds = /* @__PURE__ */ new Set();
-    const needsRebuild = overlayItems.length !== expectedKinds.length || overlayItems.some((item) => {
-      const kind = String(item.metadata?.kind ?? "");
-      const invalid = item.attachedTo !== token.id || item.visible !== true || !expectedKinds.includes(kind) || seenKinds.has(kind);
-      seenKinds.add(kind);
-      return invalid;
-    });
+    const data = getTrackerData(token);
+    const expectedKinds = getExpectedOverlayKinds(data);
+    const patchable = hasPatchableOverlaySet(token, overlayItems, expectedKinds);
+    let needsRebuild = !patchable;
+    if (!needsRebuild && overlayItems.length) {
+      const metrics = await getTokenMetrics(token);
+      const expectedSignature = buildOverlaySignature(token, data, metrics);
+      needsRebuild = overlayItems.some(
+        (item) => String(item.metadata?.signature ?? "") !== expectedSignature
+      );
+    }
     if (needsRebuild) {
       await ensureOverlayForToken(token.id);
     }
@@ -6610,7 +6713,7 @@ async function healLimbs() {
     setStatus("Only the GM or assigned player can heal this token.", "error");
     return;
   }
-  const healedParts = ["L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
+  const healedParts = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     for (const partName of healedParts) {
@@ -7079,6 +7182,7 @@ async function performAttack({ manualDefense = false } = {}) {
   const afterMinor = target ? projectedPartState.minor ?? beforeMinor : null;
   const afterSerious = target ? projectedPartState.serious ?? beforeSerious : null;
   const specialAfterHp = specialWasActive ? projectedSpecialState?.current ?? specialBeforeHp : null;
+  const targetOverlayNeedsUpdate = Boolean(target) && (afterHp !== beforeHp || specialWasActive && specialAfterHp !== specialBeforeHp);
   const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
   const resolvedAttackSummary = specialResolution.specialActive && result.hit && specialResolution.damageAppliedLabel !== "No Damage" ? `${result.summary} Applied: ${specialResolution.damageAppliedLabel}.` : result.summary;
   await updateTrackerData2(attacker.id, (current2) => {
@@ -7123,8 +7227,7 @@ async function performAttack({ manualDefense = false } = {}) {
       return next;
     });
   }
-  await ensureOverlayForToken(attacker.id);
-  if (target) {
+  if (targetOverlayNeedsUpdate) {
     await ensureOverlayForToken(target.id);
   }
   await pushDebugEntry(
@@ -7196,7 +7299,6 @@ async function performRollDice() {
     next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
     return next;
   });
-  await ensureOverlayForToken(token.id);
   await pushDebugEntry(`${getCharacterName(token)} rolls dice`, formatDiceDebug({
     tokenName: getCharacterName(token),
     result

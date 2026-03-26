@@ -624,7 +624,16 @@ function getSpecialPartColor(part) {
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
 
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero") {
+function buildRingItem(
+  token,
+  metrics,
+  kind,
+  commands,
+  fillColor,
+  zIndex = 0,
+  fillRule = "nonzero",
+  signature = "",
+) {
   return buildPath()
     .name(`${kind}: ${getCharacterName(token)}`)
     .commands(commands)
@@ -647,8 +656,49 @@ function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fi
       [OVERLAY_KEY]: token.id,
       kind,
       visualVersion: VISUAL_VERSION,
+      signature,
     })
     .build();
+}
+
+function applyOverlayItemState(target, source) {
+  target.name = source.name;
+  target.commands = source.commands;
+  target.fillRule = source.fillRule;
+  target.fillColor = source.fillColor;
+  target.fillOpacity = source.fillOpacity;
+  target.strokeColor = source.strokeColor;
+  target.strokeOpacity = source.strokeOpacity;
+  target.strokeWidth = source.strokeWidth;
+  target.position = source.position;
+  target.rotation = source.rotation;
+  target.zIndex = source.zIndex;
+  target.visible = source.visible;
+  target.attachedTo = source.attachedTo;
+  target.disableAttachmentBehavior = source.disableAttachmentBehavior;
+  target.layer = source.layer;
+  target.locked = source.locked;
+  target.disableHit = source.disableHit;
+  target.metadata = source.metadata;
+}
+
+function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
+  if (overlayItems.length !== expectedKinds.length) {
+    return false;
+  }
+
+  const seenKinds = new Set();
+  return overlayItems.every((item) => {
+    const kind = String(item.metadata?.kind ?? "");
+    const valid =
+      item.attachedTo === token.id &&
+      item.visible === true &&
+      Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION &&
+      expectedKinds.includes(kind) &&
+      !seenKinds.has(kind);
+    seenKinds.add(kind);
+    return valid;
+  });
 }
 
 function roundMetric(value) {
@@ -924,20 +974,21 @@ export function applyRollEventToData(current, event) {
   return next;
 }
 
-export function buildOverlayItems(token, data, metrics) {
+export function buildOverlayItems(token, data, metrics, signature = "") {
   const items = [];
 
   items.push(
     buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd",
-    ),
-  );
+        token,
+        metrics,
+        "outer-base",
+        buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
+        RING_COLORS.base,
+        0,
+        "evenodd",
+        signature,
+      ),
+    );
 
   for (const segment of OUTER_SEGMENTS) {
     items.push(
@@ -953,6 +1004,8 @@ export function buildOverlayItems(token, data, metrics) {
         ),
         getPartColor(data.body[segment.part]),
         1,
+        "nonzero",
+        signature,
       ),
     );
   }
@@ -966,6 +1019,7 @@ export function buildOverlayItems(token, data, metrics) {
       getPartColor(data.body.Torso),
       2,
       "evenodd",
+      signature,
     ),
   );
 
@@ -979,6 +1033,7 @@ export function buildOverlayItems(token, data, metrics) {
         getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
         3,
         "evenodd",
+        signature,
       ),
     );
   }
@@ -998,6 +1053,7 @@ export function buildOverlayItems(token, data, metrics) {
         getPartColor(data.body[SHIELD_PART_NAME]),
         4,
         "evenodd",
+        signature,
       ),
     );
   }
@@ -1042,13 +1098,50 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const sceneItems = items ?? (await OBR.scene.items.getItems());
   const token = sceneItems.find((item) => item.id === tokenId);
   if (!token || !isCharacterToken(token)) return;
-  await removeOverlaysForToken(tokenId, sceneItems);
+  const overlayItems = sceneItems.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId);
 
-  if (!isTrackedCharacter(token) || token.visible === false) return;
+  if (!isTrackedCharacter(token) || token.visible === false) {
+    if (overlayItems.length) {
+      await removeOverlaysForToken(tokenId, sceneItems);
+    }
+    return;
+  }
 
+  const data = getTrackerData(token);
   const metrics = await getTokenMetrics(token);
+  const overlaySignature = buildOverlaySignature(token, data, metrics);
+  const expectedKinds = getExpectedOverlayKinds(data);
+
+  if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
+    const currentSignature = String(overlayItems[0]?.metadata?.signature ?? "");
+    if (currentSignature === overlaySignature) {
+      return;
+    }
+
+    const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
+    const nextOverlayByKind = new Map(
+      nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item]),
+    );
+    await OBR.scene.items.updateItems(
+      overlayItems.map((item) => item.id),
+      (itemsToUpdate) => {
+        for (const overlayItem of itemsToUpdate) {
+          const kind = String(overlayItem.metadata?.kind ?? "");
+          const nextItem = nextOverlayByKind.get(kind);
+          if (!nextItem) continue;
+          applyOverlayItemState(overlayItem, nextItem);
+        }
+      },
+    );
+    return;
+  }
+
+  if (overlayItems.length) {
+    await removeOverlaysForToken(tokenId, sceneItems);
+  }
+
   await OBR.scene.items.addItems(
-    buildOverlayItems(token, getTrackerData(token), metrics),
+    buildOverlayItems(token, data, metrics, overlaySignature),
   );
 }
 
@@ -1134,20 +1227,18 @@ export async function syncTrackedOverlays() {
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
     const overlayItems = overlaysByTokenId.get(token.id) ?? [];
-    const expectedKinds = getExpectedOverlayKinds(getTrackerData(token));
-    const seenKinds = new Set();
-    const needsRebuild =
-      overlayItems.length !== expectedKinds.length ||
-      overlayItems.some((item) => {
-        const kind = String(item.metadata?.kind ?? "");
-        const invalid =
-          item.attachedTo !== token.id ||
-          item.visible !== true ||
-          !expectedKinds.includes(kind) ||
-          seenKinds.has(kind);
-        seenKinds.add(kind);
-        return invalid;
-      });
+    const data = getTrackerData(token);
+    const expectedKinds = getExpectedOverlayKinds(data);
+    const patchable = hasPatchableOverlaySet(token, overlayItems, expectedKinds);
+    let needsRebuild = !patchable;
+
+    if (!needsRebuild && overlayItems.length) {
+      const metrics = await getTokenMetrics(token);
+      const expectedSignature = buildOverlaySignature(token, data, metrics);
+      needsRebuild = overlayItems.some(
+        (item) => String(item.metadata?.signature ?? "") !== expectedSignature,
+      );
+    }
 
     if (needsRebuild) {
       await ensureOverlayForToken(token.id);

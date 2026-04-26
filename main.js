@@ -933,7 +933,7 @@ function formatDiceRollsWithModifier(result) {
 }
 
 function buildDiceRollSummary(diceLabel, result) {
-  return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], with modifier ${formatDiceRollsWithModifier(result)}`;
+  return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], sum ${result.subtotal}, with modifier ${formatDiceRollsWithModifier(result)}`;
 }
 
 function formatOverlayPreviewText(data) {
@@ -947,6 +947,7 @@ function formatDiceDebug({ tokenName, result }) {
       ["Actor", tokenName],
       ["Dice", `${result.count}d${result.sides}`],
       ["Raw Dice", formatRawDiceRolls(result)],
+      ["Dice Sum", result.subtotal],
       ["With Modifier", formatDiceRollsWithModifier(result)],
     ],
   );
@@ -2283,7 +2284,6 @@ function legacyRenderSelectedToken() {
       ${renderSkillsBlock({ odyssey }, odysseyOwnerDisabled)}
       ${renderCombatBlock(token, { odyssey }, tokenLocked)}
       ${renderDiceBlock(token, { odyssey }, tokenLocked)}
-      ${renderPrivateGmDiceBlock()}
       ${
         SHOW_EMBEDDED_PUBLIC_LOG
           ? renderCollapsibleSection(
@@ -3252,7 +3252,6 @@ function renderSelectedToken() {
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
-      ${renderPrivateGmDiceBlock()}
       ${
         SHOW_EMBEDDED_PUBLIC_LOG
           ? renderCollapsibleSection(

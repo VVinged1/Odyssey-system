@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Odyssey GM Tools</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <h1>Odyssey GM Tools</h1>
+          <p class="sub">GM-only public/private dice and environment-to-character attack tools.</p>
+        </div>
+        <div id="roleBadge" class="role-badge">...</div>
+      </header>
+
+      <section class="panel actions-panel">
+        <div class="row row-gap">
+          <button id="refreshBtn" type="button">Refresh</button>
+        </div>
+        <p id="statusBox" class="status info">Loading GM tools...</p>
+      </section>
+
+      <section id="gmOnlyNotice" class="panel" hidden>
+        <div class="section-title">GM Only</div>
+        <p class="muted">This extension is available only for the GM. Players can keep using the main Odyssey extensions.</p>
+      </section>
+
+      <div id="gmContent">
+        <section class="panel">
+          <details class="collapsible-block" open>
+            <summary class="collapsible-title">GM Dice</summary>
+            <div class="collapsible-body">
+              <div class="form-grid">
+                <label class="field-stack">
+                  <span class="field-label">Dice Sides</span>
+                  <input id="publicDiceSides" type="number" min="2" max="1000" value="20">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Dice Count</span>
+                  <input id="publicDiceCount" type="number" min="1" max="100" value="1">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Modifier</span>
+                  <input id="publicDiceModifier" type="number" value="0">
+                </label>
+              </div>
+              <div class="row row-gap">
+                <button id="publicDiceBtn" type="button">Roll GM Dice</button>
+              </div>
+              <div class="muted">Public GM dice are written into the shared Odyssey Combat Log.</div>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel">
+          <details class="collapsible-block">
+            <summary class="collapsible-title">GM Private Dice</summary>
+            <div class="collapsible-body">
+              <div class="form-grid">
+                <label class="field-stack">
+                  <span class="field-label">Dice Sides</span>
+                  <input id="privateDiceSides" type="number" min="2" max="1000" value="20">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Dice Count</span>
+                  <input id="privateDiceCount" type="number" min="1" max="100" value="1">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Modifier</span>
+                  <input id="privateDiceModifier" type="number" value="0">
+                </label>
+              </div>
+              <div class="row row-gap">
+                <button id="privateDiceBtn" type="button">Roll Private Dice</button>
+              </div>
+              <div class="muted">Private GM dice stay visible only in this extension.</div>
+              <div id="privateLog" class="list private-roll-log"></div>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel">
+          <details class="collapsible-block" open>
+            <summary class="collapsible-title">Environment Attack</summary>
+            <div class="collapsible-body">
+              <div class="form-grid">
+                <label class="field-stack">
+                  <span class="field-label">Source Name</span>
+                  <input id="attackSourceName" type="text" value="Environment" placeholder="Trap, explosion, etc.">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Attack Skill</span>
+                  <input id="attackSkill" type="number" min="0" max="10" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Weapon Damage</span>
+                  <input id="weaponDamage" type="number" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Weapon Accuracy</span>
+                  <input id="weaponAccuracy" type="number" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Attack Bonus</span>
+                  <input id="attackBonuses" type="number" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Attack Penalty</span>
+                  <input id="attackPenalties" type="number" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Defense Bonus</span>
+                  <input id="defenseBonuses" type="number" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Defense Penalty</span>
+                  <input id="defensePenalties" type="number" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Parry Mode</span>
+                  <select id="parryMode">
+                    <option value="off">Do Not Count Parry</option>
+                    <option value="1" selected>1 Opponent</option>
+                    <option value="2">2 Opponents</option>
+                    <option value="3">3 Opponents</option>
+                    <option value="4">4 Opponents</option>
+                    <option value="5">5 Opponents</option>
+                  </select>
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Current Target</span>
+                  <div id="targetName" class="hint-box">No target selected</div>
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Pick On Map</span>
+                  <button id="pickTargetBtn" type="button" class="secondary">Pick Target On Map</button>
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Target Body Part</span>
+                  <select id="targetPart"></select>
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Clear Target</span>
+                  <button id="clearTargetBtn" type="button" class="secondary">Clear Target</button>
+                </label>
+              </div>
+              <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
+              <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
+              <div class="row row-gap">
+                <button id="environmentAttackBtn" type="button" class="success">Resolve Environment Attack</button>
+              </div>
+            </div>
+          </details>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="./assets/main.js?v=1.0.0"></script>
+  </body>
+</html>

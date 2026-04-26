@@ -443,13 +443,24 @@ select {
 
 .weapon-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px auto;
+  grid-template-columns: minmax(0, 1fr) 92px 92px auto;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(7, 16, 31, 0.5);
+}
+
+.weapon-row-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 92px auto;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .checkbox-stack {

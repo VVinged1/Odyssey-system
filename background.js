@@ -1,7 +1,6 @@
 import {
   OBR,
   applyRemoteRollEvent,
-  isTrackedCharacter,
   syncTrackedOverlays,
 } from "./shared.js";
 import {
@@ -19,9 +18,7 @@ let pushStateTimer = null;
 
 async function updateBadge(items) {
   try {
-    const sceneItems = items ?? (await OBR.scene.items.getItems());
-    const trackedCount = sceneItems.filter(isTrackedCharacter).length;
-    await OBR.action.setBadgeText(trackedCount ? String(trackedCount) : undefined);
+    await OBR.action.setBadgeText(undefined);
   } catch (error) {
     console.warn("[Body HP] Unable to update badge", error);
   }

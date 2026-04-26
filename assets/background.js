@@ -3879,7 +3879,8 @@ function sanitizeWeapons(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((item) => item && typeof item === "object").map((item) => ({
     name: String(item.name ?? "").trim() || "Weapon",
-    damage: clamp(Number(item.damage ?? 0) || 0, -99, 99)
+    damage: clamp(Number(item.damage ?? 0) || 0, -99, 99),
+    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -99, 99)
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -4568,9 +4569,7 @@ var bridgePollTimer = null;
 var pushStateTimer = null;
 async function updateBadge(items) {
   try {
-    const sceneItems = items ?? await lib_default.scene.items.getItems();
-    const trackedCount = sceneItems.filter(isTrackedCharacter).length;
-    await lib_default.action.setBadgeText(trackedCount ? String(trackedCount) : void 0);
+    await lib_default.action.setBadgeText(void 0);
   } catch (error) {
     console.warn("[Body HP] Unable to update badge", error);
   }

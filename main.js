@@ -26,6 +26,7 @@ import {
   isCharacterToken,
   isTrackedCharacter,
   removeOverlaysForToken,
+  sanitizeTrackerData,
   sortCharacters,
   syncTrackedOverlays,
   updateTrackerData as persistTrackerData,
@@ -57,6 +58,8 @@ const TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
 const CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 const ATTACK_ONLY_EXCLUDED_SKILLS = new Set([PARRY_SKILL_NAME]);
 const UNARMED_WEAPON_NAME = "Not Armed";
+const TOKEN_EXPORT_FORMAT = "odyssey-token-profile";
+const TOKEN_EXPORT_VERSION = 1;
 const ATTRIBUTE_FIELDS = [
   ["Strength", "Strength"],
   ["Agility", "Agility"],
@@ -331,6 +334,9 @@ function getTransientFieldKey(field) {
   }
   if (field.dataset.action === "set-weapon-damage") {
     return `weapon-damage:${field.dataset.weaponIndex ?? ""}`;
+  }
+  if (field.dataset.action === "set-weapon-accuracy") {
+    return `weapon-accuracy:${field.dataset.weaponIndex ?? ""}`;
   }
   if (field.dataset.action === "set-field") {
     return `part:${field.dataset.part ?? ""}:${field.dataset.field ?? ""}`;
@@ -704,8 +710,10 @@ function formatAttackDebug({
   attackSkillName,
   attackSkillValue,
   weaponDamage,
+  weaponAccuracy,
   strengthBonus,
-  attackBonuses,
+  manualAttackBonuses,
+  totalAttackBonuses,
   manualAttackPenalties,
   automaticTargetPenalty,
   totalAttackPenalties,
@@ -734,7 +742,7 @@ function formatAttackDebug({
     [
       [
         "Accuracy",
-        `${result.attackRoll} + ${attackSkillValue * 10} + ${attackBonuses} - ${totalAttackPenalties} = ${result.attackTotal}`,
+        `${result.attackRoll} + ${attackSkillValue * 10} + ${totalAttackBonuses} - ${totalAttackPenalties} = ${result.attackTotal}`,
         `${result.defenseRoll} + ${targetParry * 10} + ${defenseBonuses} - ${defensePenalties} = ${result.defenseTotal}`,
       ],
       [
@@ -755,6 +763,9 @@ function formatAttackDebug({
     ["Target", `${targetName} -> ${targetPart}`],
     ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
     ["Strength Bonus", strengthBonus],
+    ["Weapon Accuracy", weaponAccuracy],
+    ["Manual Attack Bonus", manualAttackBonuses],
+    ["Total Attack Bonus", totalAttackBonuses],
     ["Manual Attack Penalty", manualAttackPenalties],
     ["Auto Target Penalty", automaticTargetPenalty],
     ["Parry Mode", getParryModeLabel(parryMode)],
@@ -1122,6 +1133,7 @@ function getAttackDraft(token, data, targetCharacters) {
         : "Torso",
     weaponName: selectedWeapon?.name ?? defaultWeapon.name,
     weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
+    weaponAccuracy: String(selectedWeapon?.accuracy ?? defaultWeapon.accuracy ?? 0),
     attackBonuses: stored.attackBonuses ?? "0",
     attackPenalties: stored.attackPenalties ?? "0",
     manualAttackBonuses: stored.manualAttackBonuses ?? stored.attackBonuses ?? "0",
@@ -1161,7 +1173,7 @@ function buildWeaponOptions(weapons, selectedWeaponName = "") {
     .map(
       (weapon) => `<option value="${escapeHtml(weapon.name)}" ${
         weapon.name === selectedWeaponName ? "selected" : ""
-      }>${escapeHtml(weapon.name)} (${weapon.damage >= 0 ? "+" : ""}${weapon.damage})</option>`,
+      }>${escapeHtml(weapon.name)} (DMG ${weapon.damage >= 0 ? "+" : ""}${weapon.damage}, ACC ${weapon.accuracy >= 0 ? "+" : ""}${weapon.accuracy})</option>`,
     )
     .join("");
 }
@@ -1169,13 +1181,13 @@ function buildWeaponOptions(weapons, selectedWeaponName = "") {
 function getAttackSelectableWeapons(token) {
   const odyssey = getOdysseyData(token);
   const meleeWeapons = odyssey.weapons?.melee ?? [];
-  return [{ name: UNARMED_WEAPON_NAME, damage: 0 }, ...meleeWeapons];
+  return [{ name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 }, ...meleeWeapons];
 }
 
 function getDefaultAttackWeapon(token) {
   const odyssey = getOdysseyData(token);
   const meleeWeapons = odyssey.weapons?.melee ?? [];
-  return meleeWeapons[0] ?? { name: UNARMED_WEAPON_NAME, damage: 0 };
+  return meleeWeapons[0] ?? { name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 };
 }
 
 function getWeaponByName(token, weaponName) {
@@ -1184,11 +1196,12 @@ function getWeaponByName(token, weaponName) {
   return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? getDefaultAttackWeapon(token);
 }
 
-function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage) {
+function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage, weaponAccuracy = 0) {
   if (!tokenId) return;
 
   saveAttackDraftValue(tokenId, "weaponName", weaponName);
   saveAttackDraftValue(tokenId, "weaponDamage", String(weaponDamage));
+  saveAttackDraftValue(tokenId, "weaponAccuracy", String(weaponAccuracy));
 
   const attackWeaponSelect = ui.selectedTokenPanel.querySelector('[data-attack-field="weaponName"]');
   if (attackWeaponSelect instanceof HTMLSelectElement) {
@@ -1217,6 +1230,197 @@ function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage) {
         field.value = String(weaponDamage);
       }
     });
+
+  ui.selectedTokenPanel
+    .querySelectorAll("[data-weapon-accuracy-display]")
+    .forEach((field) => {
+      field.textContent = `${weaponAccuracy >= 0 ? "+" : ""}${weaponAccuracy}`;
+    });
+}
+
+function sanitizeFileName(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
+    .replace(/\s+/g, "_")
+    .slice(0, 80) || "token";
+}
+
+function buildTokenExportPayload(token) {
+  const tracker = getTrackerData(token);
+  const odyssey = getOdysseyData(token);
+  const body = BODY_ORDER.reduce((accumulator, partName) => {
+    const part = tracker.body?.[partName] ?? {};
+    accumulator[partName] = {
+      current: Number(part.current) || 0,
+      max: Number(part.max) || 0,
+      armor: Number(part.armor) || 0,
+      minor: Number(part.minor) || 0,
+      serious: Number(part.serious) || 0,
+    };
+    return accumulator;
+  }, {});
+
+  return {
+    format: TOKEN_EXPORT_FORMAT,
+    version: TOKEN_EXPORT_VERSION,
+    exportedAt: new Date().toISOString(),
+    tokenName: getCharacterName(token),
+    data: {
+      enabled: tracker.enabled !== false,
+      minor: Number(tracker.minor) || 0,
+      serious: Number(tracker.serious) || 0,
+      body,
+      odyssey: {
+        skills: structuredClone(odyssey.skills ?? {}),
+        skillCategories: structuredClone(odyssey.skillCategories ?? {}),
+        skillStrengthBonuses: structuredClone(odyssey.skillStrengthBonuses ?? {}),
+        attributes: structuredClone(odyssey.attributes ?? {}),
+        weapons: structuredClone(odyssey.weapons ?? { melee: [], ranged: [] }),
+      },
+    },
+  };
+}
+
+function normalizeImportedTokenPayload(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Import file is empty or has an invalid format.");
+  }
+
+  const source =
+    raw.format === TOKEN_EXPORT_FORMAT && raw.data && typeof raw.data === "object"
+      ? raw.data
+      : raw.trackerData && typeof raw.trackerData === "object"
+        ? raw.trackerData
+        : raw;
+
+  const normalized = sanitizeTrackerData({
+    enabled: source.enabled,
+    minor: source.minor,
+    serious: source.serious,
+    body: source.body,
+    odyssey: {
+      skills: source.odyssey?.skills,
+      skillCategories: source.odyssey?.skillCategories,
+      skillStrengthBonuses: source.odyssey?.skillStrengthBonuses,
+      attributes: source.odyssey?.attributes,
+      weapons: source.odyssey?.weapons,
+    },
+  });
+
+  return {
+    enabled: normalized.enabled,
+    minor: normalized.minor,
+    serious: normalized.serious,
+    body: structuredClone(normalized.body),
+    odyssey: {
+      skills: structuredClone(normalized.odyssey.skills),
+      skillCategories: structuredClone(normalized.odyssey.skillCategories),
+      skillStrengthBonuses: structuredClone(normalized.odyssey.skillStrengthBonuses),
+      attributes: structuredClone(normalized.odyssey.attributes),
+      weapons: structuredClone(normalized.odyssey.weapons),
+    },
+  };
+}
+
+function downloadTextFile(filename, content, mimeType = "application/json") {
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+async function exportSelectedTokenData() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!isEditable()) {
+    setStatus("Only the GM can export token data.", "error");
+    return;
+  }
+
+  const payload = buildTokenExportPayload(token);
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const fileName = `${sanitizeFileName(getCharacterName(token))}-${timestamp}.odyssey-token.json`;
+  downloadTextFile(fileName, JSON.stringify(payload, null, 2));
+  setStatus(`Exported ${getCharacterName(token)} data to ${fileName}.`, "success");
+}
+
+function openTokenImportPicker() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!isEditable()) {
+    setStatus("Only the GM can import token data.", "error");
+    return;
+  }
+
+  const input = ui.selectedTokenPanel.querySelector("[data-token-import-input]");
+  if (!(input instanceof HTMLInputElement)) {
+    setStatus("Import control is not available for this token.", "error");
+    return;
+  }
+  input.value = "";
+  input.click();
+}
+
+async function importSelectedTokenData(file) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!isEditable()) {
+    setStatus("Only the GM can import token data.", "error");
+    return;
+  }
+  if (!(file instanceof File)) {
+    setStatus("Choose an import file first.", "error");
+    return;
+  }
+
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error("Import file must contain valid JSON.");
+  }
+
+  const imported = normalizeImportedTokenPayload(parsed);
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    next.enabled = imported.enabled;
+    next.minor = imported.minor;
+    next.serious = imported.serious;
+    next.body = structuredClone(imported.body);
+    next.odyssey.skills = structuredClone(imported.odyssey.skills);
+    next.odyssey.skillCategories = structuredClone(imported.odyssey.skillCategories);
+    next.odyssey.skillStrengthBonuses = structuredClone(imported.odyssey.skillStrengthBonuses);
+    next.odyssey.attributes = structuredClone(imported.odyssey.attributes);
+    next.odyssey.weapons = structuredClone(imported.odyssey.weapons);
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+  const fallbackWeapon = getDefaultAttackWeapon(getCharacterById(token.id) ?? token);
+  syncAttackWeaponInputs(
+    token.id,
+    fallbackWeapon.name,
+    fallbackWeapon.damage,
+    fallbackWeapon.accuracy ?? 0,
+  );
+  setStatus(`Imported token data into ${getCharacterName(token)}.`, "success");
 }
 
 async function persistAttackTargetToken(tokenId, targetTokenId) {
@@ -2629,6 +2833,15 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
             data-weapon-index="${index}"
             ${disabledAttr}
           >
+          <input
+            type="number"
+            min="-99"
+            max="99"
+            value="${weapon.accuracy ?? 0}"
+            data-action="set-weapon-accuracy"
+            data-weapon-index="${index}"
+            ${disabledAttr}
+          >
           <button
             type="button"
             class="danger"
@@ -2645,6 +2858,12 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
     "Weapons",
     `
       <div class="field-label">Melee Weapons</div>
+      <div class="weapon-row-header">
+        <span>Name</span>
+        <span>Damage</span>
+        <span>Accuracy</span>
+        <span></span>
+      </div>
       <div class="list">${weaponRows || '<div class="empty">No melee weapons yet.</div>'}</div>
       <div class="form-grid">
         <label class="field-stack">
@@ -2654,6 +2873,10 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
         <label class="field-stack">
           <span class="field-label">Weapon Damage</span>
           <input type="number" min="-99" max="99" value="0" data-weapon-field="new-damage" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon Accuracy</span>
+          <input type="number" min="-99" max="99" value="0" data-weapon-field="new-accuracy" ${disabledAttr}>
         </label>
       </div>
       <div class="row row-gap">
@@ -2682,6 +2905,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
     : draft.targetTokenName || "No target selected";
   const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
   const attackDisabledAttr = tokenLocked || !draft.targetTokenId ? "disabled" : "";
+  const weaponAccuracyDisplay = Number(draft.weaponAccuracy) || 0;
 
   return renderCollapsibleSection(
     "Attack",
@@ -2720,6 +2944,10 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           <input type="number" value="${draft.weaponDamage}" data-attack-field="weaponDamage" ${disabledAttr}>
         </label>
         <label class="field-stack">
+          <span class="field-label">Weapon Accuracy</span>
+          <div class="hint-box" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
+        </label>
+        <label class="field-stack">
           <span class="field-label">Attack Bonus</span>
           <input type="number" value="${draft.attackBonuses}" data-attack-field="attackBonuses" ${disabledAttr}>
         </label>
@@ -2753,6 +2981,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           ? "Attack goes from the selected attacker token to the saved target chosen on the map."
           : "No visible target tokens found. You can still keep a saved target or use No Target Attack below."
       }</div>
+      <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
       <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
       <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is always added to defense unless Parry Mode is set to Do Not Count Parry.</div>
       <div class="row row-gap">
@@ -2773,6 +3002,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const disabledAttr = tokenLocked ? "disabled" : "";
+  const weaponAccuracyDisplay = Number(draft.weaponAccuracy) || 0;
 
   return renderCollapsibleSection(
     "No Target Attack",
@@ -2789,6 +3019,10 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Weapon Damage</span>
           <input type="number" value="${draft.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr}>
+        </label>
+        <label class="field-stack">
+          <span class="field-label">Weapon Accuracy</span>
+          <div class="hint-box" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
         </label>
         <label class="field-stack">
           <span class="field-label">Attack Bonus</span>
@@ -2809,9 +3043,26 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
       </div>
       <div class="muted">Uses the manual attack values below and the defense settings above, but ignores the saved Pick On Map target.</div>
       <div class="muted">Saved target for this token stays unchanged.</div>
+      <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
       <div class="row row-gap">
         <button type="button" class="success" data-action="perform-manual-attack" ${disabledAttr}>No Target Attack</button>
       </div>
+    `,
+    false,
+  );
+}
+
+function renderTokenTransferBlock(disabledAttr) {
+  return renderCollapsibleSection(
+    "Import / Export",
+    `
+      <div class="row row-gap">
+        <button type="button" class="secondary" data-action="export-token-data" ${disabledAttr}>Export Token Data</button>
+        <button type="button" class="secondary" data-action="open-token-import" ${disabledAttr}>Import Token Data</button>
+      </div>
+      <input type="file" accept=".json,.txt,.odyssey-token.json" data-token-import-input hidden>
+      <div class="muted">Exports and imports body parts, attributes, skills and weapons as JSON text.</div>
+      <div class="muted">Current owner, saved target and roll history stay on the destination token.</div>
     `,
     false,
   );
@@ -2997,6 +3248,7 @@ function renderSelectedToken() {
           : ""
       }
       ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
+      ${isEditable() ? renderTokenTransferBlock(gmOnlyDisabled) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
@@ -3417,14 +3669,15 @@ async function addWeapon() {
 
   const name = getActionFieldValue('[data-weapon-field="new-name"]').trim() || "New Weapon";
   const damage = clamp(Number(getActionFieldValue('[data-weapon-field="new-damage"]')) || 0, -99, 99);
+  const accuracy = clamp(Number(getActionFieldValue('[data-weapon-field="new-accuracy"]')) || 0, -99, 99);
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey.weapons.melee ??= [];
-    next.odyssey.weapons.melee.push({ name, damage });
+    next.odyssey.weapons.melee.push({ name, damage, accuracy });
     return next;
   });
-  syncAttackWeaponInputs(token.id, name, damage);
+  syncAttackWeaponInputs(token.id, name, damage, accuracy);
   setStatus(`Weapon "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
 
@@ -3439,21 +3692,52 @@ async function setWeaponDamage(index, value) {
     return;
   }
 
-  const currentWeaponName = getOdysseyData(token).weapons?.melee?.[index]?.name ?? "Default";
+  const currentWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
+  const currentWeaponName = currentWeapon.name ?? "Default";
   const nextDamage = clamp(Number(value) || 0, -99, 99);
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey.weapons.melee ??= [];
     if (!next.odyssey.weapons.melee[index]) {
-      next.odyssey.weapons.melee[index] = { name: "Default", damage: 0 };
+      next.odyssey.weapons.melee[index] = { name: "Default", damage: 0, accuracy: 0 };
     }
     next.odyssey.weapons.melee[index].damage = nextDamage;
     return next;
   });
   const currentDraft = attackFormDrafts.get(token.id) ?? {};
   if (currentDraft.weaponName === currentWeaponName) {
-    syncAttackWeaponInputs(token.id, currentWeaponName, nextDamage);
+    syncAttackWeaponInputs(token.id, currentWeaponName, nextDamage, currentWeapon.accuracy ?? 0);
+  }
+}
+
+async function setWeaponAccuracy(index, value) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) {
+    setStatus("Select a character first.", "error");
+    return;
+  }
+  if (!isEditable()) {
+    setStatus("Only the GM can edit weapons.", "error");
+    return;
+  }
+
+  const currentWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
+  const currentWeaponName = currentWeapon.name ?? "Default";
+  const nextAccuracy = clamp(Number(value) || 0, -99, 99);
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    next.odyssey.weapons.melee ??= [];
+    if (!next.odyssey.weapons.melee[index]) {
+      next.odyssey.weapons.melee[index] = { name: "Default", damage: 0, accuracy: 0 };
+    }
+    next.odyssey.weapons.melee[index].accuracy = nextAccuracy;
+    return next;
+  });
+  const currentDraft = attackFormDrafts.get(token.id) ?? {};
+  if (currentDraft.weaponName === currentWeaponName) {
+    syncAttackWeaponInputs(token.id, currentWeaponName, currentWeapon.damage ?? 0, nextAccuracy);
   }
 }
 
@@ -3468,21 +3752,21 @@ async function setWeaponName(index, value) {
     return;
   }
 
-  const previousWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0 };
+  const previousWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
   const nextWeaponName = String(value || "").trim() || "Default";
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     next.odyssey.weapons.melee ??= [];
     if (!next.odyssey.weapons.melee[index]) {
-      next.odyssey.weapons.melee[index] = { name: "Default", damage: 0 };
+      next.odyssey.weapons.melee[index] = { name: "Default", damage: 0, accuracy: 0 };
     }
     next.odyssey.weapons.melee[index].name = nextWeaponName;
     return next;
   });
   const currentDraft = attackFormDrafts.get(token.id) ?? {};
   if (currentDraft.weaponName === previousWeapon.name) {
-    syncAttackWeaponInputs(token.id, nextWeaponName, previousWeapon.damage);
+    syncAttackWeaponInputs(token.id, nextWeaponName, previousWeapon.damage, previousWeapon.accuracy ?? 0);
   }
 }
 
@@ -3514,8 +3798,8 @@ async function removeWeapon(index) {
   const refreshedToken = getCharacterById(token.id);
   const fallbackWeapon = refreshedToken
     ? getDefaultAttackWeapon(refreshedToken)
-    : { name: UNARMED_WEAPON_NAME, damage: 0 };
-  syncAttackWeaponInputs(token.id, fallbackWeapon.name, fallbackWeapon.damage);
+    : { name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 };
+  syncAttackWeaponInputs(token.id, fallbackWeapon.name, fallbackWeapon.damage, fallbackWeapon.accuracy ?? 0);
   setStatus(`Weapon "${removedWeapon.name}" removed.`, "success");
 }
 
@@ -3541,16 +3825,25 @@ async function autosaveDraftField(draft) {
     if (draft.action === "set-weapon-damage") {
       next.odyssey.weapons.melee ??= [];
       if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
-        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0 };
+        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0, accuracy: 0 };
       }
       next.odyssey.weapons.melee[draft.weaponIndex].damage = clamp(Number(draft.value) || 0, -99, 99);
+      return next;
+    }
+
+    if (draft.action === "set-weapon-accuracy") {
+      next.odyssey.weapons.melee ??= [];
+      if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
+        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0, accuracy: 0 };
+      }
+      next.odyssey.weapons.melee[draft.weaponIndex].accuracy = clamp(Number(draft.value) || 0, -99, 99);
       return next;
     }
 
     if (draft.action === "set-weapon-name") {
       next.odyssey.weapons.melee ??= [];
       if (!next.odyssey.weapons.melee[draft.weaponIndex]) {
-        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0 };
+        next.odyssey.weapons.melee[draft.weaponIndex] = { name: "Default", damage: 0, accuracy: 0 };
       }
       next.odyssey.weapons.melee[draft.weaponIndex].name = String(draft.value || "").trim() || "Default";
       return next;
@@ -3656,17 +3949,20 @@ async function performAttack({ manualDefense = false } = {}) {
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]')
       : getActionFieldValue('[data-attack-field="weaponName"]');
+  const selectedWeapon = getWeaponByName(attacker, weaponName);
   const requestedTargetPart = getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]')
       : getActionFieldValue('[data-attack-field="weaponDamage"]')
   ) || 0;
-  const attackBonuses = Number(
+  const manualAttackBonuses = Number(
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="attackBonuses"]') || getActionFieldValue('[data-attack-field="attackBonuses"]')
       : getActionFieldValue('[data-attack-field="attackBonuses"]')
   ) || 0;
+  const weaponAccuracy = Number(selectedWeapon?.accuracy) || 0;
+  const attackBonuses = manualAttackBonuses + weaponAccuracy;
   const manualAttackPenalties = Number(
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]')
@@ -3864,8 +4160,10 @@ async function performAttack({ manualDefense = false } = {}) {
       attackSkillName: skillName,
       attackSkillValue: attackerOdyssey.skills[skillName] ?? 0,
       weaponDamage: finalWeaponDamage,
+      weaponAccuracy,
       strengthBonus,
-      attackBonuses,
+      manualAttackBonuses,
+      totalAttackBonuses: attackBonuses,
       manualAttackPenalties,
       automaticTargetPenalty,
       totalAttackPenalties,
@@ -4281,6 +4579,18 @@ function bindUiEvents() {
       return;
     }
 
+    if (action === "export-token-data") {
+      void exportSelectedTokenData().catch((error) => {
+        setStatus(error?.message ?? "Unable to export token data.", "error");
+      });
+      return;
+    }
+
+    if (action === "open-token-import") {
+      openTokenImportPicker();
+      return;
+    }
+
     if (action === "remove-skill" && skill) {
       void removeOdysseySkill(skill).catch((error) => {
         setStatus(error?.message ?? "Unable to remove skill.", "error");
@@ -4306,7 +4616,12 @@ function bindUiEvents() {
         const token = getCharacterById(activeTokenId);
         const selectedWeapon = token ? getWeaponByName(token, target.value) : null;
         if (selectedWeapon) {
-          syncAttackWeaponInputs(activeTokenId, selectedWeapon.name, selectedWeapon.damage);
+          syncAttackWeaponInputs(
+            activeTokenId,
+            selectedWeapon.name,
+            selectedWeapon.damage,
+            selectedWeapon.accuracy ?? 0,
+          );
         }
         return;
       }
@@ -4332,7 +4647,12 @@ function bindUiEvents() {
         const token = getCharacterById(activeTokenId);
         const selectedWeapon = token ? getWeaponByName(token, target.value) : null;
         if (selectedWeapon) {
-          syncAttackWeaponInputs(activeTokenId, selectedWeapon.name, selectedWeapon.damage);
+          syncAttackWeaponInputs(
+            activeTokenId,
+            selectedWeapon.name,
+            selectedWeapon.damage,
+            selectedWeapon.accuracy ?? 0,
+          );
         }
         return;
       }
@@ -4384,10 +4704,27 @@ function bindUiEvents() {
       return;
     }
 
+    if (target.dataset.action === "set-weapon-accuracy") {
+      const index = Number(target.dataset.weaponIndex ?? 0);
+      void setWeaponAccuracy(index, target.value).catch((error) => {
+        setStatus(error?.message ?? "Unable to save weapon accuracy.", "error");
+      });
+      return;
+    }
+
     if (target.dataset.action === "set-weapon-name") {
       const index = Number(target.dataset.weaponIndex ?? 0);
       void setWeaponName(index, target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save weapon name.", "error");
+      });
+      return;
+    }
+
+    if (target.dataset.tokenImportInput != null) {
+      const [file] = target.files ?? [];
+      target.value = "";
+      void importSelectedTokenData(file).catch((error) => {
+        setStatus(error?.message ?? "Unable to import token data.", "error");
       });
       return;
     }
@@ -4447,6 +4784,16 @@ function bindUiEvents() {
       queueInputAutosave({
         tokenId: activeTokenId,
         action: "set-weapon-damage",
+        weaponIndex: Number(target.dataset.weaponIndex ?? 0),
+        value: target.value,
+      });
+      return;
+    }
+
+    if (target.dataset.action === "set-weapon-accuracy") {
+      queueInputAutosave({
+        tokenId: activeTokenId,
+        action: "set-weapon-accuracy",
         weaponIndex: Number(target.dataset.weaponIndex ?? 0),
         value: target.value,
       });

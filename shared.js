@@ -249,6 +249,7 @@ function sanitizeWeapons(raw) {
     .map((item) => ({
       name: String(item.name ?? "").trim() || "Weapon",
       damage: clamp(Number(item.damage ?? 0) || 0, -99, 99),
+      accuracy: clamp(Number(item.accuracy ?? 0) || 0, -99, 99),
     }))
     .slice(0, 20);
 }
@@ -359,7 +360,7 @@ export function canPlayerControlToken(playerRole, playerId, token) {
 export function getAvailableWeapons(token, mode = "melee") {
   const odyssey = getOdysseyData(token);
   const list = mode === "ranged" ? odyssey.weapons.ranged : odyssey.weapons.melee;
-  return list.length ? list : [{ name: "Default", damage: 0 }];
+  return list.length ? list : [{ name: "Default", damage: 0, accuracy: 0 }];
 }
 
 export function getBodyTotals(data) {

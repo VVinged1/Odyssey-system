@@ -51,6 +51,11 @@ const ui = {
   privateDiceModifier: document.getElementById("privateDiceModifier"),
   privateDiceBtn: document.getElementById("privateDiceBtn"),
   privateLog: document.getElementById("privateLog"),
+  skillLabel: document.getElementById("skillLabel"),
+  skillLevel: document.getElementById("skillLevel"),
+  skillModifier: document.getElementById("skillModifier"),
+  skillPrivate: document.getElementById("skillPrivate"),
+  skillRollBtn: document.getElementById("skillRollBtn"),
   attackSourceName: document.getElementById("attackSourceName"),
   attackSkill: document.getElementById("attackSkill"),
   weaponDamage: document.getElementById("weaponDamage"),
@@ -136,6 +141,19 @@ function buildDiceRollSummary(diceLabel, result) {
   return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], sum ${result.subtotal}, with modifier ${formatDiceRollsWithModifier(result)}`;
 }
 
+function getResolvedCheckResultIcon(resultLabel) {
+  const normalized = String(resultLabel).trim();
+  if (normalized === "Critical Success") return "🎯";
+  if (normalized === "Critical Failure") return "💀";
+  if (normalized === "Check Passed") return "✅";
+  return "❌";
+}
+
+function isResolvedCheckResultSuccess(resultLabel) {
+  const normalized = String(resultLabel).trim();
+  return normalized === "Check Passed" || normalized === "Critical Success";
+}
+
 function formatDiceDebug(label, result) {
   return [
     `Actor: ${label}`,
@@ -143,6 +161,44 @@ function formatDiceDebug(label, result) {
     `Raw Dice: ${formatRawDiceRolls(result)}`,
     `Dice Sum: ${result.subtotal}`,
     `With Modifier: ${formatDiceRollsWithModifier(result)}`,
+  ].join("\n");
+}
+
+function rollSkillCheck(skillValue, modifier = 0) {
+  const baseSkill = clamp(Number(skillValue) || 0, 0, 10);
+  const rollPrimary = Math.floor(Math.random() * 100) + 1;
+  const rollSecondary = Math.floor(Math.random() * 100) + 1;
+  const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier) || 0);
+  const totalSecondary = rollSecondary;
+  let result = totalPrimary > totalSecondary ? "Check Passed" : "Check Failed";
+  let outcome = result === "Check Passed" ? "success" : "failure";
+
+  if (rollPrimary >= 95) {
+    result = "Critical Success";
+    outcome = "critical-success";
+  } else if (rollPrimary <= 5) {
+    result = "Critical Failure";
+    outcome = "critical-failure";
+  }
+
+  return {
+    rollPrimary,
+    rollSecondary,
+    baseSkill,
+    modifier: Number(modifier) || 0,
+    totalPrimary,
+    totalSecondary,
+    result,
+    outcome,
+  };
+}
+
+function formatSkillDebug(label, result) {
+  return [
+    `Skill Label: ${label}`,
+    `${getResolvedCheckResultIcon(result.result)} ${result.result}`,
+    `First Roll: ${result.rollPrimary} + ${result.baseSkill * 10} + ${result.modifier} = ${result.totalPrimary}`,
+    `Second Roll: ${result.rollSecondary} = ${result.totalSecondary}`,
   ].join("\n");
 }
 
@@ -504,6 +560,42 @@ async function performPublicGmRoll() {
   setStatus(summary, "success");
 }
 
+async function performPublicSkillRoll() {
+  if (playerRole !== "GM") {
+    setStatus("Only the GM can use this extension.", "error");
+    return;
+  }
+
+  const label = ui.skillLabel.value.trim() || "Skill Check";
+  const skillLevel = clamp(Number(ui.skillLevel.value) || 0, 0, 10);
+  const modifier = Number(ui.skillModifier.value) || 0;
+  const isPrivate = Boolean(ui.skillPrivate?.checked);
+  const result = rollSkillCheck(skillLevel, modifier);
+  const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${label}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
+  const debugBody = formatSkillDebug(label, result);
+  const statusKind = isResolvedCheckResultSuccess(result.result) ? "success" : "error";
+
+  if (isPrivate) {
+    pushPrivateEntry(
+      `${getResolvedCheckResultIcon(result.result)} GM Private skill ${label}`,
+      debugBody,
+    );
+    setStatus(`Private skill roll. ${summary}`, statusKind);
+    return;
+  }
+
+  await pushSharedLogEntry(
+    `${getResolvedCheckResultIcon(result.result)} GM skill ${label}`,
+    debugBody,
+    isResolvedCheckResultSuccess(result.result)
+      ? "success"
+      : result.result === "Critical Failure"
+        ? "error"
+        : "info",
+  );
+  setStatus(summary, statusKind);
+}
+
 function performPrivateGmRoll() {
   if (playerRole !== "GM") {
     setStatus("Only the GM can use this extension.", "error");
@@ -851,6 +943,12 @@ function bindEvents() {
   ui.publicDiceBtn.addEventListener("click", () => {
     void performPublicGmRoll().catch((error) => {
       setStatus(error?.message ?? "Unable to roll GM dice.", "error");
+    });
+  });
+
+  ui.skillRollBtn.addEventListener("click", () => {
+    void performPublicSkillRoll().catch((error) => {
+      setStatus(error?.message ?? "Unable to roll GM skill.", "error");
     });
   });
 

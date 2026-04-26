@@ -2136,7 +2136,7 @@ function legacyRenderDiceBlock(token, data, tokenLocked) {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice sides</span>
-          <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+          <input type="number" min="2" value="20" data-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Modifier</span>
@@ -2203,7 +2203,7 @@ function legacyRenderPrivateGmDiceBlock() {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice sides</span>
-          <input type="number" min="2" max="1000" value="20" data-gm-roll-field="dice">
+          <input type="number" min="2" value="20" data-gm-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Modifier</span>
@@ -2509,7 +2509,7 @@ function renderDiceBlock(token, data, tokenLocked) {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice sides</span>
-          <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+          <input type="number" min="2" value="20" data-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Modifier</span>
@@ -2709,7 +2709,7 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice sides</span>
-          <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+          <input type="number" min="2" value="20" data-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Modifier</span>
@@ -3086,7 +3086,7 @@ function renderEnglishDiceBlock(token, data, tokenLocked) {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice Sides</span>
-          <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+          <input type="number" min="2" value="20" data-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Dice Count</span>
@@ -3157,7 +3157,7 @@ function renderPrivateGmDiceBlock() {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice sides</span>
-          <input type="number" min="2" max="1000" value="20" data-gm-roll-field="dice">
+          <input type="number" min="2" value="20" data-gm-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Dice Count</span>

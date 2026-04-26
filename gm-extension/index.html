@@ -36,7 +36,7 @@
               <div class="form-grid">
                 <label class="field-stack">
                   <span class="field-label">Dice Sides</span>
-                  <input id="publicDiceSides" type="number" min="2" max="1000" value="20">
+                  <input id="publicDiceSides" type="number" min="2" value="20">
                 </label>
                 <label class="field-stack">
                   <span class="field-label">Dice Count</span>
@@ -62,7 +62,7 @@
               <div class="form-grid">
                 <label class="field-stack">
                   <span class="field-label">Dice Sides</span>
-                  <input id="privateDiceSides" type="number" min="2" max="1000" value="20">
+                  <input id="privateDiceSides" type="number" min="2" value="20">
                 </label>
                 <label class="field-stack">
                   <span class="field-label">Dice Count</span>
@@ -78,6 +78,40 @@
               </div>
               <div class="muted">Private GM dice stay visible only in this extension.</div>
               <div id="privateLog" class="list private-roll-log"></div>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel">
+          <details class="collapsible-block" open>
+            <summary class="collapsible-title">GM Skill Roll</summary>
+            <div class="collapsible-body">
+              <div class="form-grid">
+                <label class="field-stack">
+                  <span class="field-label">Skill Label</span>
+                  <input id="skillLabel" type="text" value="Skill Check" placeholder="Lockpick, Notice, etc.">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Skill Level</span>
+                  <input id="skillLevel" type="number" min="0" max="10" value="0">
+                </label>
+                <label class="field-stack">
+                  <span class="field-label">Modifier</span>
+                  <input id="skillModifier" type="number" value="0">
+                </label>
+                <label class="field-stack checkbox-field">
+                  <span class="field-label">Visibility</span>
+                  <label class="checkbox-inline">
+                    <input id="skillPrivate" type="checkbox">
+                    <span>Private</span>
+                  </label>
+                </label>
+              </div>
+              <div class="row row-gap">
+                <button id="skillRollBtn" type="button">Roll GM Skill</button>
+              </div>
+              <div class="muted">Modifier is applied only to the first d100 roll, exactly like the normal Odyssey skill check.</div>
+              <div class="muted">Turn on Private to keep the result only inside this GM extension; otherwise it goes to the shared Odyssey Combat Log.</div>
             </div>
           </details>
         </section>
@@ -158,6 +192,6 @@
       </div>
     </div>
 
-    <script type="module" src="./assets/main.js?v=1.0.0"></script>
+    <script type="module" src="./assets/main.js?v=1.0.2"></script>
   </body>
 </html>

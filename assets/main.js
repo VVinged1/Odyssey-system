@@ -4559,7 +4559,7 @@ function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
 }
 function rollDice(sides, modifier = 0, count = 1) {
-  const safeSides = clamp(Number(sides) || 0, 2, 1e3);
+  const safeSides = clamp(Number(sides) || 0, 2, Number.MAX_SAFE_INTEGER);
   const safeCount = clamp(Number(count) || 0, 1, 100);
   const rolls = Array.from({ length: safeCount }, () => Math.floor(Math.random() * safeSides) + 1);
   const subtotal = rolls.reduce((sum, roll) => sum + roll, 0);
@@ -6600,7 +6600,7 @@ function renderEnglishDiceBlock(token, data, tokenLocked) {
       <div class="form-grid">
         <label class="field-stack">
           <span class="field-label">Dice Sides</span>
-          <input type="number" min="2" max="1000" value="20" data-roll-field="dice">
+          <input type="number" min="2" value="20" data-roll-field="dice">
         </label>
         <label class="field-stack">
           <span class="field-label">Dice Count</span>

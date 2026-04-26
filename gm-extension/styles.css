@@ -220,9 +220,26 @@ select {
   gap: 4px;
 }
 
+.checkbox-field {
+  justify-content: end;
+}
+
 .field-label {
   font-size: 12px;
   color: var(--muted);
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--text);
+}
+
+.checkbox-inline input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 .hint-box {

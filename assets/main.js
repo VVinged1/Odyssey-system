@@ -3933,13 +3933,13 @@ function sanitizeTrackerData(raw) {
   for (const partName of BODY_ORDER) {
     const source = raw.body?.[partName] ?? {};
     const part = next.body[partName];
-    part.max = clamp(numberOrFallback(source.max, part.max), 0, 99);
+    part.max = clamp(numberOrFallback(source.max, part.max), 0, 999);
     part.current = clamp(
       numberOrFallback(source.current, part.current),
       0,
       part.max
     );
-    part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 99);
+    part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
   }
@@ -3998,8 +3998,8 @@ function sanitizeWeapons(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((item) => item && typeof item === "object").map((item) => ({
     name: String(item.name ?? "").trim() || "Weapon",
-    damage: clamp(Number(item.damage ?? 0) || 0, -99, 99),
-    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -99, 99)
+    damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
+    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999)
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -6365,8 +6365,8 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
           >
           <input
             type="number"
-            min="-99"
-            max="99"
+            min="-999"
+            max="999"
             value="${weapon.damage}"
             data-action="set-weapon-damage"
             data-weapon-index="${index}"
@@ -6374,8 +6374,8 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
           >
           <input
             type="number"
-            min="-99"
-            max="99"
+            min="-999"
+            max="999"
             value="${weapon.accuracy ?? 0}"
             data-action="set-weapon-accuracy"
             data-weapon-index="${index}"
@@ -6409,11 +6409,11 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
         </label>
         <label class="field-stack">
           <span class="field-label">Weapon Damage</span>
-          <input type="number" min="-99" max="99" value="0" data-weapon-field="new-damage" ${disabledAttr}>
+          <input type="number" min="-999" max="999" value="0" data-weapon-field="new-damage" ${disabledAttr}>
         </label>
         <label class="field-stack">
           <span class="field-label">Weapon Accuracy</span>
-          <input type="number" min="-99" max="99" value="0" data-weapon-field="new-accuracy" ${disabledAttr}>
+          <input type="number" min="-999" max="999" value="0" data-weapon-field="new-accuracy" ${disabledAttr}>
         </label>
       </div>
       <div class="row row-gap">
@@ -6555,7 +6555,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         </label>
         <label class="field-stack">
           <span class="field-label">Armor</span>
-          <input type="number" min="0" max="99" value="${draft2.manualArmor}" data-manual-attack-field="manualArmor" ${disabledAttr}>
+          <input type="number" min="0" max="999" value="${draft2.manualArmor}" data-manual-attack-field="manualArmor" ${disabledAttr}>
         </label>
         <label class="field-stack">
           <span class="field-label">Parry</span>
@@ -6745,12 +6745,12 @@ function renderSelectedToken() {
                               </div>
                             </td>
                             <td>
-                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="99" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
+                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="max" ${bodyFieldDisabled}>
                             </td>
                             <td>
-                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="99" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
+                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
         partName
       )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>
@@ -6939,10 +6939,10 @@ async function changeBodyField(partName, field, delta) {
     if (field === "current") {
       part.current = clamp(part.current + delta, 0, part.max);
     } else if (field === "max") {
-      part.max = clamp(part.max + delta, 0, 99);
+      part.max = clamp(part.max + delta, 0, 999);
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
-      part.armor = clamp(part.armor + delta, 0, 99);
+      part.armor = clamp(part.armor + delta, 0, 999);
     }
     return next;
   });
@@ -6962,7 +6962,7 @@ async function setBodyField(partName, field, value) {
     const next = structuredClone(current2);
     const part = next.body[partName];
     if (!part) return next;
-    const numericValue = clamp(Number(value) || 0, 0, 99);
+    const numericValue = clamp(Number(value) || 0, 0, 999);
     if (field === "current") {
       part.current = clamp(numericValue, 0, part.max);
     } else if (field === "max") {
@@ -7058,8 +7058,8 @@ async function addWeapon() {
     return;
   }
   const name = getActionFieldValue('[data-weapon-field="new-name"]').trim() || "New Weapon";
-  const damage = clamp(Number(getActionFieldValue('[data-weapon-field="new-damage"]')) || 0, -99, 99);
-  const accuracy = clamp(Number(getActionFieldValue('[data-weapon-field="new-accuracy"]')) || 0, -99, 99);
+  const damage = clamp(Number(getActionFieldValue('[data-weapon-field="new-damage"]')) || 0, -999, 999);
+  const accuracy = clamp(Number(getActionFieldValue('[data-weapon-field="new-accuracy"]')) || 0, -999, 999);
   await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
@@ -7082,7 +7082,7 @@ async function setWeaponDamage(index, value) {
   }
   const currentWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
   const currentWeaponName = currentWeapon.name ?? "Default";
-  const nextDamage = clamp(Number(value) || 0, -99, 99);
+  const nextDamage = clamp(Number(value) || 0, -999, 999);
   await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
@@ -7110,7 +7110,7 @@ async function setWeaponAccuracy(index, value) {
   }
   const currentWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
   const currentWeaponName = currentWeapon.name ?? "Default";
-  const nextAccuracy = clamp(Number(value) || 0, -99, 99);
+  const nextAccuracy = clamp(Number(value) || 0, -999, 999);
   await updateTrackerData2(token.id, (current2) => {
     var _a;
     const next = structuredClone(current2);
@@ -7202,7 +7202,7 @@ async function autosaveDraftField(draft2) {
       if (!next.odyssey.weapons.melee[draft2.weaponIndex]) {
         next.odyssey.weapons.melee[draft2.weaponIndex] = { name: "Default", damage: 0, accuracy: 0 };
       }
-      next.odyssey.weapons.melee[draft2.weaponIndex].damage = clamp(Number(draft2.value) || 0, -99, 99);
+      next.odyssey.weapons.melee[draft2.weaponIndex].damage = clamp(Number(draft2.value) || 0, -999, 999);
       return next;
     }
     if (draft2.action === "set-weapon-accuracy") {
@@ -7210,7 +7210,7 @@ async function autosaveDraftField(draft2) {
       if (!next.odyssey.weapons.melee[draft2.weaponIndex]) {
         next.odyssey.weapons.melee[draft2.weaponIndex] = { name: "Default", damage: 0, accuracy: 0 };
       }
-      next.odyssey.weapons.melee[draft2.weaponIndex].accuracy = clamp(Number(draft2.value) || 0, -99, 99);
+      next.odyssey.weapons.melee[draft2.weaponIndex].accuracy = clamp(Number(draft2.value) || 0, -999, 999);
       return next;
     }
     if (draft2.action === "set-weapon-name") {
@@ -7225,7 +7225,7 @@ async function autosaveDraftField(draft2) {
       if (!canEditTokenData(token)) return next;
       const part = next.body[draft2.partName];
       if (!part) return next;
-      const numericValue = clamp(Number(draft2.value) || 0, 0, 99);
+      const numericValue = clamp(Number(draft2.value) || 0, 0, 999);
       if (draft2.field === "current") {
         part.current = clamp(numericValue, 0, part.max);
       } else if (draft2.field === "max") {
@@ -7330,7 +7330,7 @@ async function performAttack({ manualDefense = false } = {}) {
       manualDefense ? getActionFieldValue('[data-manual-attack-field="manualArmor"]') || getActionFieldValue('[data-attack-field="manualArmor"]') : getActionFieldValue('[data-attack-field="manualArmor"]')
     ) || 0,
     0,
-    99
+    999
   );
   const manualParry = clamp(
     Number(

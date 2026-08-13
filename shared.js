@@ -150,13 +150,13 @@ export function sanitizeTrackerData(raw) {
   for (const partName of BODY_ORDER) {
     const source = raw.body?.[partName] ?? {};
     const part = next.body[partName];
-    part.max = clamp(numberOrFallback(source.max, part.max), 0, 99);
+    part.max = clamp(numberOrFallback(source.max, part.max), 0, 999);
     part.current = clamp(
       numberOrFallback(source.current, part.current),
       0,
       part.max,
     );
-    part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 99);
+    part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
   }
@@ -248,8 +248,8 @@ function sanitizeWeapons(raw) {
     .filter((item) => item && typeof item === "object")
     .map((item) => ({
       name: String(item.name ?? "").trim() || "Weapon",
-      damage: clamp(Number(item.damage ?? 0) || 0, -99, 99),
-      accuracy: clamp(Number(item.accuracy ?? 0) || 0, -99, 99),
+      damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
+      accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
     }))
     .slice(0, 20);
 }
@@ -861,7 +861,7 @@ function applyBodyEffects(body, bodyEffects) {
     if (patch.max != null || patch.max_delta != null) {
       const baseMax = patch.max != null ? Number(patch.max) || 0 : part.max;
       const deltaMax = Number(patch.max_delta) || 0;
-      part.max = clamp(baseMax + deltaMax, 0, 99);
+      part.max = clamp(baseMax + deltaMax, 0, 999);
     }
 
     if (patch.current != null || patch.current_delta != null) {
@@ -876,7 +876,7 @@ function applyBodyEffects(body, bodyEffects) {
     if (patch.armor != null || patch.armor_delta != null) {
       const baseArmor = patch.armor != null ? Number(patch.armor) || 0 : part.armor;
       const deltaArmor = Number(patch.armor_delta) || 0;
-      part.armor = clamp(baseArmor + deltaArmor, 0, 99);
+      part.armor = clamp(baseArmor + deltaArmor, 0, 999);
     }
 
     if (patch.minor != null || patch.minor_delta != null) {

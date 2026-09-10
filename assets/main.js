@@ -4593,15 +4593,9 @@ function calculateDamage(attackResult, defenseResult, weaponDamage = 0, armor = 
   let crit = 0;
   let serious = 0;
   let minor = 0;
-  if (damageDiff > 90) {
-    label = "Critical damage: 3 Crit.";
-    crit = 3;
-  } else if (damageDiff > 60) {
-    label = "Critical damage: 2 Crit.";
-    crit = 2;
-  } else if (damageDiff >= 31) {
-    label = "Critical damage: 1 Crit.";
-    crit = 1;
+  if (damageDiff >= 31) {
+    crit = Math.ceil(damageDiff / 30) - 1;
+    label = `Critical damage: ${crit} Crit.`;
   } else if (damageDiff >= 6) {
     label = "Serious hit.";
     serious = 1;
@@ -5597,6 +5591,7 @@ function saveAttackDraftValue(tokenId, field, value) {
   });
 }
 function getSharedAttackDraftField(manualField) {
+  if (manualField === "targetPart") return "targetPart";
   if (manualField === "skill") return "skill";
   if (manualField === "weaponName") return "weaponName";
   if (manualField === "weaponDamage") return "weaponDamage";
@@ -6538,6 +6533,14 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
           <select data-manual-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
         </label>
         <label class="field-stack">
+          <span class="field-label">Target Body Part</span>
+          <select data-manual-attack-field="targetPart" ${disabledAttr}>
+            ${getTargetableBodyParts(null).map(
+      (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
+    ).join("")}
+          </select>
+        </label>
+        <label class="field-stack">
           <span class="field-label">Weapon Damage</span>
           <input type="number" value="${draft2.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr}>
         </label>
@@ -7307,7 +7310,7 @@ async function performAttack({ manualDefense = false } = {}) {
   const skillName = manualDefense ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]') : getActionFieldValue('[data-attack-field="skill"]');
   const weaponName = manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]') : getActionFieldValue('[data-attack-field="weaponName"]');
   const selectedWeapon = getWeaponByName(attacker, weaponName);
-  const requestedTargetPart = getActionFieldValue('[data-attack-field="targetPart"]');
+  const requestedTargetPart = manualDefense ? getActionFieldValue('[data-manual-attack-field="targetPart"]') || getActionFieldValue('[data-attack-field="targetPart"]') : getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]') : getActionFieldValue('[data-attack-field="weaponDamage"]')
   ) || 0;

@@ -1159,6 +1159,7 @@ function saveAttackDraftValue(tokenId, field, value) {
 }
 
 function getSharedAttackDraftField(manualField) {
+  if (manualField === "targetPart") return "targetPart";
   if (manualField === "skill") return "skill";
   if (manualField === "weaponName") return "weaponName";
   if (manualField === "weaponDamage") return "weaponDamage";
@@ -3017,6 +3018,15 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
           <select data-manual-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
         </label>
         <label class="field-stack">
+          <span class="field-label">Target Body Part</span>
+          <select data-manual-attack-field="targetPart" ${disabledAttr}>
+            ${getTargetableBodyParts(null).map(
+              (part) =>
+                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
+            ).join("")}
+          </select>
+        </label>
+        <label class="field-stack">
           <span class="field-label">Weapon Damage</span>
           <input type="number" value="${draft.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr}>
         </label>
@@ -3949,7 +3959,9 @@ async function performAttack({ manualDefense = false } = {}) {
       ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]')
       : getActionFieldValue('[data-attack-field="weaponName"]');
   const selectedWeapon = getWeaponByName(attacker, weaponName);
-  const requestedTargetPart = getActionFieldValue('[data-attack-field="targetPart"]');
+  const requestedTargetPart = manualDefense
+    ? getActionFieldValue('[data-manual-attack-field="targetPart"]') || getActionFieldValue('[data-attack-field="targetPart"]')
+    : getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]')

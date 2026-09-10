@@ -61,15 +61,9 @@ export function calculateDamage(attackResult, defenseResult, weaponDamage = 0, a
   let serious = 0;
   let minor = 0;
 
-  if (damageDiff > 90) {
-    label = "Critical damage: 3 Crit.";
-    crit = 3;
-  } else if (damageDiff > 60) {
-    label = "Critical damage: 2 Crit.";
-    crit = 2;
-  } else if (damageDiff >= 31) {
-    label = "Critical damage: 1 Crit.";
-    crit = 1;
+  if (damageDiff >= 31) {
+    crit = Math.ceil(damageDiff / 30) - 1;
+    label = `Critical damage: ${crit} Crit.`;
   } else if (damageDiff >= 6) {
     label = "Serious hit.";
     serious = 1;

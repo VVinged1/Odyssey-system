@@ -64,5 +64,6 @@ export function consumeAmmo(odyssey, weaponIndex, shot) {
 }
 
 export function effectiveArmor(armor, penetration) {
+  if (penetration < 0 && armor <= 0) return armor;
   return Math.max(0, armor - penetration);
 }

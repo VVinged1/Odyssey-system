@@ -22,6 +22,7 @@ assert.equal(shot.damage, 36);
 assert.equal(effectiveArmor(10, shot.penetration), 5);
 assert.equal(effectiveArmor(10, 20), 0);
 assert.equal(effectiveArmor(10, -5), 15);
+assert.equal(effectiveArmor(0, -5), 0);
 consumeAmmo(data, 0, shot);
 assert.equal(data.weapons.ranged[0].loaded, 3);
 reloadMagazine(data, 0, "ap");

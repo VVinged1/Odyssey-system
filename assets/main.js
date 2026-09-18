@@ -3656,8 +3656,7 @@ var PathBuilder = class extends GenericItemBuilder {
 };
 
 // node_modules/js-base64/base64.mjs
-var _hasBuffer = typeof Buffer === "function";
-var _TD = typeof TextDecoder === "function" ? new TextDecoder() : void 0;
+var _TD = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { ignoreBOM: true }) : void 0;
 var _TE = typeof TextEncoder === "function" ? new TextEncoder() : void 0;
 var b64ch = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 var b64chs = Array.prototype.slice.call(b64ch);
@@ -3670,6 +3669,26 @@ var b64re = /^(?:[A-Za-z\d+\/]{4})*?(?:[A-Za-z\d+\/]{2}(?:==)?|[A-Za-z\d+\/]{3}=
 var _fromCC = String.fromCharCode.bind(String);
 var _U8Afrom = typeof Uint8Array.from === "function" ? Uint8Array.from.bind(Uint8Array) : (it) => new Uint8Array(Array.prototype.slice.call(it, 0));
 var _tidyB64 = (s) => s.replace(/[^A-Za-z0-9\+\/]/g, "");
+var btoaPolyfill = (bin) => {
+  let u32, c0, c1, c2, asc = "";
+  const pad = bin.length % 3;
+  for (let i = 0; i < bin.length; ) {
+    if ((c0 = bin.charCodeAt(i++)) > 255 || (c1 = bin.charCodeAt(i++)) > 255 || (c2 = bin.charCodeAt(i++)) > 255)
+      throw new TypeError("invalid character found");
+    u32 = c0 << 16 | c1 << 8 | c2;
+    asc += b64chs[u32 >> 18 & 63] + b64chs[u32 >> 12 & 63] + b64chs[u32 >> 6 & 63] + b64chs[u32 & 63];
+  }
+  return pad ? asc.slice(0, pad - 3) + "===".substring(pad) : asc;
+};
+var _btoa = typeof btoa === "function" ? (bin) => btoa(bin) : btoaPolyfill;
+var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? (u8a) => u8a.toBase64() : (u8a) => {
+  const maxargs = 4096;
+  let strs = [];
+  for (let i = 0, l = u8a.length; i < l; i += maxargs) {
+    strs.push(_fromCC.apply(null, u8a.subarray(i, i + maxargs)));
+  }
+  return _btoa(strs.join(""));
+};
 var re_btou = /[\xC0-\xDF][\x80-\xBF]|[\xE0-\xEF][\x80-\xBF]{2}|[\xF0-\xF7][\x80-\xBF]{3}/g;
 var cb_btou = (cccc) => {
   switch (cccc.length) {
@@ -3702,9 +3721,9 @@ var atobPolyfill = (asc) => {
   }
   return binArray.join("");
 };
-var _atob = typeof atob === "function" ? (asc) => atob(_tidyB64(asc)) : _hasBuffer ? (asc) => Buffer.from(asc, "base64").toString("binary") : atobPolyfill;
-var _toUint8Array = _hasBuffer ? (a) => _U8Afrom(Buffer.from(a, "base64")) : (a) => _U8Afrom(_atob(a).split("").map((c) => c.charCodeAt(0)));
-var _decode = _hasBuffer ? (a) => Buffer.from(a, "base64").toString("utf8") : _TD ? (a) => _TD.decode(_toUint8Array(a)) : (a) => btou(_atob(a));
+var _atob = typeof atob === "function" ? (asc) => atob(_tidyB64(asc)) : atobPolyfill;
+var _toUint8Array = typeof Uint8Array.fromBase64 === "function" ? (a) => Uint8Array.fromBase64(a) : (a) => _U8Afrom(_atob(a).split("").map((c) => c.charCodeAt(0)));
+var _decode = _TD ? (a) => _TD.decode(_toUint8Array(a)) : (a) => btou(_atob(a));
 var _unURI = (a) => _tidyB64(a.replace(/[-_]/g, (m0) => m0 == "-" ? "+" : "/"));
 var decode = (src) => _decode(_unURI(src));
 
@@ -3857,6 +3876,7 @@ function consumeAmmo(odyssey, weaponIndex, shot) {
   odyssey.weapons.ranged[weaponIndex].loaded -= shot.count;
 }
 function effectiveArmor(armor, penetration) {
+  if (penetration < 0 && armor <= 0) return armor;
   return Math.max(0, armor - penetration);
 }
 
@@ -6442,40 +6462,158 @@ function renderAmmunitionBlock(odyssey) {
         </div>
         <button type="button" class="danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}">Remove Ammo</button>
       </div>`).join("") || '<div class="empty">No ammunition.</div>'}
-    <button type="button" class="secondary" data-action="ammo-add">Add Ammo</button>
+	<div class="form-grid">
+	  <label class="field-stack">
+		<span class="field-label">Ammunition Name</span>
+		<input type="text" data-ammo-field="new-name" placeholder="New ammunition">
+	  </label>
+
+	  <label class="field-stack">
+		<span class="field-label">Damage / Round</span>
+		<input type="number" min="0" max="999" value="0" data-ammo-field="new-damage">
+	  </label>
+
+	  <label class="field-stack">
+		<span class="field-label">Armor Penetration</span>
+		<input type="number" min="-999" max="999" value="0" data-ammo-field="new-penetration">
+	  </label>
+
+	  <label class="field-stack">
+		<span class="field-label">Reserve</span>
+		<input type="number" min="0" max="999999" value="0" data-ammo-field="new-quantity">
+	  </label>
+	</div>
+    <button type="button" class="secondary" data-action="ammo-add">Add Ammunition</button>
   `, false);
 }
-function renderRangedWeaponsBlock(odyssey) {
-  const ammunition = odyssey.ammunition ?? [];
-  return renderCollapsibleSection("Ranged Weapons", `
-    ${(odyssey.weapons.ranged ?? []).map((weapon, index) => `
-      <div class="ammo-entry">
-        <div class="form-grid">
-          <label class="field-stack"><span class="field-label">Weapon</span>
-            <input type="text" value="${escapeHtml(weapon.name)}" data-ranged-index="${index}" data-ranged-edit="name"></label>
-          <label class="field-stack"><span class="field-label">Accuracy</span>
-            <input type="number" min="-999" max="999" value="${weapon.accuracy}" data-ranged-index="${index}" data-ranged-edit="accuracy"></label>
+function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
+  const ranged = type === "ranged";
+  return `
+    <div class="weapon-entry">
+      <div class="form-grid">
+        <label class="field-stack"><span class="field-label">Weapon</span>
+          <input type="text" value="${escapeHtml(weapon.name)}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="name" ${disabledAttr}></label>
+        <label class="field-stack"><span class="field-label">Accuracy</span>
+          <input type="number" min="-999" max="999" value="${weapon.accuracy}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="accuracy" ${disabledAttr}></label>
+        <label class="field-stack checkbox-stack"><span class="field-label">Ranged</span>
+          <input type="checkbox" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="ranged" ${ranged ? "checked" : ""} ${disabledAttr}></label>
+        ${ranged ? `
           <label class="field-stack"><span class="field-label">Magazine Capacity</span>
-            <input type="number" min="${weapon.loaded}" max="999" step="1" value="${weapon.capacity}" data-ranged-index="${index}" data-ranged-edit="capacity"></label>
+            <input type="number" min="${weapon.loaded}" max="999" step="1" value="${weapon.capacity}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="capacity" ${disabledAttr}></label>
           <div class="field-stack"><span class="field-label">Loaded</span>
             <span>${weapon.loaded} / ${weapon.capacity} (${escapeHtml(ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId)?.name || "Empty")})</span></div>
-        </div>
-        <details data-section-key="ammo-compatible:${escapeHtml(weapon.id)}" ${collapsibleSectionState.get(`ammo-compatible:${weapon.id}`) ? "open" : ""}><summary>Compatible Ammunition</summary>
+        ` : `
+          <label class="field-stack"><span class="field-label">Weapon Damage</span>
+            <input type="number" min="-999" max="999" value="${weapon.damage}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="damage" ${disabledAttr}></label>
+        `}
+      </div>
+      ${ranged ? `
+        <details data-section-key="ammo-compatible:${escapeHtml(weapon.id)}"><summary>Compatible Ammunition</summary>
           ${ammunition.map((ammo) => `<label class="ammo-choice"><input type="checkbox"
-            data-ranged-index="${index}" data-ranged-edit="compatible" data-ammo-id="${escapeHtml(ammo.id)}"
-            ${weapon.ammoIds.includes(ammo.id) ? "checked" : ""}>${escapeHtml(ammo.name)}</label>`).join("")}
+            data-weapon-type="ranged" data-weapon-index="${index}" data-weapon-edit="compatible" data-ammo-id="${escapeHtml(ammo.id)}"
+            ${weapon.ammoIds.includes(ammo.id) ? "checked" : ""} ${disabledAttr}>${escapeHtml(ammo.name)}</label>`).join("")}
         </details>
         <div class="form-grid">
           <label class="field-stack"><span class="field-label">Reload Ammo</span>
-            <select data-reload-ammo="${index}">
+            <select data-reload-ammo="${index}" ${disabledAttr}>
               ${ammunition.filter((ammo) => weapon.ammoIds.includes(ammo.id)).map((ammo) => `<option value="${escapeHtml(ammo.id)}" ${ammo.id === weapon.loadedAmmoId ? "selected" : ""}>${escapeHtml(ammo.name)} (${ammo.quantity})</option>`).join("")}
             </select></label>
-          <button type="button" data-action="ammo-reload" data-ranged-index="${index}">Reload</button>
-          <button type="button" class="secondary" data-action="ammo-unload" data-ranged-index="${index}">Unload</button>
+          <button type="button" data-action="ammo-reload" data-ranged-index="${index}" ${disabledAttr}>Reload</button>
+          <button type="button" class="secondary" data-action="ammo-unload" data-ranged-index="${index}" ${disabledAttr}>Unload</button>
         </div>
-        <button type="button" class="danger" data-action="ranged-remove" data-ranged-index="${index}">Remove Weapon</button>
-      </div>`).join("") || '<div class="empty">No ranged weapons.</div>'}
-    <button type="button" class="secondary" data-action="ranged-add">Add Ranged Weapon</button>
+      ` : ""}
+      <button type="button" class="danger" data-action="weapon-remove" data-weapon-type="${type}" data-weapon-index="${index}" ${disabledAttr}>Remove Weapon</button>
+    </div>`;
+}
+async function editWeapon(node) {
+  if (!isEditable()) {
+    throw new Error("Only the GM can edit weapons.");
+  }
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a token first.");
+  const type = node.dataset.weaponType;
+  const index = Number(node.dataset.weaponIndex);
+  const field = node.dataset.weaponEdit;
+  const value = node.type === "checkbox" ? node.checked : node.value;
+  await updateTrackerData2(token.id, (current2) => {
+    const next = structuredClone(current2);
+    const source = next.odyssey.weapons[type] ?? [];
+    const weapon = source[index];
+    if (!weapon) return next;
+    if (field === "ranged") {
+      if (value && type === "melee") {
+        source.splice(index, 1);
+        next.odyssey.weapons.ranged.push({
+          id: crypto.randomUUID(),
+          name: weapon.name,
+          damage: 0,
+          accuracy: weapon.accuracy ?? 0,
+          capacity: 0,
+          loaded: 0,
+          loadedAmmoId: "",
+          ammoIds: []
+        });
+      }
+      if (!value && type === "ranged") {
+        const loadedAmmo = next.odyssey.ammunition.find(
+          (ammo) => ammo.id === weapon.loadedAmmoId
+        );
+        if (loadedAmmo) {
+          loadedAmmo.quantity += weapon.loaded;
+        }
+        source.splice(index, 1);
+        next.odyssey.weapons.melee.push({
+          name: weapon.name,
+          damage: 0,
+          accuracy: weapon.accuracy ?? 0
+        });
+      }
+      return next;
+    }
+    if (field === "compatible") {
+      weapon.ammoIds = value ? [.../* @__PURE__ */ new Set([...weapon.ammoIds, node.dataset.ammoId])] : weapon.ammoIds.filter((id) => id !== node.dataset.ammoId);
+      return next;
+    }
+    if (field === "capacity") {
+      const capacity = clamp(Number(value) || 0, weapon.loaded, 999);
+      weapon.capacity = capacity;
+      return next;
+    }
+    if (field === "damage" && type === "melee") {
+      weapon.damage = clamp(Number(value) || 0, -999, 999);
+      return next;
+    }
+    if (field === "accuracy") {
+      weapon.accuracy = clamp(Number(value) || 0, -999, 999);
+      return next;
+    }
+    if (field === "name") {
+      const name = String(value).trim();
+      if (!name) throw new Error("Weapon name cannot be empty.");
+      weapon.name = name;
+    }
+    return next;
+  });
+}
+function renderEnglishWeaponsBlock(data, disabledAttr) {
+  const ammunition = data.odyssey.ammunition ?? [];
+  const weapons = [
+    ...(data.odyssey.weapons?.melee ?? []).map((weapon, index) => renderWeaponRow(weapon, "melee", index, ammunition, disabledAttr)),
+    ...(data.odyssey.weapons?.ranged ?? []).map((weapon, index) => renderWeaponRow(weapon, "ranged", index, ammunition, disabledAttr))
+  ].join("");
+  return renderCollapsibleSection("Weapons", `
+    ${weapons || '<div class="empty">No weapons yet.</div>'}
+    <div class="form-grid">
+      <label class="field-stack"><span class="field-label">Weapon Name</span>
+        <input type="text" data-weapon-field="new-name" placeholder="New weapon" ${disabledAttr}></label>
+      <label class="field-stack"><span class="field-label">Weapon Damage</span>
+        <input type="number" min="-999" max="999" value="0" data-weapon-field="new-damage" ${disabledAttr}></label>
+      <label class="field-stack"><span class="field-label">Weapon Accuracy</span>
+        <input type="number" min="-999" max="999" value="0" data-weapon-field="new-accuracy" ${disabledAttr}></label>
+      <label class="field-stack checkbox-stack"><span class="field-label">Ranged</span>
+        <input type="checkbox" data-weapon-field="new-ranged" ${disabledAttr}></label>
+    </div>
+    <button type="button" class="secondary" data-action="add-weapon" ${disabledAttr}>Add Weapon</button>
   `, false);
 }
 function renderAttackAmmunition(token, draft2, manual, disabledAttr) {
@@ -6507,7 +6645,34 @@ async function editAmmunition(action, node) {
     data.ammunition ?? (data.ammunition = []);
     const weapon = data.weapons.ranged[index];
     const ammo = data.ammunition.find((item) => item.id === ammoId);
-    if (action === "ammo-add") data.ammunition.push({ id: newId, name: "New Ammo", damage: 0, penetration: 0, quantity: 0 });
+    if (action === "ammo-add") {
+      const name = getActionFieldValue('[data-ammo-field="new-name"]').trim();
+      if (!name) {
+        throw new Error("Enter an ammunition name first.");
+      }
+      if (data.ammunition.some((item) => item.name === name)) {
+        throw new Error("Ammunition with this name already exists.");
+      }
+      data.ammunition.push({
+        id: newId,
+        name,
+        damage: clamp(
+          Number(getActionFieldValue('[data-ammo-field="new-damage"]')) || 0,
+          0,
+          999
+        ),
+        penetration: clamp(
+          Number(getActionFieldValue('[data-ammo-field="new-penetration"]')) || 0,
+          -999,
+          999
+        ),
+        quantity: clamp(
+          Number(getActionFieldValue('[data-ammo-field="new-quantity"]')) || 0,
+          0,
+          999999
+        )
+      });
+    }
     if (action === "ammo-edit" && ammo) {
       const field = node.dataset.ammoEdit;
       if (["name", "damage", "penetration", "quantity"].includes(field)) ammo[field] = value;
@@ -6516,24 +6681,6 @@ async function editAmmunition(action, node) {
       if (data.weapons.ranged.some((item) => item.loadedAmmoId === ammoId && item.loaded > 0)) throw new Error("Unload this ammunition before removing it.");
       data.ammunition = data.ammunition.filter((item) => item.id !== ammoId);
       for (const item of data.weapons.ranged) item.ammoIds = item.ammoIds.filter((id) => id !== ammoId);
-    }
-    if (action === "ranged-add") {
-      if (data.weapons.ranged.length >= 20) throw new Error("Maximum 20 ranged weapons.");
-      let name = "Ranged Weapon";
-      const names = [...data.weapons.melee, ...data.weapons.ranged].map((item) => item.name);
-      for (let suffix = 2; names.includes(name); suffix++) name = `Ranged Weapon ${suffix}`;
-      data.weapons.ranged.push({ id: newId, name, accuracy: 0, damage: 0, capacity: 0, loaded: 0, loadedAmmoId: "", ammoIds: [] });
-    }
-    if (action === "ranged-edit" && weapon) {
-      const field = node.dataset.rangedEdit;
-      if (field === "compatible") {
-        if (!value && weapon.loaded > 0 && weapon.loadedAmmoId === ammoId) throw new Error("Unload this ammunition first.");
-        weapon.ammoIds = value ? [.../* @__PURE__ */ new Set([...weapon.ammoIds, ammoId])] : weapon.ammoIds.filter((id) => id !== ammoId);
-      } else if (["name", "accuracy", "capacity"].includes(field)) {
-        if (field === "capacity" && Number(value) < weapon.loaded) throw new Error("Unload rounds before reducing capacity.");
-        if (field === "name" && (!value.trim() || value.trim() === UNARMED_WEAPON_NAME || [...data.weapons.melee, ...data.weapons.ranged].some((item) => item !== weapon && item.name === value.trim()))) throw new Error("Choose a unique weapon name.");
-        weapon[field] = field === "name" ? value.trim() : value;
-      }
     }
     if (action === "ammo-reload") reloadMagazine(data, index, reloadId);
     if ((action === "ranged-remove" || action === "ammo-unload") && weapon) {
@@ -6549,78 +6696,6 @@ async function editAmmunition(action, node) {
     }
     return next;
   });
-}
-function renderEnglishWeaponsBlock(data, disabledAttr) {
-  const meleeWeapons = data.odyssey.weapons?.melee ?? [];
-  const weaponRows = meleeWeapons.map(
-    (weapon, index) => `
-        <div class="weapon-row">
-          <input
-            type="text"
-            value="${escapeHtml(weapon.name)}"
-            data-action="set-weapon-name"
-            data-weapon-index="${index}"
-            ${disabledAttr}
-          >
-          <input
-            type="number"
-            min="-999"
-            max="999"
-            value="${weapon.damage}"
-            data-action="set-weapon-damage"
-            data-weapon-index="${index}"
-            ${disabledAttr}
-          >
-          <input
-            type="number"
-            min="-999"
-            max="999"
-            value="${weapon.accuracy ?? 0}"
-            data-action="set-weapon-accuracy"
-            data-weapon-index="${index}"
-            ${disabledAttr}
-          >
-          <button
-            type="button"
-            class="danger"
-            data-action="remove-weapon"
-            data-weapon-index="${index}"
-            ${disabledAttr}
-          >Remove</button>
-        </div>
-      `
-  ).join("");
-  return renderCollapsibleSection(
-    "Weapons",
-    `
-      <div class="field-label">Melee Weapons</div>
-      <div class="weapon-row-header">
-        <span>Name</span>
-        <span>Damage</span>
-        <span>Accuracy</span>
-        <span></span>
-      </div>
-      <div class="list">${weaponRows || '<div class="empty">No melee weapons yet.</div>'}</div>
-      <div class="form-grid">
-        <label class="field-stack">
-          <span class="field-label">Weapon Name</span>
-          <input type="text" data-weapon-field="new-name" placeholder="New weapon" ${disabledAttr}>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Weapon Damage</span>
-          <input type="number" min="-999" max="999" value="0" data-weapon-field="new-damage" ${disabledAttr}>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Weapon Accuracy</span>
-          <input type="number" min="-999" max="999" value="0" data-weapon-field="new-accuracy" ${disabledAttr}>
-        </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" class="secondary" data-action="add-weapon" ${disabledAttr}>Add Weapon</button>
-      </div>
-    `,
-    false
-  );
 }
 function renderEnglishAttackBlock(token, data, tokenLocked) {
   if (!canViewAttackBlock(token)) return "";
@@ -6909,7 +6984,7 @@ function renderSelectedToken() {
             ${renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled)}
           ` : ""}
       ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
-      ${isEditable() ? renderAmmunitionBlock(odyssey) + renderRangedWeaponsBlock(odyssey) : ""}
+      ${isEditable() ? renderAmmunitionBlock(odyssey) : ""}
       ${isEditable() ? renderTokenTransferBlock(gmOnlyDisabled) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
@@ -7270,14 +7345,38 @@ async function addWeapon() {
   const name = getActionFieldValue('[data-weapon-field="new-name"]').trim() || "New Weapon";
   const damage = clamp(Number(getActionFieldValue('[data-weapon-field="new-damage"]')) || 0, -999, 999);
   const accuracy = clamp(Number(getActionFieldValue('[data-weapon-field="new-accuracy"]')) || 0, -999, 999);
+  const rangedField = ui.selectedTokenPanel.querySelector(
+    '[data-weapon-field="new-ranged"]'
+  );
+  const ranged = rangedField instanceof HTMLInputElement && rangedField.checked;
   await updateTrackerData2(token.id, (current2) => {
-    var _a;
+    var _a, _b;
     const next = structuredClone(current2);
-    (_a = next.odyssey.weapons).melee ?? (_a.melee = []);
-    next.odyssey.weapons.melee.push({ name, damage, accuracy });
+    if (ranged) {
+      (_a = next.odyssey.weapons).ranged ?? (_a.ranged = []);
+      next.odyssey.weapons.ranged.push({
+        id: crypto.randomUUID(),
+        name,
+        damage: 0,
+        accuracy,
+        capacity: 0,
+        loaded: 0,
+        loadedAmmoId: "",
+        ammoIds: []
+      });
+    } else {
+      (_b = next.odyssey.weapons).melee ?? (_b.melee = []);
+      next.odyssey.weapons.melee.push({
+        name,
+        damage,
+        accuracy
+      });
+    }
     return next;
   });
-  syncAttackWeaponInputs(token.id, name, damage, accuracy);
+  if (!ranged) {
+    syncAttackWeaponInputs(token.id, name, damage, accuracy);
+  }
   setStatus(`Weapon "${name}" saved for ${getCharacterName(token)}.`, "success");
 }
 async function setWeaponDamage(index, value) {
@@ -7363,7 +7462,7 @@ async function setWeaponName(index, value) {
     syncAttackWeaponInputs(token.id, nextWeaponName, previousWeapon.damage, previousWeapon.accuracy ?? 0);
   }
 }
-async function removeWeapon(index) {
+async function removeWeapon(type = "melee", index) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
     setStatus("Select a character first.", "error");
@@ -7373,7 +7472,7 @@ async function removeWeapon(index) {
     setStatus("Only the GM can edit weapons.", "error");
     return;
   }
-  const currentWeapons = getOdysseyData(token).weapons?.melee ?? [];
+  const currentWeapons = getOdysseyData(token).weapons?.[type] ?? [];
   const removedWeapon = currentWeapons[index];
   if (!removedWeapon) {
     setStatus("Weapon not found.", "error");
@@ -7381,7 +7480,17 @@ async function removeWeapon(index) {
   }
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
-    next.odyssey.weapons.melee = (next.odyssey.weapons.melee ?? []).filter(
+    const weapons = next.odyssey.weapons[type] ?? [];
+    const weapon = weapons[index];
+    if (type === "ranged" && weapon?.loaded > 0) {
+      const ammo = next.odyssey.ammunition.find(
+        (item) => item.id === weapon.loadedAmmoId
+      );
+      if (ammo) {
+        ammo.quantity += weapon.loaded;
+      }
+    }
+    next.odyssey.weapons[type] = weapons.filter(
       (_weapon, weaponIndex) => weaponIndex !== index
     );
     return next;
@@ -7971,7 +8080,16 @@ function bindUiEvents() {
     const actionNode = target.closest("[data-action]");
     if (!(actionNode instanceof HTMLElement)) return;
     const action = actionNode.dataset.action;
-    if (["ammo-add", "ammo-remove", "ammo-reload", "ammo-unload", "ranged-add", "ranged-remove"].includes(action)) {
+    if (action === "weapon-remove") {
+      const type = actionNode.dataset.weaponType;
+      const weaponIndex = Number(actionNode.dataset.weaponIndex ?? -1);
+      if (weaponIndex < 0) return;
+      void removeWeapon(type, weaponIndex).catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
+    if (["ammo-add", "ammo-remove", "ammo-reload", "ammo-unload"].includes(action)) {
       void editAmmunition(action, actionNode).catch((error) => {
         setStatus(error.message, "error");
         scheduleRender();
@@ -8097,6 +8215,13 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.weaponEdit) {
+      void editWeapon(target).catch((error) => {
+        setStatus(error.message, "error");
+        scheduleRender();
+      });
+      return;
+    }
     if (target.dataset.ammoEdit || target.dataset.rangedEdit) {
       void editAmmunition(target.dataset.ammoEdit ? "ammo-edit" : "ranged-edit", target).catch((error) => {
         setStatus(error.message, "error");

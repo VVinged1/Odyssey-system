@@ -1,4 +1,5 @@
 import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
+import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
 
 export { OBR };
 
@@ -108,6 +109,7 @@ export const DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0,
     },
+    ammunition: [],
     weapons: {
       melee: [],
       ranged: [],
@@ -237,19 +239,21 @@ export function sanitizeOdysseyData(raw) {
   }
 
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
-  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged);
+  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
+  next.ammunition = sanitizeAmmunition(raw.ammunition);
 
   return next;
 }
 
-function sanitizeWeapons(raw) {
+function sanitizeWeapons(raw, ranged = false) {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((item) => item && typeof item === "object")
-    .map((item) => ({
+    .map((item, index) => ({
       name: String(item.name ?? "").trim() || "Weapon",
       damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
       accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
+      ...(ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}),
     }))
     .slice(0, 20);
 }

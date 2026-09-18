@@ -3796,6 +3796,70 @@ function buildPath() {
 }
 var lib_default = OBR;
 
+// ammunition.js
+var integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
+var modifier = (value) => Math.min(999, Math.max(-999, Math.trunc(Number(value) || 0)));
+function sanitizeAmmunition(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).filter((item) => {
+    if (!item || typeof item.id !== "string" || !item.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  }).map((item) => ({
+    id: item.id,
+    name: String(item.name || "Ammo").trim() || "Ammo",
+    damage: integer(item.damage, 999),
+    penetration: modifier(item.penetration),
+    quantity: integer(item.quantity)
+  }));
+}
+function sanitizeMagazine(weapon) {
+  const capacity = integer(weapon.capacity, 999);
+  return {
+    ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
+    capacity,
+    loadedAmmoId: String(weapon.loadedAmmoId || ""),
+    loaded: integer(weapon.loaded, capacity)
+  };
+}
+function reloadMagazine(odyssey, weaponIndex, ammoId) {
+  const weapon = odyssey.weapons.ranged[weaponIndex];
+  const ammo = odyssey.ammunition.find((item) => item.id === ammoId);
+  if (!weapon || !ammo || !weapon.ammoIds.includes(ammoId)) throw new Error("Choose compatible ammunition.");
+  if (weapon.capacity < 1) throw new Error("Set magazine capacity first.");
+  if (ammo.quantity < 1) throw new Error("Ammo reserve is empty.");
+  if (weapon.loadedAmmoId !== ammoId && weapon.loaded > 0) {
+    const previous = odyssey.ammunition.find((item) => item.id === weapon.loadedAmmoId);
+    if (!previous) throw new Error("Loaded ammunition is missing from the inventory.");
+    if (previous.quantity + weapon.loaded > 999999) throw new Error("Ammo reserve is full.");
+    previous.quantity += weapon.loaded;
+    weapon.loaded = 0;
+  }
+  const count = Math.min(weapon.capacity - weapon.loaded, ammo.quantity);
+  if (count <= 0) throw new Error("Magazine is full or ammo reserve is empty.");
+  weapon.loadedAmmoId = ammoId;
+  weapon.loaded += count;
+  ammo.quantity -= count;
+}
+function getAmmoShot(odyssey, weaponIndex, ammoId, count) {
+  const weapon = odyssey.weapons.ranged[weaponIndex];
+  const ammo = odyssey.ammunition.find((item) => item.id === ammoId);
+  if (!weapon || !ammo || !weapon.ammoIds.includes(ammoId) || weapon.loadedAmmoId !== ammoId) {
+    throw new Error("The selected ammunition must be loaded by the GM first.");
+  }
+  if (!Number.isInteger(count) || count < 1 || count > weapon.loaded || count > weapon.capacity) {
+    throw new Error("Not enough rounds in the magazine.");
+  }
+  return { ammoId, count, damage: ammo.damage * count, penetration: ammo.penetration, name: ammo.name };
+}
+function consumeAmmo(odyssey, weaponIndex, shot) {
+  getAmmoShot(odyssey, weaponIndex, shot.ammoId, shot.count);
+  odyssey.weapons.ranged[weaponIndex].loaded -= shot.count;
+}
+function effectiveArmor(armor, penetration) {
+  return Math.max(0, armor - penetration);
+}
+
 // shared.js
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
@@ -3901,6 +3965,7 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
+    ammunition: [],
     weapons: {
       melee: [],
       ranged: []
@@ -3991,15 +4056,17 @@ function sanitizeOdysseyData(raw) {
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
-  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged);
+  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
+  next.ammunition = sanitizeAmmunition(raw.ammunition);
   return next;
 }
-function sanitizeWeapons(raw) {
+function sanitizeWeapons(raw, ranged = false) {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item) => item && typeof item === "object").map((item) => ({
+  return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
-    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999)
+    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
+    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -4558,7 +4625,7 @@ async function syncTrackedOverlays() {
 function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
 }
-function rollDice(sides, modifier = 0, count = 1) {
+function rollDice(sides, modifier2 = 0, count = 1) {
   const safeSides = clamp(Number(sides) || 0, 2, Number.MAX_SAFE_INTEGER);
   const safeCount = clamp(Number(count) || 0, 1, 100);
   const rolls = Array.from({ length: safeCount }, () => Math.floor(Math.random() * safeSides) + 1);
@@ -4569,8 +4636,8 @@ function rollDice(sides, modifier = 0, count = 1) {
     count: safeCount,
     sides: safeSides,
     subtotal,
-    modifier: Number(modifier) || 0,
-    total: subtotal + (Number(modifier) || 0)
+    modifier: Number(modifier2) || 0,
+    total: subtotal + (Number(modifier2) || 0)
   };
 }
 function calculateAccuracy(attackSkill, attackBonuses = 0, attackPenalties = 0, defenseBonuses = 0, defensePenalties = 0, parry = 0) {
@@ -4936,6 +5003,7 @@ function getTransientFieldKey(field) {
   if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) {
     return "";
   }
+  if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
   if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
@@ -5020,7 +5088,7 @@ function restoreSelectedPanelState(panelState) {
         );
         if (!hasMatchingOption) return;
       }
-      field.value = normalizedValue;
+      field.value = field.dataset.attackField === "rounds" || field.dataset.manualAttackField === "rounds" ? String(Math.max(1, Math.min(Number(normalizedValue) || 1, Number(field.max)))) : normalizedValue;
     }
     if (key === panelState.focusedKey) {
       focusedField = field;
@@ -5420,8 +5488,8 @@ function formatRawDiceRolls(result) {
   return result.rolls.join(", ");
 }
 function formatDiceRollsWithModifier(result) {
-  const modifier = Number(result.modifier) || 0;
-  return result.rolls.map((roll) => (Number(roll) || 0) + modifier).join(", ");
+  const modifier2 = Number(result.modifier) || 0;
+  return result.rolls.map((roll) => (Number(roll) || 0) + modifier2).join(", ");
 }
 function buildDiceRollSummary(diceLabel, result) {
   return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], sum ${result.subtotal}, with modifier ${formatDiceRollsWithModifier(result)}`;
@@ -5562,13 +5630,13 @@ function getAttackDraft(token, data, targetCharacters) {
   const targetTokenId = draftTargetTokenId && draftTargetTokenId !== token.id ? draftTargetTokenId : "";
   const resolvedTarget = targetTokenId ? targetCharacters.find((target) => target.id === targetTokenId) ?? null : null;
   const storedWeaponName = String(stored.weaponName ?? "").trim();
-  const selectedWeapon = availableWeapons.find((weapon) => weapon.name === storedWeaponName) ?? defaultWeapon;
+  const selectedWeapon = availableWeapons.find((weapon) => (weapon.selectionKey ?? weapon.name) === storedWeaponName) ?? defaultWeapon;
   return {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
     targetTokenId,
     targetTokenName: resolvedTarget ? getCharacterName(resolvedTarget) : draftTargetTokenName,
     targetPart: BODY_ORDER.includes(stored.targetPart) && stored.targetPart !== SPECIAL_PART_NAME ? stored.targetPart : "Torso",
-    weaponName: selectedWeapon?.name ?? defaultWeapon.name,
+    weaponName: selectedWeapon?.selectionKey ?? selectedWeapon?.name ?? defaultWeapon.name,
     weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
     weaponAccuracy: String(selectedWeapon?.accuracy ?? defaultWeapon.accuracy ?? 0),
     attackBonuses: stored.attackBonuses ?? "0",
@@ -5579,6 +5647,7 @@ function getAttackDraft(token, data, targetCharacters) {
     defensePenalties: stored.defensePenalties ?? "0",
     manualArmor: stored.manualArmor ?? "0",
     manualParry: stored.manualParry ?? "0",
+    rounds: stored.rounds ?? "1",
     parryMode: ["off", "1", "2", "3", "4", "5"].includes(String(stored.parryMode)) ? String(stored.parryMode) : "1"
   };
 }
@@ -5591,6 +5660,7 @@ function saveAttackDraftValue(tokenId, field, value) {
   });
 }
 function getSharedAttackDraftField(manualField) {
+  if (manualField === "rounds") return "rounds";
   if (manualField === "targetPart") return "targetPart";
   if (manualField === "skill") return "skill";
   if (manualField === "weaponName") return "weaponName";
@@ -5603,13 +5673,17 @@ function getSharedAttackDraftField(manualField) {
 }
 function buildWeaponOptions(weapons, selectedWeaponName = "") {
   return weapons.map(
-    (weapon) => `<option value="${escapeHtml(weapon.name)}" ${weapon.name === selectedWeaponName ? "selected" : ""}>${escapeHtml(weapon.name)} (DMG ${weapon.damage >= 0 ? "+" : ""}${weapon.damage}, ACC ${weapon.accuracy >= 0 ? "+" : ""}${weapon.accuracy})</option>`
+    (weapon) => `<option value="${escapeHtml(weapon.selectionKey ?? weapon.name)}" ${(weapon.selectionKey ?? weapon.name) === selectedWeaponName ? "selected" : ""}>${escapeHtml(weapon.name)} (${weapon.rangedIndex == null ? `DMG ${weapon.damage}, ` : `Ammo ${weapon.loaded}/${weapon.capacity}, `}ACC ${weapon.accuracy >= 0 ? "+" : ""}${weapon.accuracy})</option>`
   ).join("");
 }
 function getAttackSelectableWeapons(token) {
   const odyssey = getOdysseyData(token);
   const meleeWeapons = odyssey.weapons?.melee ?? [];
-  return [{ name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 }, ...meleeWeapons];
+  return [
+    { name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 },
+    ...meleeWeapons,
+    ...(odyssey.weapons?.ranged ?? []).map((weapon, rangedIndex) => ({ ...weapon, damage: 0, rangedIndex, selectionKey: `ranged:${weapon.id}` }))
+  ];
 }
 function getDefaultAttackWeapon(token) {
   const odyssey = getOdysseyData(token);
@@ -5619,9 +5693,10 @@ function getDefaultAttackWeapon(token) {
 function getWeaponByName(token, weaponName) {
   const normalizedWeaponName = String(weaponName ?? "").trim();
   const weapons = getAttackSelectableWeapons(token);
-  return weapons.find((weapon) => weapon.name === normalizedWeaponName) ?? getDefaultAttackWeapon(token);
+  return weapons.find((weapon) => (weapon.selectionKey ?? weapon.name) === normalizedWeaponName) ?? getDefaultAttackWeapon(token);
 }
 function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage, weaponAccuracy = 0) {
+  scheduleRender();
   if (!tokenId) return;
   saveAttackDraftValue(tokenId, "weaponName", weaponName);
   saveAttackDraftValue(tokenId, "weaponDamage", String(weaponDamage));
@@ -5685,7 +5760,8 @@ function buildTokenExportPayload(token) {
         skillCategories: structuredClone(odyssey.skillCategories ?? {}),
         skillStrengthBonuses: structuredClone(odyssey.skillStrengthBonuses ?? {}),
         attributes: structuredClone(odyssey.attributes ?? {}),
-        weapons: structuredClone(odyssey.weapons ?? { melee: [], ranged: [] })
+        weapons: structuredClone(odyssey.weapons ?? { melee: [], ranged: [] }),
+        ammunition: structuredClone(odyssey.ammunition ?? [])
       }
     }
   };
@@ -5705,7 +5781,8 @@ function normalizeImportedTokenPayload(raw) {
       skillCategories: source.odyssey?.skillCategories,
       skillStrengthBonuses: source.odyssey?.skillStrengthBonuses,
       attributes: source.odyssey?.attributes,
-      weapons: source.odyssey?.weapons
+      weapons: source.odyssey?.weapons,
+      ammunition: source.odyssey?.ammunition
     }
   });
   return {
@@ -5718,7 +5795,8 @@ function normalizeImportedTokenPayload(raw) {
       skillCategories: structuredClone(normalized.odyssey.skillCategories),
       skillStrengthBonuses: structuredClone(normalized.odyssey.skillStrengthBonuses),
       attributes: structuredClone(normalized.odyssey.attributes),
-      weapons: structuredClone(normalized.odyssey.weapons)
+      weapons: structuredClone(normalized.odyssey.weapons),
+      ammunition: structuredClone(normalized.odyssey.ammunition)
     }
   };
 }
@@ -5802,6 +5880,7 @@ async function importSelectedTokenData(file) {
     next.odyssey.skillStrengthBonuses = structuredClone(imported.odyssey.skillStrengthBonuses);
     next.odyssey.attributes = structuredClone(imported.odyssey.attributes);
     next.odyssey.weapons = structuredClone(imported.odyssey.weapons);
+    next.odyssey.ammunition = structuredClone(imported.odyssey.ammunition);
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -6187,9 +6266,9 @@ function pushPrivateGmEntry(title, body) {
     ...gmPrivateEntries
   ].slice(0, 12);
 }
-function rollCharacterCheck(attributeValue, modifier = 0) {
+function rollCharacterCheck(attributeValue, modifier2 = 0) {
   const baseAttribute = Number(attributeValue) || 0;
-  const finalAttribute = Math.max(0, baseAttribute + (Number(modifier) || 0));
+  const finalAttribute = Math.max(0, baseAttribute + (Number(modifier2) || 0));
   const roll = Math.floor(Math.random() * 20) + 1;
   let result = roll <= finalAttribute ? "Check Passed" : "Check Failed";
   let outcome = result === "Check Passed" ? "success" : "failure";
@@ -6203,17 +6282,17 @@ function rollCharacterCheck(attributeValue, modifier = 0) {
   return {
     roll,
     baseAttribute,
-    modifier: Number(modifier) || 0,
+    modifier: Number(modifier2) || 0,
     finalAttribute,
     result,
     outcome
   };
 }
-function rollSkillCheck(skillValue, modifier = 0) {
+function rollSkillCheck(skillValue, modifier2 = 0) {
   const baseSkill = Number(skillValue) || 0;
   const rollPrimary = Math.floor(Math.random() * 100) + 1;
   const rollSecondary = Math.floor(Math.random() * 100) + 1;
-  const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier) || 0);
+  const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier2) || 0);
   const totalSecondary = rollSecondary;
   let result = totalPrimary > totalSecondary ? "Check Passed" : "Check Failed";
   let outcome = result === "Check Passed" ? "success" : "failure";
@@ -6228,7 +6307,7 @@ function rollSkillCheck(skillValue, modifier = 0) {
     rollPrimary,
     rollSecondary,
     baseSkill,
-    modifier: Number(modifier) || 0,
+    modifier: Number(modifier2) || 0,
     totalPrimary,
     totalSecondary,
     result,
@@ -6345,6 +6424,131 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
     `,
     false
   );
+}
+function renderAmmunitionBlock(odyssey) {
+  const numberField = (ammo, field, label, min = 0, max = 999) => `
+    <label class="field-stack"><span class="field-label">${label}</span>
+      <input type="number" min="${min}" max="${max}" step="1" value="${ammo[field]}"
+        data-ammo-id="${escapeHtml(ammo.id)}" data-ammo-edit="${field}"></label>`;
+  return renderCollapsibleSection("Ammunition", `
+    ${(odyssey.ammunition ?? []).map((ammo) => `
+      <div class="ammo-entry">
+        <label class="field-stack"><span class="field-label">Name</span>
+          <input type="text" value="${escapeHtml(ammo.name)}" data-ammo-id="${escapeHtml(ammo.id)}" data-ammo-edit="name"></label>
+        <div class="form-grid">
+          ${numberField(ammo, "damage", "Damage / Round")}
+          ${numberField(ammo, "penetration", "Armor Penetration", -999)}
+          ${numberField(ammo, "quantity", "Reserve", 0, 999999)}
+        </div>
+        <button type="button" class="danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}">Remove Ammo</button>
+      </div>`).join("") || '<div class="empty">No ammunition.</div>'}
+    <button type="button" class="secondary" data-action="ammo-add">Add Ammo</button>
+  `, false);
+}
+function renderRangedWeaponsBlock(odyssey) {
+  const ammunition = odyssey.ammunition ?? [];
+  return renderCollapsibleSection("Ranged Weapons", `
+    ${(odyssey.weapons.ranged ?? []).map((weapon, index) => `
+      <div class="ammo-entry">
+        <div class="form-grid">
+          <label class="field-stack"><span class="field-label">Weapon</span>
+            <input type="text" value="${escapeHtml(weapon.name)}" data-ranged-index="${index}" data-ranged-edit="name"></label>
+          <label class="field-stack"><span class="field-label">Accuracy</span>
+            <input type="number" min="-999" max="999" value="${weapon.accuracy}" data-ranged-index="${index}" data-ranged-edit="accuracy"></label>
+          <label class="field-stack"><span class="field-label">Magazine Capacity</span>
+            <input type="number" min="${weapon.loaded}" max="999" step="1" value="${weapon.capacity}" data-ranged-index="${index}" data-ranged-edit="capacity"></label>
+          <div class="field-stack"><span class="field-label">Loaded</span>
+            <span>${weapon.loaded} / ${weapon.capacity} (${escapeHtml(ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId)?.name || "Empty")})</span></div>
+        </div>
+        <details data-section-key="ammo-compatible:${escapeHtml(weapon.id)}" ${collapsibleSectionState.get(`ammo-compatible:${weapon.id}`) ? "open" : ""}><summary>Compatible Ammunition</summary>
+          ${ammunition.map((ammo) => `<label class="ammo-choice"><input type="checkbox"
+            data-ranged-index="${index}" data-ranged-edit="compatible" data-ammo-id="${escapeHtml(ammo.id)}"
+            ${weapon.ammoIds.includes(ammo.id) ? "checked" : ""}>${escapeHtml(ammo.name)}</label>`).join("")}
+        </details>
+        <div class="form-grid">
+          <label class="field-stack"><span class="field-label">Reload Ammo</span>
+            <select data-reload-ammo="${index}">
+              ${ammunition.filter((ammo) => weapon.ammoIds.includes(ammo.id)).map((ammo) => `<option value="${escapeHtml(ammo.id)}" ${ammo.id === weapon.loadedAmmoId ? "selected" : ""}>${escapeHtml(ammo.name)} (${ammo.quantity})</option>`).join("")}
+            </select></label>
+          <button type="button" data-action="ammo-reload" data-ranged-index="${index}">Reload</button>
+          <button type="button" class="secondary" data-action="ammo-unload" data-ranged-index="${index}">Unload</button>
+        </div>
+        <button type="button" class="danger" data-action="ranged-remove" data-ranged-index="${index}">Remove Weapon</button>
+      </div>`).join("") || '<div class="empty">No ranged weapons.</div>'}
+    <button type="button" class="secondary" data-action="ranged-add">Add Ranged Weapon</button>
+  `, false);
+}
+function renderAttackAmmunition(token, draft2, manual, disabledAttr) {
+  const weapon = getWeaponByName(token, draft2.weaponName);
+  if (weapon.rangedIndex == null) return "";
+  const ammo = getOdysseyData(token).ammunition ?? [];
+  const prefix = manual ? "data-manual-attack-field" : "data-attack-field";
+  return `<label class="field-stack"><span class="field-label">Ammunition (${weapon.loaded}/${weapon.capacity})</span>
+    <select ${prefix}="ammoId" ${disabledAttr}>
+      <option value="" ${!weapon.loadedAmmoId ? "selected" : ""}>Empty</option>
+      ${ammo.filter((item) => weapon.ammoIds.includes(item.id)).map((item) => `<option value="${escapeHtml(item.id)}"
+        ${item.id === weapon.loadedAmmoId ? "selected" : "disabled"}>${escapeHtml(item.name)} (DMG ${item.damage}, AP ${item.penetration})${item.id === weapon.loadedAmmoId ? "" : " - Not loaded"}</option>`).join("")}
+    </select></label>
+    <label class="field-stack"><span class="field-label">Rounds / Attack</span>
+      <input type="number" min="1" max="${weapon.loaded}" step="1" value="${Math.min(Number(draft2.rounds) || 1, weapon.loaded) || 1}" ${prefix}="rounds" ${disabledAttr} ${weapon.loaded ? "" : "disabled"}></label>`;
+}
+async function editAmmunition(action, node) {
+  if (!isEditable()) throw new Error("Only the GM can edit ammunition and reload weapons.");
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a token first.");
+  const index = Number(node.dataset.rangedIndex);
+  const ammoId = node.dataset.ammoId;
+  const value = node.type === "checkbox" ? node.checked : node.value;
+  const newId = crypto.randomUUID();
+  const reloadId = action === "ammo-reload" ? getActionFieldValue(`[data-reload-ammo="${index}"]`) : "";
+  await updateTrackerData2(token.id, (current2) => {
+    const next = structuredClone(current2);
+    const data = next.odyssey;
+    data.ammunition ?? (data.ammunition = []);
+    const weapon = data.weapons.ranged[index];
+    const ammo = data.ammunition.find((item) => item.id === ammoId);
+    if (action === "ammo-add") data.ammunition.push({ id: newId, name: "New Ammo", damage: 0, penetration: 0, quantity: 0 });
+    if (action === "ammo-edit" && ammo) {
+      const field = node.dataset.ammoEdit;
+      if (["name", "damage", "penetration", "quantity"].includes(field)) ammo[field] = value;
+    }
+    if (action === "ammo-remove") {
+      if (data.weapons.ranged.some((item) => item.loadedAmmoId === ammoId && item.loaded > 0)) throw new Error("Unload this ammunition before removing it.");
+      data.ammunition = data.ammunition.filter((item) => item.id !== ammoId);
+      for (const item of data.weapons.ranged) item.ammoIds = item.ammoIds.filter((id) => id !== ammoId);
+    }
+    if (action === "ranged-add") {
+      if (data.weapons.ranged.length >= 20) throw new Error("Maximum 20 ranged weapons.");
+      let name = "Ranged Weapon";
+      const names = [...data.weapons.melee, ...data.weapons.ranged].map((item) => item.name);
+      for (let suffix = 2; names.includes(name); suffix++) name = `Ranged Weapon ${suffix}`;
+      data.weapons.ranged.push({ id: newId, name, accuracy: 0, damage: 0, capacity: 0, loaded: 0, loadedAmmoId: "", ammoIds: [] });
+    }
+    if (action === "ranged-edit" && weapon) {
+      const field = node.dataset.rangedEdit;
+      if (field === "compatible") {
+        if (!value && weapon.loaded > 0 && weapon.loadedAmmoId === ammoId) throw new Error("Unload this ammunition first.");
+        weapon.ammoIds = value ? [.../* @__PURE__ */ new Set([...weapon.ammoIds, ammoId])] : weapon.ammoIds.filter((id) => id !== ammoId);
+      } else if (["name", "accuracy", "capacity"].includes(field)) {
+        if (field === "capacity" && Number(value) < weapon.loaded) throw new Error("Unload rounds before reducing capacity.");
+        if (field === "name" && (!value.trim() || value.trim() === UNARMED_WEAPON_NAME || [...data.weapons.melee, ...data.weapons.ranged].some((item) => item !== weapon && item.name === value.trim()))) throw new Error("Choose a unique weapon name.");
+        weapon[field] = field === "name" ? value.trim() : value;
+      }
+    }
+    if (action === "ammo-reload") reloadMagazine(data, index, reloadId);
+    if ((action === "ranged-remove" || action === "ammo-unload") && weapon) {
+      const loadedAmmo = data.ammunition.find((item) => item.id === weapon.loadedAmmoId);
+      if (weapon.loaded && !loadedAmmo) throw new Error("Loaded ammunition is missing.");
+      if (loadedAmmo) {
+        if (loadedAmmo.quantity + weapon.loaded > 999999) throw new Error("Ammo reserve is full.");
+        loadedAmmo.quantity += weapon.loaded;
+      }
+      weapon.loaded = 0;
+      weapon.loadedAmmoId = "";
+      if (action === "ranged-remove") data.weapons.ranged.splice(index, 1);
+    }
+    return next;
+  });
 }
 function renderEnglishWeaponsBlock(data, disabledAttr) {
   const meleeWeapons = data.odyssey.weapons?.melee ?? [];
@@ -6465,10 +6669,11 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
     ).join("")}
           </select>
         </label>
-        <label class="field-stack">
+        <label class="field-stack ${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? "hidden" : ""}">
           <span class="field-label">Weapon Damage</span>
-          <input type="number" value="${draft2.weaponDamage}" data-attack-field="weaponDamage" ${disabledAttr}>
+          <input type="number" value="${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? 0 : draft2.weaponDamage}" data-attack-field="weaponDamage" ${disabledAttr} ${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? "disabled" : ""}>
         </label>
+        ${renderAttackAmmunition(token, draft2, false, disabledAttr)}
         <label class="field-stack">
           <span class="field-label">Weapon Accuracy</span>
           <div class="hint-box" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
@@ -6540,10 +6745,11 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
     ).join("")}
           </select>
         </label>
-        <label class="field-stack">
+        <label class="field-stack ${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? "hidden" : ""}">
           <span class="field-label">Weapon Damage</span>
-          <input type="number" value="${draft2.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr}>
+          <input type="number" value="${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? 0 : draft2.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr} ${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? "disabled" : ""}>
         </label>
+        ${renderAttackAmmunition(token, draft2, true, disabledAttr)}
         <label class="field-stack">
           <span class="field-label">Weapon Accuracy</span>
           <div class="hint-box" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
@@ -6703,6 +6909,7 @@ function renderSelectedToken() {
             ${renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled)}
           ` : ""}
       ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
+      ${isEditable() ? renderAmmunitionBlock(odyssey) + renderRangedWeaponsBlock(odyssey) : ""}
       ${isEditable() ? renderTokenTransferBlock(gmOnlyDisabled) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
@@ -7275,7 +7482,17 @@ function getActionFieldValue(selector) {
   }
   return field.value;
 }
-async function performAttack({ manualDefense = false } = {}) {
+var attackPending = false;
+async function performAttack(options = {}) {
+  if (attackPending) return;
+  attackPending = true;
+  try {
+    await performAttackOnce(options);
+  } finally {
+    attackPending = false;
+  }
+}
+async function performAttackOnce({ manualDefense = false } = {}) {
   const attacker = getCharacterById(activeTokenId);
   if (!attacker) {
     setStatus("Select an attacker token first.", "error");
@@ -7310,6 +7527,13 @@ async function performAttack({ manualDefense = false } = {}) {
   const skillName = manualDefense ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]') : getActionFieldValue('[data-attack-field="skill"]');
   const weaponName = manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]') : getActionFieldValue('[data-attack-field="weaponName"]');
   const selectedWeapon = getWeaponByName(attacker, weaponName);
+  const shotPrefix = manualDefense ? "data-manual-attack-field" : "data-attack-field";
+  const shot = selectedWeapon.rangedIndex == null ? null : getAmmoShot(
+    attackerOdyssey,
+    selectedWeapon.rangedIndex,
+    getActionFieldValue(`[${shotPrefix}="ammoId"]`),
+    Number(getActionFieldValue(`[${shotPrefix}="rounds"]`))
+  );
   const requestedTargetPart = manualDefense ? getActionFieldValue('[data-manual-attack-field="targetPart"]') || getActionFieldValue('[data-attack-field="targetPart"]') : getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]') : getActionFieldValue('[data-attack-field="weaponDamage"]')
@@ -7378,14 +7602,15 @@ async function performAttack({ manualDefense = false } = {}) {
   saveAttackDraftValue(attacker.id, "parryMode", parryMode);
   const specialPartState = targetData?.body?.[SPECIAL_PART_NAME] ?? null;
   const specialWasActive = Boolean(target) && hasConfiguredSpecial(targetData) && (Number(specialPartState?.max) || 0) > 0 && (Number(specialPartState?.current) || 0) > 0;
-  const targetArmor = target ? (Number(targetData?.body?.[targetPart]?.armor) || 0) + (specialWasActive ? Number(specialPartState?.armor) || 0 : 0) : manualArmor;
+  const baseTargetArmor = target ? (Number(targetData?.body?.[targetPart]?.armor) || 0) + (specialWasActive ? Number(specialPartState?.armor) || 0 : 0) : manualArmor;
+  const targetArmor = effectiveArmor(baseTargetArmor, shot?.penetration ?? 0);
   const targetPartState = targetData?.body?.[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
   const beforeHp = target ? targetPartState.current ?? 0 : null;
   const beforeMinor = target ? targetPartState.minor ?? 0 : null;
   const beforeSerious = target ? targetPartState.serious ?? 0 : null;
   const specialBeforeHp = specialWasActive ? Number(specialPartState?.current) || 0 : null;
-  const strengthBonus = getSkillStrengthBonusFlag(attackerOdyssey, skillName) ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
-  const finalWeaponDamage = weaponDamage + strengthBonus;
+  const strengthBonus = !shot && getSkillStrengthBonusFlag(attackerOdyssey, skillName) ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
+  const finalWeaponDamage = shot ? shot.damage : weaponDamage + strengthBonus;
   const baseTargetParry = target ? targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0 : manualParry;
   const targetParry = parryDivisor <= 0 ? 0 : Math.max(Math.floor(baseTargetParry / parryDivisor), 0);
   const result = resolveAttack({
@@ -7421,9 +7646,14 @@ async function performAttack({ manualDefense = false } = {}) {
   const afterSerious = target ? projectedPartState.serious ?? beforeSerious : null;
   const specialAfterHp = specialWasActive ? projectedSpecialState?.current ?? specialBeforeHp : null;
   const resolvedTargetName = target ? getCharacterName(target) : "Manual Defense";
-  const resolvedAttackSummary = specialResolution.specialActive && result.hit && specialResolution.damageAppliedLabel !== "No Damage" ? `${result.summary} Applied: ${specialResolution.damageAppliedLabel}.` : result.summary;
+  const damageSummary = specialResolution.specialActive && result.hit && specialResolution.damageAppliedLabel !== "No Damage" ? `${result.summary} Applied: ${specialResolution.damageAppliedLabel}.` : result.summary;
+  const resolvedAttackSummary = shot ? `${damageSummary} ${shot.name} x${shot.count}; ammo damage ${shot.damage}; armor ${baseTargetArmor} -> ${targetArmor} (AP ${shot.penetration}).` : damageSummary;
   await updateTrackerData2(attacker.id, (current2) => {
     const next = structuredClone(current2);
+    if (shot) {
+      if (next.odyssey.weapons.ranged[selectedWeapon.rangedIndex]?.id !== selectedWeapon.id) throw new Error("Weapon changed. Please retry the attack.");
+      consumeAmmo(next.odyssey, selectedWeapon.rangedIndex, shot);
+    }
     next.lastRoll = {
       eventId: 0,
       actorName: playerName || "Owlbear Player",
@@ -7519,8 +7749,8 @@ async function performRollDice() {
   }
   const dice = Number(getActionFieldValue('[data-roll-field="dice"]')) || 20;
   const count = Number(getActionFieldValue('[data-roll-field="count"]')) || 1;
-  const modifier = Number(getActionFieldValue('[data-roll-field="modifier"]')) || 0;
-  const result = rollDice(dice, modifier, count);
+  const modifier2 = Number(getActionFieldValue('[data-roll-field="modifier"]')) || 0;
+  const result = rollDice(dice, modifier2, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
   await updateTrackerData2(token.id, (current2) => {
@@ -7611,9 +7841,9 @@ async function performRollChar() {
     return;
   }
   const attribute = getActionFieldValue('[data-roll-char-field="attribute"]') || "Strength";
-  const modifier = Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0;
+  const modifier2 = Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
-  const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
+  const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier2);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
   const summary = `${getResolvedCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
   await updateTrackerData2(token.id, (current2) => {
@@ -7657,9 +7887,9 @@ async function performRollSkill() {
     setStatus("Choose a skill first.", "error");
     return;
   }
-  const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
+  const modifier2 = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
   const odyssey = getOdysseyData(token);
-  const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
+  const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier2);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
@@ -7694,8 +7924,8 @@ async function performPrivateGmRoll() {
   }
   const dice = Number(getActionFieldValue('[data-gm-roll-field="dice"]')) || 20;
   const count = Number(getActionFieldValue('[data-gm-roll-field="count"]')) || 1;
-  const modifier = Number(getActionFieldValue('[data-gm-roll-field="modifier"]')) || 0;
-  const result = rollDice(dice, modifier, count);
+  const modifier2 = Number(getActionFieldValue('[data-gm-roll-field="modifier"]')) || 0;
+  const result = rollDice(dice, modifier2, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
   pushPrivateGmEntry(
@@ -7741,6 +7971,13 @@ function bindUiEvents() {
     const actionNode = target.closest("[data-action]");
     if (!(actionNode instanceof HTMLElement)) return;
     const action = actionNode.dataset.action;
+    if (["ammo-add", "ammo-remove", "ammo-reload", "ammo-unload", "ranged-add", "ranged-remove"].includes(action)) {
+      void editAmmunition(action, actionNode).catch((error) => {
+        setStatus(error.message, "error");
+        scheduleRender();
+      });
+      return;
+    }
     const tokenId = actionNode.dataset.tokenId;
     const partName = actionNode.dataset.part;
     const field = actionNode.dataset.field;
@@ -7860,6 +8097,13 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.ammoEdit || target.dataset.rangedEdit) {
+      void editAmmunition(target.dataset.ammoEdit ? "ammo-edit" : "ranged-edit", target).catch((error) => {
+        setStatus(error.message, "error");
+        scheduleRender();
+      });
+      return;
+    }
     if (target.dataset.attackField && activeTokenId) {
       if (target.dataset.attackField === "weaponName") {
         const token = getCharacterById(activeTokenId);
@@ -7867,7 +8111,7 @@ function bindUiEvents() {
         if (selectedWeapon) {
           syncAttackWeaponInputs(
             activeTokenId,
-            selectedWeapon.name,
+            selectedWeapon.selectionKey ?? selectedWeapon.name,
             selectedWeapon.damage,
             selectedWeapon.accuracy ?? 0
           );
@@ -7897,7 +8141,7 @@ function bindUiEvents() {
         if (selectedWeapon) {
           syncAttackWeaponInputs(
             activeTokenId,
-            selectedWeapon.name,
+            selectedWeapon.selectionKey ?? selectedWeapon.name,
             selectedWeapon.damage,
             selectedWeapon.accuracy ?? 0
           );

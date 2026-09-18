@@ -3677,6 +3677,33 @@ function buildPath() {
 }
 var lib_default = OBR;
 
+// ammunition.js
+var integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
+var modifier = (value) => Math.min(999, Math.max(-999, Math.trunc(Number(value) || 0)));
+function sanitizeAmmunition(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).filter((item) => {
+    if (!item || typeof item.id !== "string" || !item.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  }).map((item) => ({
+    id: item.id,
+    name: String(item.name || "Ammo").trim() || "Ammo",
+    damage: integer(item.damage, 999),
+    penetration: modifier(item.penetration),
+    quantity: integer(item.quantity)
+  }));
+}
+function sanitizeMagazine(weapon) {
+  const capacity = integer(weapon.capacity, 999);
+  return {
+    ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
+    capacity,
+    loadedAmmoId: String(weapon.loadedAmmoId || ""),
+    loaded: integer(weapon.loaded, capacity)
+  };
+}
+
 // shared.js
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
@@ -3782,6 +3809,7 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
+    ammunition: [],
     weapons: {
       melee: [],
       ranged: []
@@ -3872,15 +3900,17 @@ function sanitizeOdysseyData(raw) {
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
-  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged);
+  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
+  next.ammunition = sanitizeAmmunition(raw.ammunition);
   return next;
 }
-function sanitizeWeapons(raw) {
+function sanitizeWeapons(raw, ranged = false) {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item) => item && typeof item === "object").map((item) => ({
+  return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
-    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999)
+    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
+    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {

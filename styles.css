@@ -551,6 +551,26 @@ select {
   display: none !important;
 }
 
+.ammo-entry {
+  border-bottom: 1px solid var(--border, #555);
+  padding: 12px 0;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ammo-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.ammo-choice input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 640px) {
   html,
   body {

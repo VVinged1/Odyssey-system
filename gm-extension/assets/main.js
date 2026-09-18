@@ -3677,6 +3677,33 @@ function buildPath() {
 }
 var lib_default = OBR;
 
+// ../ammunition.js
+var integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
+var modifier = (value) => Math.min(999, Math.max(-999, Math.trunc(Number(value) || 0)));
+function sanitizeAmmunition(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).filter((item) => {
+    if (!item || typeof item.id !== "string" || !item.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  }).map((item) => ({
+    id: item.id,
+    name: String(item.name || "Ammo").trim() || "Ammo",
+    damage: integer(item.damage, 999),
+    penetration: modifier(item.penetration),
+    quantity: integer(item.quantity)
+  }));
+}
+function sanitizeMagazine(weapon) {
+  const capacity = integer(weapon.capacity, 999);
+  return {
+    ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
+    capacity,
+    loadedAmmoId: String(weapon.loadedAmmoId || ""),
+    loaded: integer(weapon.loaded, capacity)
+  };
+}
+
 // ../shared.js
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
@@ -3782,6 +3809,7 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
+    ammunition: [],
     weapons: {
       melee: [],
       ranged: []
@@ -3872,15 +3900,17 @@ function sanitizeOdysseyData(raw) {
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
-  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged);
+  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
+  next.ammunition = sanitizeAmmunition(raw.ammunition);
   return next;
 }
-function sanitizeWeapons(raw) {
+function sanitizeWeapons(raw, ranged = false) {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item) => item && typeof item === "object").map((item) => ({
+  return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
-    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999)
+    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
+    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -4355,7 +4385,7 @@ async function ensureOverlayForToken(tokenId, items) {
 function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
 }
-function rollDice(sides, modifier = 0, count = 1) {
+function rollDice(sides, modifier2 = 0, count = 1) {
   const safeSides = clamp(Number(sides) || 0, 2, Number.MAX_SAFE_INTEGER);
   const safeCount = clamp(Number(count) || 0, 1, 100);
   const rolls = Array.from({ length: safeCount }, () => Math.floor(Math.random() * safeSides) + 1);
@@ -4366,8 +4396,8 @@ function rollDice(sides, modifier = 0, count = 1) {
     count: safeCount,
     sides: safeSides,
     subtotal,
-    modifier: Number(modifier) || 0,
-    total: subtotal + (Number(modifier) || 0)
+    modifier: Number(modifier2) || 0,
+    total: subtotal + (Number(modifier2) || 0)
   };
 }
 function calculateAccuracy(attackSkill, attackBonuses = 0, attackPenalties = 0, defenseBonuses = 0, defensePenalties = 0, parry = 0) {
@@ -4612,8 +4642,8 @@ function formatRawDiceRolls(result) {
   return result.rolls.join(", ");
 }
 function formatDiceRollsWithModifier(result) {
-  const modifier = Number(result.modifier) || 0;
-  return result.rolls.map((roll) => (Number(roll) || 0) + modifier).join(", ");
+  const modifier2 = Number(result.modifier) || 0;
+  return result.rolls.map((roll) => (Number(roll) || 0) + modifier2).join(", ");
 }
 function buildDiceRollSummary(diceLabel, result) {
   return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], sum ${result.subtotal}, with modifier ${formatDiceRollsWithModifier(result)}`;
@@ -4638,11 +4668,11 @@ function formatDiceDebug(label, result) {
     `With Modifier: ${formatDiceRollsWithModifier(result)}`
   ].join("\n");
 }
-function rollSkillCheck(skillValue, modifier = 0) {
+function rollSkillCheck(skillValue, modifier2 = 0) {
   const baseSkill = clamp(Number(skillValue) || 0, 0, 10);
   const rollPrimary = Math.floor(Math.random() * 100) + 1;
   const rollSecondary = Math.floor(Math.random() * 100) + 1;
-  const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier) || 0);
+  const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier2) || 0);
   const totalSecondary = rollSecondary;
   let result = totalPrimary > totalSecondary ? "Check Passed" : "Check Failed";
   let outcome = result === "Check Passed" ? "success" : "failure";
@@ -4657,7 +4687,7 @@ function rollSkillCheck(skillValue, modifier = 0) {
     rollPrimary,
     rollSecondary,
     baseSkill,
-    modifier: Number(modifier) || 0,
+    modifier: Number(modifier2) || 0,
     totalPrimary,
     totalSecondary,
     result,
@@ -4955,8 +4985,8 @@ async function performPublicGmRoll() {
   }
   const dice = Number(ui.publicDiceSides.value) || 20;
   const count = Number(ui.publicDiceCount.value) || 1;
-  const modifier = Number(ui.publicDiceModifier.value) || 0;
-  const result = rollDice(dice, modifier, count);
+  const modifier2 = Number(ui.publicDiceModifier.value) || 0;
+  const result = rollDice(dice, modifier2, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
   await pushSharedLogEntry(
@@ -4973,9 +5003,9 @@ async function performPublicSkillRoll() {
   }
   const label = ui.skillLabel.value.trim() || "Skill Check";
   const skillLevel = clamp(Number(ui.skillLevel.value) || 0, 0, 10);
-  const modifier = Number(ui.skillModifier.value) || 0;
+  const modifier2 = Number(ui.skillModifier.value) || 0;
   const isPrivate = Boolean(ui.skillPrivate?.checked);
-  const result = rollSkillCheck(skillLevel, modifier);
+  const result = rollSkillCheck(skillLevel, modifier2);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${label}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   const debugBody = formatSkillDebug(label, result);
   const statusKind = isResolvedCheckResultSuccess(result.result) ? "success" : "error";
@@ -5001,8 +5031,8 @@ function performPrivateGmRoll() {
   }
   const dice = Number(ui.privateDiceSides.value) || 20;
   const count = Number(ui.privateDiceCount.value) || 1;
-  const modifier = Number(ui.privateDiceModifier.value) || 0;
-  const result = rollDice(dice, modifier, count);
+  const modifier2 = Number(ui.privateDiceModifier.value) || 0;
+  const result = rollDice(dice, modifier2, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
   pushPrivateEntry(`GM Private ${diceLabel}`, formatDiceDebug(playerName || "GM Private Dice", result));

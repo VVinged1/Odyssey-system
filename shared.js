@@ -1,4 +1,4 @@
-import OBR, { Command, buildImage, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
 
 export { OBR };
@@ -39,8 +39,13 @@ const OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 },
 ];
-const OVERLAY_KIND = "svg";
-const FIXED_OVERLAY_KINDS = [OVERLAY_KIND];
+const FIXED_OVERLAY_KINDS = [
+  "outer-base",
+  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
+  "torso-ring",
+  "special-ring",
+  "shield-ring",
+];
 const overlayEnsureQueue = new Map();
 const OVERLAY_UPDATE_DELAY_MS = 75;
 let cachedGridDpi = null;
@@ -629,10 +634,53 @@ function getSpecialPartColor(part) {
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
 
+function buildRingItem(
+  token,
+  metrics,
+  kind,
+  commands,
+  fillColor,
+  zIndex = 0,
+  fillRule = "nonzero",
+  signature = "",
+  itemVisible = true,
+) {
+  return buildPath()
+    .name(`${kind}: ${getCharacterName(token)}`)
+    .commands(commands)
+    .fillRule(fillRule)
+    .fillColor(fillColor)
+    .fillOpacity(1)
+    .strokeColor(RING_COLORS.border)
+    .strokeOpacity(1)
+    .strokeWidth(OVERLAY_STROKE_WIDTH)
+    .position(metrics.center)
+    .rotation(0)
+    .zIndex((token.zIndex ?? 0) + 100 + zIndex)
+    .visible(itemVisible && token.visible !== false)
+    .attachedTo(token.id)
+    .disableAttachmentBehavior(["ROTATION"])
+    .layer("ATTACHMENT")
+    .locked(true)
+    .disableHit(true)
+    .metadata({
+      [OVERLAY_KEY]: token.id,
+      kind,
+      visualVersion: VISUAL_VERSION,
+      signature,
+    })
+    .build();
+}
+
 function applyOverlayItemState(target, source) {
   target.name = source.name;
-  target.image = source.image;
-  target.grid = source.grid;
+  target.commands = source.commands;
+  target.fillRule = source.fillRule;
+  target.fillColor = source.fillColor;
+  target.fillOpacity = source.fillOpacity;
+  target.strokeColor = source.strokeColor;
+  target.strokeOpacity = source.strokeOpacity;
+  target.strokeWidth = source.strokeWidth;
   target.position = source.position;
   target.rotation = source.rotation;
   target.zIndex = source.zIndex;
@@ -652,7 +700,6 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
   return overlayItems.every((item) => {
     const kind = String(item.metadata?.kind ?? "");
     const valid =
-      item.type === "IMAGE" &&
       item.attachedTo === token.id &&
       Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION &&
       expectedKinds.includes(kind) &&
@@ -913,36 +960,94 @@ export async function updateTrackerData(tokenId, updater) {
   });
 }
 
-export function buildOverlayItems(token, data, metrics) {
-  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
-  const image = buildImage(
-    {
-      url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-      mime: "image/svg+xml",
-      width,
-      height,
-    },
-    { dpi: 1, offset: { x: width / 2, y: height / 2 } },
-  )
-    .name(`HP overlay: ${getCharacterName(token)}`)
-    .position(metrics.center)
-    .rotation(0)
-    .zIndex((token.zIndex ?? 0) + 100)
-    .visible(token.visible !== false)
-    .attachedTo(token.id)
-    .disableAttachmentBehavior(["ROTATION"])
-    .layer("ATTACHMENT")
-    .locked(true)
-    .disableHit(true)
-    .metadata({
-      [OVERLAY_KEY]: token.id,
-      kind: OVERLAY_KIND,
-      visualVersion: VISUAL_VERSION,
-      signature,
-    })
-    .build();
+export function buildOverlayItems(token, data, metrics, signature = "") {
+  const items = [];
+  const specialVisible = hasConfiguredSpecial(data);
+  const shieldVisible = hasConfiguredShield(data);
 
-  return [image];
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "outer-base",
+      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
+      RING_COLORS.base,
+      0,
+      "evenodd",
+      signature,
+      true,
+    ),
+  );
+
+  for (const segment of OUTER_SEGMENTS) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        `segment-${segment.part}`,
+        buildSectorCommands(
+          metrics.outerRadius,
+          metrics.outerInnerRadius,
+          segment.angle,
+          segment.span,
+        ),
+        getPartColor(data.body[segment.part]),
+        1,
+        "nonzero",
+        signature,
+        true,
+      ),
+    );
+  }
+
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "torso-ring",
+      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
+      getPartColor(data.body.Torso),
+      2,
+      "evenodd",
+      signature,
+      true,
+    ),
+  );
+
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "special-ring",
+      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
+      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+      3,
+      "evenodd",
+      signature,
+      specialVisible,
+    ),
+  );
+
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "shield-ring",
+      buildAnnulusCommands(
+        metrics.shieldOuterRadius,
+        metrics.shieldInnerRadius,
+        0,
+        metrics.shieldOffsetY,
+      ),
+      getPartColor(data.body[SHIELD_PART_NAME]),
+      4,
+      "evenodd",
+      signature,
+      shieldVisible,
+    ),
+  );
+
+  return items;
 }
 
 function getExpectedOverlayKinds(data) {

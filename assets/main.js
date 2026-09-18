@@ -3917,8 +3917,13 @@ var OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 }
 ];
-var OVERLAY_KIND = "svg";
-var FIXED_OVERLAY_KINDS = [OVERLAY_KIND];
+var FIXED_OVERLAY_KINDS = [
+  "outer-base",
+  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
+  "torso-ring",
+  "special-ring",
+  "shield-ring"
+];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
 var OVERLAY_UPDATE_DELAY_MS = 75;
 var cachedGridDpi = null;
@@ -4368,10 +4373,23 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
+function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "", itemVisible = true) {
+  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(OVERLAY_STROKE_WIDTH).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+    [OVERLAY_KEY]: token.id,
+    kind,
+    visualVersion: VISUAL_VERSION,
+    signature
+  }).build();
+}
 function applyOverlayItemState(target, source) {
   target.name = source.name;
-  target.image = source.image;
-  target.grid = source.grid;
+  target.commands = source.commands;
+  target.fillRule = source.fillRule;
+  target.fillColor = source.fillColor;
+  target.fillOpacity = source.fillOpacity;
+  target.strokeColor = source.strokeColor;
+  target.strokeOpacity = source.strokeOpacity;
+  target.strokeWidth = source.strokeWidth;
   target.position = source.position;
   target.rotation = source.rotation;
   target.zIndex = source.zIndex;
@@ -4388,49 +4406,13 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
   const seenKinds = /* @__PURE__ */ new Set();
   return overlayItems.every((item) => {
     const kind = String(item.metadata?.kind ?? "");
-    const valid = item.type === "IMAGE" && item.attachedTo === token.id && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && expectedKinds.includes(kind) && !seenKinds.has(kind);
+    const valid = item.attachedTo === token.id && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && expectedKinds.includes(kind) && !seenKinds.has(kind);
     seenKinds.add(kind);
     return valid;
   });
 }
 function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
-}
-function commandsToSvgPath(commands) {
-  return commands.map((command) => {
-    const [type, x = 0, y = 0] = command;
-    if (type === Command.MOVE) {
-      return `M ${roundMetric(x)} ${roundMetric(y)}`;
-    }
-    if (type === Command.LINE) {
-      return `L ${roundMetric(x)} ${roundMetric(y)}`;
-    }
-    if (type === Command.CLOSE) {
-      return "Z";
-    }
-    return "";
-  }).filter(Boolean).join(" ");
-}
-function buildOverlayBounds(metrics, data) {
-  const specialActive = hasConfiguredSpecial(data);
-  const shieldActive = hasConfiguredShield(data);
-  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
-  const horizontalExtent = Math.max(
-    ringRadius,
-    shieldActive ? metrics.shieldOuterRadius : 0
-  );
-  const topExtent = Math.max(
-    ringRadius,
-    shieldActive ? Math.abs(metrics.shieldOffsetY) + metrics.shieldOuterRadius : 0
-  );
-  const bottomExtent = ringRadius;
-  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
-  return {
-    minX: -horizontalExtent - padding,
-    maxX: horizontalExtent + padding,
-    minY: -topExtent - padding,
-    maxY: bottomExtent + padding
-  };
 }
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = BODY_ORDER.map((partName) => {
@@ -4455,69 +4437,6 @@ function buildOverlaySignature(token, data, metrics) {
     bodySignature
   ].join(";");
 }
-function buildOverlaySvgMarkup(token, data, metrics) {
-  const layers = [
-    {
-      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
-      fill: RING_COLORS.base,
-      fillRule: "evenodd"
-    },
-    ...OUTER_SEGMENTS.map((segment) => ({
-      d: commandsToSvgPath(
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span
-        )
-      ),
-      fill: getPartColor(data.body[segment.part]),
-      fillRule: "nonzero"
-    })),
-    {
-      d: commandsToSvgPath(
-        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
-      ),
-      fill: getPartColor(data.body.Torso),
-      fillRule: "evenodd"
-    }
-  ];
-  if (hasConfiguredSpecial(data)) {
-    layers.push({
-      d: commandsToSvgPath(
-        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
-      ),
-      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      fillRule: "evenodd"
-    });
-  }
-  if (hasConfiguredShield(data)) {
-    layers.push({
-      d: commandsToSvgPath(
-        buildAnnulusCommands(
-          metrics.shieldOuterRadius,
-          metrics.shieldInnerRadius,
-          0,
-          metrics.shieldOffsetY
-        )
-      ),
-      fill: getPartColor(data.body[SHIELD_PART_NAME]),
-      fillRule: "evenodd"
-    });
-  }
-  const bounds = buildOverlayBounds(metrics, data);
-  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
-  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
-    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
-  ).join("")}</svg>`;
-  return {
-    svg,
-    width,
-    height,
-    signature: buildOverlaySignature(token, data, metrics)
-  };
-}
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -4528,23 +4447,88 @@ async function updateTrackerData(tokenId, updater) {
     );
   });
 }
-function buildOverlayItems(token, data, metrics) {
-  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
-  const image = buildImage(
-    {
-      url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-      mime: "image/svg+xml",
-      width,
-      height
-    },
-    { dpi: 1, offset: { x: width / 2, y: height / 2 } }
-  ).name(`HP overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind: OVERLAY_KIND,
-    visualVersion: VISUAL_VERSION,
-    signature
-  }).build();
-  return [image];
+function buildOverlayItems(token, data, metrics, signature = "") {
+  const items = [];
+  const specialVisible = hasConfiguredSpecial(data);
+  const shieldVisible = hasConfiguredShield(data);
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "outer-base",
+      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
+      RING_COLORS.base,
+      0,
+      "evenodd",
+      signature,
+      true
+    )
+  );
+  for (const segment of OUTER_SEGMENTS) {
+    items.push(
+      buildRingItem(
+        token,
+        metrics,
+        `segment-${segment.part}`,
+        buildSectorCommands(
+          metrics.outerRadius,
+          metrics.outerInnerRadius,
+          segment.angle,
+          segment.span
+        ),
+        getPartColor(data.body[segment.part]),
+        1,
+        "nonzero",
+        signature,
+        true
+      )
+    );
+  }
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "torso-ring",
+      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
+      getPartColor(data.body.Torso),
+      2,
+      "evenodd",
+      signature,
+      true
+    )
+  );
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "special-ring",
+      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
+      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+      3,
+      "evenodd",
+      signature,
+      specialVisible
+    )
+  );
+  items.push(
+    buildRingItem(
+      token,
+      metrics,
+      "shield-ring",
+      buildAnnulusCommands(
+        metrics.shieldOuterRadius,
+        metrics.shieldInnerRadius,
+        0,
+        metrics.shieldOffsetY
+      ),
+      getPartColor(data.body[SHIELD_PART_NAME]),
+      4,
+      "evenodd",
+      signature,
+      shieldVisible
+    )
+  );
+  return items;
 }
 function getExpectedOverlayKinds(data) {
   return FIXED_OVERLAY_KINDS;

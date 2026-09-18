@@ -2837,35 +2837,31 @@ function renderAmmunitionBlock(odyssey) {
       <div class="ammo-entry">
         <label class="field-stack"><span class="field-label">Name</span>
           <input type="text" value="${escapeHtml(ammo.name)}" data-ammo-id="${escapeHtml(ammo.id)}" data-ammo-edit="name"></label>
-        <div class="form-grid">
+        <div class="ammo-stats">
           ${numberField(ammo, "damage", "Damage / Round")}
           ${numberField(ammo, "penetration", "Armor Penetration", -999)}
           ${numberField(ammo, "quantity", "Reserve", 0, 999999)}
         </div>
-        <button type="button" class="danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}">Remove Ammo</button>
+        <div class="ammo-actions">
+          <button type="button" class="danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}">Remove Ammo</button>
+        </div>
       </div>`).join("") || '<div class="empty">No ammunition.</div>'}
-	<div class="form-grid">
+	<div class="ammo-new-form">
 	  <label class="field-stack">
 		<span class="field-label">Ammunition Name</span>
 		<input type="text" data-ammo-field="new-name" placeholder="New ammunition">
 	  </label>
 
-	  <label class="field-stack">
-		<span class="field-label">Damage / Round</span>
-		<input type="number" min="0" max="999" value="0" data-ammo-field="new-damage">
-	  </label>
-
-	  <label class="field-stack">
-		<span class="field-label">Armor Penetration</span>
-		<input type="number" min="-999" max="999" value="0" data-ammo-field="new-penetration">
-	  </label>
-
-	  <label class="field-stack">
-		<span class="field-label">Reserve</span>
-		<input type="number" min="0" max="999999" value="0" data-ammo-field="new-quantity">
-	  </label>
+	  <div class="ammo-stats">
+		<label class="field-stack"><span class="field-label">Damage / Round</span>
+		  <input type="number" min="0" max="999" value="0" data-ammo-field="new-damage"></label>
+		<label class="field-stack"><span class="field-label">Armor Penetration</span>
+		  <input type="number" min="-999" max="999" value="0" data-ammo-field="new-penetration"></label>
+		<label class="field-stack"><span class="field-label">Reserve</span>
+		  <input type="number" min="0" max="999999" value="0" data-ammo-field="new-quantity"></label>
+	  </div>
 	</div>
-    <button type="button" class="secondary" data-action="ammo-add">Add Ammunition</button>
+    <div class="ammo-actions"><button type="button" class="secondary" data-action="ammo-add">Add Ammunition</button></div>
   `, false);
 }
 
@@ -2874,13 +2870,13 @@ function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
   const identity = weapon ? `data-weapon-type="${type}" data-weapon-index="${index}"` : "";
   return `
     <div class="weapon-entry" ${identity}>
-      <div class="form-grid">
+      <div class="weapon-form-grid">
         <label class="field-stack"><span class="field-label">Type</span>
           <select data-weapon-draft="type" ${disabledAttr}>
             <option value="melee" ${!ranged ? "selected" : ""}>Melee</option>
             <option value="ranged" ${ranged ? "selected" : ""}>Ranged</option>
           </select></label>
-        <label class="field-stack"><span class="field-label">Weapon</span>
+        <label class="field-stack weapon-name-field"><span class="field-label">Weapon</span>
           <input type="text" value="${escapeHtml(weapon?.name ?? "")}" data-weapon-draft="name" ${disabledAttr}></label>
         <label class="field-stack"><span class="field-label">Accuracy</span>
           <input type="number" min="-999" max="999" value="${weapon?.accuracy ?? 0}" data-weapon-draft="accuracy" ${disabledAttr}></label>
@@ -2888,8 +2884,8 @@ function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
           <input type="number" min="-999" max="999" value="${weapon?.damage ?? 0}" data-weapon-draft="damage" ${disabledAttr}></label>
         <label class="field-stack weapon-ranged-fields ${ranged ? "" : "hidden"}"><span class="field-label">Magazine Capacity</span>
           <input type="number" min="0" max="999" step="1" value="${weapon?.capacity ?? 0}" data-weapon-draft="capacity" ${disabledAttr}></label>
-        ${weapon && ranged ? `<div class="field-stack"><span class="field-label">Loaded</span>
-          <span>${weapon.loaded} / ${weapon.capacity} (${escapeHtml(ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId)?.name || "Empty")})</span></div>` : ""}
+        ${weapon && ranged ? `<div class="weapon-loaded"><span class="field-label">Loaded</span>
+          <strong>${weapon.loaded} / ${weapon.capacity}</strong><span>${escapeHtml(ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId)?.name || "Empty")}</span></div>` : ""}
       </div>
       ${weapon && ranged ? `
         <details data-section-key="ammo-compatible:${escapeHtml(weapon.id)}"><summary>Compatible Ammunition</summary>
@@ -2897,17 +2893,21 @@ function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
             data-weapon-draft="compatible" data-ammo-id="${escapeHtml(ammo.id)}"
             ${weapon.ammoIds.includes(ammo.id) ? "checked" : ""} ${disabledAttr}>${escapeHtml(ammo.name)}</label>`).join("")}
         </details>
-        <div class="form-grid">
+        <div class="weapon-reload">
           <label class="field-stack"><span class="field-label">Reload Ammo</span>
             <select data-reload-ammo="${index}" ${disabledAttr}>
               ${ammunition.filter((ammo) => weapon.ammoIds.includes(ammo.id)).map((ammo) => `<option value="${escapeHtml(ammo.id)}" ${ammo.id === weapon.loadedAmmoId ? "selected" : ""}>${escapeHtml(ammo.name)} (${ammo.quantity})</option>`).join("")}
             </select></label>
-          <button type="button" data-action="ammo-reload" data-ranged-index="${index}" ${disabledAttr}>Reload</button>
-          <button type="button" class="secondary" data-action="ammo-unload" data-ranged-index="${index}" ${disabledAttr}>Unload</button>
+          <div class="weapon-actions">
+            <button type="button" data-action="ammo-reload" data-ranged-index="${index}" ${disabledAttr}>Reload</button>
+            <button type="button" class="secondary" data-action="ammo-unload" data-ranged-index="${index}" ${disabledAttr}>Unload</button>
+          </div>
         </div>
       ` : ""}
-      <button type="button" class="secondary" data-action="weapon-save" ${identity} ${disabledAttr}>Save Weapon</button>
-      ${weapon ? `<button type="button" class="danger" data-action="weapon-remove" ${identity} ${disabledAttr}>Remove Weapon</button>` : ""}
+      <div class="weapon-actions weapon-actions-footer">
+        <button type="button" class="secondary" data-action="weapon-save" ${identity} ${disabledAttr}>Save Weapon</button>
+        ${weapon ? `<button type="button" class="danger" data-action="weapon-remove" ${identity} ${disabledAttr}>Remove Weapon</button>` : ""}
+      </div>
     </div>`;
 }
 

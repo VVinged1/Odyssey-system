@@ -3481,61 +3481,119 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
-var PathBuilder = class extends GenericItemBuilder {
-  constructor(player) {
+// node_modules/@owlbear-rodeo/sdk/lib/builders/ImageBuilder.js
+var ImageBuilder = class extends GenericItemBuilder {
+  constructor(player, image, grid) {
     super(player);
-    this._commands = [];
-    this._fillRule = "nonzero";
-    this._style = {
-      fillColor: "black",
-      fillOpacity: 1,
-      strokeColor: "white",
-      strokeOpacity: 1,
-      strokeWidth: 5,
-      strokeDash: []
+    this._image = image;
+    this._grid = grid;
+    this._item.name = "Image";
+    this._text = {
+      richText: [
+        {
+          type: "paragraph",
+          children: [{ text: "" }]
+        }
+      ],
+      plainText: "",
+      style: {
+        padding: 8,
+        fontFamily: "Roboto",
+        fontSize: 24,
+        fontWeight: 400,
+        textAlign: "CENTER",
+        textAlignVertical: "BOTTOM",
+        fillColor: "white",
+        fillOpacity: 1,
+        strokeColor: "white",
+        strokeOpacity: 1,
+        strokeWidth: 0,
+        lineHeight: 1.5
+      },
+      type: "PLAIN",
+      width: "AUTO",
+      height: "AUTO"
     };
-    this._item.name = "Path";
-    this._item.layer = "DRAWING";
+    this._textItemType = "LABEL";
   }
-  commands(commands) {
-    this._commands = commands;
+  text(text) {
+    this._text = text;
     return this.self();
   }
-  fillRule(fillRule) {
-    this._fillRule = fillRule;
+  textItemType(textItemType) {
+    this._textItemType = textItemType;
     return this.self();
   }
-  style(style) {
-    this._style = style;
+  textWidth(width) {
+    this._text.width = width;
     return this.self();
   }
-  fillColor(fillColor) {
-    this._style.fillColor = fillColor;
+  textHeight(height) {
+    this._text.height = height;
     return this.self();
   }
-  fillOpacity(fillOpacity) {
-    this._style.fillOpacity = fillOpacity;
+  richText(richText) {
+    this._text.richText = richText;
     return this.self();
   }
-  strokeColor(strokeColor) {
-    this._style.strokeColor = strokeColor;
+  plainText(plainText) {
+    this._text.plainText = plainText;
     return this.self();
   }
-  strokeOpacity(strokeOpacity) {
-    this._style.strokeOpacity = strokeOpacity;
+  textType(textType) {
+    this._text.type = textType;
     return this.self();
   }
-  strokeWidth(strokeWidth) {
-    this._style.strokeWidth = strokeWidth;
+  textPadding(padding) {
+    this._text.style.padding = padding;
     return this.self();
   }
-  strokeDash(strokeDash) {
-    this._style.strokeDash = strokeDash;
+  fontFamily(fontFamily) {
+    this._text.style.fontFamily = fontFamily;
+    return this.self();
+  }
+  fontSize(fontSize) {
+    this._text.style.fontSize = fontSize;
+    return this.self();
+  }
+  fontWeight(fontWeight) {
+    this._text.style.fontWeight = fontWeight;
+    return this.self();
+  }
+  textAlign(textAlign) {
+    this._text.style.textAlign = textAlign;
+    return this.self();
+  }
+  textAlignVertical(textAlignVertical) {
+    this._text.style.textAlignVertical = textAlignVertical;
+    return this.self();
+  }
+  textFillColor(fillColor) {
+    this._text.style.fillColor = fillColor;
+    return this.self();
+  }
+  textFillOpacity(fillOpacity) {
+    this._text.style.fillOpacity = fillOpacity;
+    return this.self();
+  }
+  textStrokeColor(strokeColor) {
+    this._text.style.strokeColor = strokeColor;
+    return this.self();
+  }
+  textStrokeOpacity(strokeOpacity) {
+    this._text.style.strokeOpacity = strokeOpacity;
+    return this.self();
+  }
+  textStrokeWidth(strokeWidth) {
+    this._text.style.strokeWidth = strokeWidth;
+    return this.self();
+  }
+  textLineHeight(lineHeight) {
+    this._text.style.lineHeight = lineHeight;
     return this.self();
   }
   build() {
-    return Object.assign(Object.assign({}, this._item), { type: "PATH", commands: this._commands, fillRule: this._fillRule, style: this._style });
+    return Object.assign(Object.assign({}, this._item), { type: "IMAGE", image: this._image, grid: this._grid, text: this._text, textItemType: this._textItemType });
   }
 };
 
@@ -3691,8 +3749,8 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildPath() {
-  return new PathBuilder(playerApi);
+function buildImage(image, grid) {
+  return new ImageBuilder(playerApi, image, grid);
 }
 var lib_default = OBR;
 
@@ -3752,6 +3810,7 @@ var RING_COLORS = {
   base: "#000000",
   border: "#050505"
 };
+var OVERLAY_STROKE_WIDTH = 0.75;
 var OUTER_SEGMENTS = [
   { part: "Head", angle: -90, span: 30 },
   { part: "R.Arm", angle: -18, span: 30 },
@@ -3759,14 +3818,10 @@ var OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 }
 ];
-var FIXED_OVERLAY_KINDS = [
-  "outer-base",
-  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
-  "torso-ring",
-  "special-ring",
-  "shield-ring"
-];
+var OVERLAY_KIND = "svg";
+var FIXED_OVERLAY_KINDS = [OVERLAY_KIND];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
+var OVERLAY_UPDATE_DELAY_MS = 75;
 var cachedGridDpi = null;
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
@@ -4157,23 +4212,10 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "", itemVisible = true) {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind,
-    visualVersion: VISUAL_VERSION,
-    signature
-  }).build();
-}
 function applyOverlayItemState(target, source) {
   target.name = source.name;
-  target.commands = source.commands;
-  target.fillRule = source.fillRule;
-  target.fillColor = source.fillColor;
-  target.fillOpacity = source.fillOpacity;
-  target.strokeColor = source.strokeColor;
-  target.strokeOpacity = source.strokeOpacity;
-  target.strokeWidth = source.strokeWidth;
+  target.image = source.image;
+  target.grid = source.grid;
   target.position = source.position;
   target.rotation = source.rotation;
   target.zIndex = source.zIndex;
@@ -4190,7 +4232,7 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
   const seenKinds = /* @__PURE__ */ new Set();
   return overlayItems.every((item) => {
     const kind = String(item.metadata?.kind ?? "");
-    const valid = item.attachedTo === token.id && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && expectedKinds.includes(kind) && !seenKinds.has(kind);
+    const valid = item.type === "IMAGE" && item.attachedTo === token.id && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && expectedKinds.includes(kind) && !seenKinds.has(kind);
     seenKinds.add(kind);
     return valid;
   });
@@ -4198,17 +4240,47 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
 function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
+function commandsToSvgPath(commands) {
+  return commands.map((command) => {
+    const [type, x = 0, y = 0] = command;
+    if (type === Command.MOVE) {
+      return `M ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.LINE) {
+      return `L ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.CLOSE) {
+      return "Z";
+    }
+    return "";
+  }).filter(Boolean).join(" ");
+}
+function buildOverlayBounds(metrics, data) {
+  const specialActive = hasConfiguredSpecial(data);
+  const shieldActive = hasConfiguredShield(data);
+  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
+  const horizontalExtent = Math.max(
+    ringRadius,
+    shieldActive ? metrics.shieldOuterRadius : 0
+  );
+  const topExtent = Math.max(
+    ringRadius,
+    shieldActive ? Math.abs(metrics.shieldOffsetY) + metrics.shieldOuterRadius : 0
+  );
+  const bottomExtent = ringRadius;
+  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
+  return {
+    minX: -horizontalExtent - padding,
+    maxX: horizontalExtent + padding,
+    minY: -topExtent - padding,
+    maxY: bottomExtent + padding
+  };
+}
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = BODY_ORDER.map((partName) => {
     const part = data.body?.[partName] ?? {};
-    return [
-      partName,
-      Number(part.current) || 0,
-      Number(part.max) || 0,
-      Number(part.armor) || 0,
-      Number(part.minor) || 0,
-      Number(part.serious) || 0
-    ].join(":");
+    const color = partName === SPECIAL_PART_NAME ? getSpecialPartColor(part) : getPartColor(part);
+    return `${partName}:${color}`;
   }).join("|");
   return [
     VISUAL_VERSION,
@@ -4222,8 +4294,73 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.shieldOuterRadius),
     roundMetric(metrics.shieldInnerRadius),
     roundMetric(metrics.shieldOffsetY),
+    hasConfiguredSpecial(data),
+    hasConfiguredShield(data),
     bodySignature
   ].join(";");
+}
+function buildOverlaySvgMarkup(token, data, metrics) {
+  const layers = [
+    {
+      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
+      fill: RING_COLORS.base,
+      fillRule: "evenodd"
+    },
+    ...OUTER_SEGMENTS.map((segment) => ({
+      d: commandsToSvgPath(
+        buildSectorCommands(
+          metrics.outerRadius,
+          metrics.outerInnerRadius,
+          segment.angle,
+          segment.span
+        )
+      ),
+      fill: getPartColor(data.body[segment.part]),
+      fillRule: "nonzero"
+    })),
+    {
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
+      ),
+      fill: getPartColor(data.body.Torso),
+      fillRule: "evenodd"
+    }
+  ];
+  if (hasConfiguredSpecial(data)) {
+    layers.push({
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
+      ),
+      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+      fillRule: "evenodd"
+    });
+  }
+  if (hasConfiguredShield(data)) {
+    layers.push({
+      d: commandsToSvgPath(
+        buildAnnulusCommands(
+          metrics.shieldOuterRadius,
+          metrics.shieldInnerRadius,
+          0,
+          metrics.shieldOffsetY
+        )
+      ),
+      fill: getPartColor(data.body[SHIELD_PART_NAME]),
+      fillRule: "evenodd"
+    });
+  }
+  const bounds = buildOverlayBounds(metrics, data);
+  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
+  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
+    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
+  ).join("")}</svg>`;
+  return {
+    svg,
+    width,
+    height,
+    signature: buildOverlaySignature(token, data, metrics)
+  };
 }
 function applyBodyEffects(body, bodyEffects) {
   if (!bodyEffects || typeof bodyEffects !== "object") return;
@@ -4311,88 +4448,23 @@ async function updateTrackerData(tokenId, updater) {
     );
   });
 }
-function buildOverlayItems(token, data, metrics, signature = "") {
-  const items = [];
-  const specialVisible = hasConfiguredSpecial(data);
-  const shieldVisible = hasConfiguredShield(data);
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd",
-      signature,
-      true
-    )
-  );
-  for (const segment of OUTER_SEGMENTS) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `segment-${segment.part}`,
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span
-        ),
-        getPartColor(data.body[segment.part]),
-        1,
-        "nonzero",
-        signature,
-        true
-      )
-    );
-  }
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd",
-      signature,
-      true
-    )
-  );
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "special-ring",
-      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      3,
-      "evenodd",
-      signature,
-      specialVisible
-    )
-  );
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "shield-ring",
-      buildAnnulusCommands(
-        metrics.shieldOuterRadius,
-        metrics.shieldInnerRadius,
-        0,
-        metrics.shieldOffsetY
-      ),
-      getPartColor(data.body[SHIELD_PART_NAME]),
-      4,
-      "evenodd",
-      signature,
-      shieldVisible
-    )
-  );
-  return items;
+function buildOverlayItems(token, data, metrics) {
+  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
+  const image = buildImage(
+    {
+      url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+      mime: "image/svg+xml",
+      width,
+      height
+    },
+    { dpi: 1, offset: { x: width / 2, y: height / 2 } }
+  ).name(`HP overlay: ${getCharacterName(token)}`).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+    [OVERLAY_KEY]: token.id,
+    kind: OVERLAY_KIND,
+    visualVersion: VISUAL_VERSION,
+    signature
+  }).build();
+  return [image];
 }
 function getExpectedOverlayKinds(data) {
   return FIXED_OVERLAY_KINDS;
@@ -4452,15 +4524,39 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
     buildOverlayItems(token, data, metrics, overlaySignature)
   );
 }
-async function ensureOverlayForToken(tokenId, items) {
-  const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
-  const next = previous.catch(() => {
-  }).then(() => ensureOverlayForTokenInternal(tokenId, items));
-  overlayEnsureQueue.set(tokenId, next);
+function ensureOverlayForToken(tokenId) {
+  let pending = overlayEnsureQueue.get(tokenId);
+  if (!pending) {
+    pending = { timer: null, running: false, waiters: [] };
+    overlayEnsureQueue.set(tokenId, pending);
+  }
+  return new Promise((resolve, reject) => {
+    pending.waiters.push({ resolve, reject });
+    if (pending.running) return;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      pending.timer = null;
+      void flushOverlayEnsure(tokenId, pending);
+    }, OVERLAY_UPDATE_DELAY_MS);
+  });
+}
+async function flushOverlayEnsure(tokenId, pending) {
+  if (pending.running) return;
+  pending.running = true;
+  const waiters = pending.waiters.splice(0);
   try {
-    await next;
+    await ensureOverlayForTokenInternal(tokenId);
+    waiters.forEach(({ resolve }) => resolve());
+  } catch (error) {
+    waiters.forEach(({ reject }) => reject(error));
   } finally {
-    if (overlayEnsureQueue.get(tokenId) === next) {
+    pending.running = false;
+    if (pending.waiters.length) {
+      pending.timer = setTimeout(() => {
+        pending.timer = null;
+        void flushOverlayEnsure(tokenId, pending);
+      }, OVERLAY_UPDATE_DELAY_MS);
+    } else {
       overlayEnsureQueue.delete(tokenId);
     }
   }

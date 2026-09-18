@@ -1,4 +1,4 @@
-import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildImage, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
 
 export { OBR };
@@ -31,6 +31,7 @@ const RING_COLORS = {
   base: "#000000",
   border: "#050505",
 };
+const OVERLAY_STROKE_WIDTH = 0.75;
 const OUTER_SEGMENTS = [
   { part: "Head", angle: -90, span: 30 },
   { part: "R.Arm", angle: -18, span: 30 },
@@ -38,14 +39,10 @@ const OUTER_SEGMENTS = [
   { part: "L.Leg", angle: 126, span: 30 },
   { part: "L.Arm", angle: 198, span: 30 },
 ];
-const FIXED_OVERLAY_KINDS = [
-  "outer-base",
-  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
-  "torso-ring",
-  "special-ring",
-  "shield-ring",
-];
+const OVERLAY_KIND = "svg";
+const FIXED_OVERLAY_KINDS = [OVERLAY_KIND];
 const overlayEnsureQueue = new Map();
+const OVERLAY_UPDATE_DELAY_MS = 75;
 let cachedGridDpi = null;
 export const DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
@@ -632,53 +629,10 @@ function getSpecialPartColor(part) {
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
 
-function buildRingItem(
-  token,
-  metrics,
-  kind,
-  commands,
-  fillColor,
-  zIndex = 0,
-  fillRule = "nonzero",
-  signature = "",
-  itemVisible = true,
-) {
-  return buildPath()
-    .name(`${kind}: ${getCharacterName(token)}`)
-    .commands(commands)
-    .fillRule(fillRule)
-    .fillColor(fillColor)
-    .fillOpacity(1)
-    .strokeColor(RING_COLORS.border)
-    .strokeOpacity(1)
-    .strokeWidth(0.75)
-    .position(metrics.center)
-    .rotation(0)
-    .zIndex((token.zIndex ?? 0) + 100 + zIndex)
-    .visible(itemVisible && token.visible !== false)
-    .attachedTo(token.id)
-    .disableAttachmentBehavior(["ROTATION"])
-    .layer("ATTACHMENT")
-    .locked(true)
-    .disableHit(true)
-    .metadata({
-      [OVERLAY_KEY]: token.id,
-      kind,
-      visualVersion: VISUAL_VERSION,
-      signature,
-    })
-    .build();
-}
-
 function applyOverlayItemState(target, source) {
   target.name = source.name;
-  target.commands = source.commands;
-  target.fillRule = source.fillRule;
-  target.fillColor = source.fillColor;
-  target.fillOpacity = source.fillOpacity;
-  target.strokeColor = source.strokeColor;
-  target.strokeOpacity = source.strokeOpacity;
-  target.strokeWidth = source.strokeWidth;
+  target.image = source.image;
+  target.grid = source.grid;
   target.position = source.position;
   target.rotation = source.rotation;
   target.zIndex = source.zIndex;
@@ -698,6 +652,7 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
   return overlayItems.every((item) => {
     const kind = String(item.metadata?.kind ?? "");
     const valid =
+      item.type === "IMAGE" &&
       item.attachedTo === token.id &&
       Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION &&
       expectedKinds.includes(kind) &&
@@ -756,14 +711,10 @@ function buildOverlayBounds(metrics, data) {
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = BODY_ORDER.map((partName) => {
     const part = data.body?.[partName] ?? {};
-    return [
-      partName,
-      Number(part.current) || 0,
-      Number(part.max) || 0,
-      Number(part.armor) || 0,
-      Number(part.minor) || 0,
-      Number(part.serious) || 0,
-    ].join(":");
+    const color = partName === SPECIAL_PART_NAME
+      ? getSpecialPartColor(part)
+      : getPartColor(part);
+    return `${partName}:${color}`;
   }).join("|");
 
   return [
@@ -778,6 +729,8 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.shieldOuterRadius),
     roundMetric(metrics.shieldInnerRadius),
     roundMetric(metrics.shieldOffsetY),
+    hasConfiguredSpecial(data),
+    hasConfiguredShield(data),
     bodySignature,
   ].join(";");
 }
@@ -960,94 +913,36 @@ export async function updateTrackerData(tokenId, updater) {
   });
 }
 
-export function buildOverlayItems(token, data, metrics, signature = "") {
-  const items = [];
-  const specialVisible = hasConfiguredSpecial(data);
-  const shieldVisible = hasConfiguredShield(data);
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-        RING_COLORS.base,
-        0,
-        "evenodd",
-        signature,
-        true,
-      ),
-    );
-
-  for (const segment of OUTER_SEGMENTS) {
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `segment-${segment.part}`,
-        buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
-          segment.angle,
-          segment.span,
-        ),
-        getPartColor(data.body[segment.part]),
-        1,
-        "nonzero",
-        signature,
-        true,
-      ),
-    );
-  }
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd",
+export function buildOverlayItems(token, data, metrics) {
+  const { svg, width, height, signature } = buildOverlaySvgMarkup(token, data, metrics);
+  const image = buildImage(
+    {
+      url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+      mime: "image/svg+xml",
+      width,
+      height,
+    },
+    { dpi: 1, offset: { x: width / 2, y: height / 2 } },
+  )
+    .name(`HP overlay: ${getCharacterName(token)}`)
+    .position(metrics.center)
+    .rotation(0)
+    .zIndex((token.zIndex ?? 0) + 100)
+    .visible(token.visible !== false)
+    .attachedTo(token.id)
+    .disableAttachmentBehavior(["ROTATION"])
+    .layer("ATTACHMENT")
+    .locked(true)
+    .disableHit(true)
+    .metadata({
+      [OVERLAY_KEY]: token.id,
+      kind: OVERLAY_KIND,
+      visualVersion: VISUAL_VERSION,
       signature,
-      true,
-    ),
-  );
+    })
+    .build();
 
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "special-ring",
-      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      3,
-      "evenodd",
-      signature,
-      specialVisible,
-    ),
-  );
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "shield-ring",
-      buildAnnulusCommands(
-        metrics.shieldOuterRadius,
-        metrics.shieldInnerRadius,
-        0,
-        metrics.shieldOffsetY,
-      ),
-      getPartColor(data.body[SHIELD_PART_NAME]),
-      4,
-      "evenodd",
-      signature,
-      shieldVisible,
-    ),
-  );
-
-  return items;
+  return [image];
 }
 
 function getExpectedOverlayKinds(data) {
@@ -1120,18 +1015,42 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   );
 }
 
-export async function ensureOverlayForToken(tokenId, items) {
-  const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
-  const next = previous
-    .catch(() => {})
-    .then(() => ensureOverlayForTokenInternal(tokenId, items));
+export function ensureOverlayForToken(tokenId) {
+  let pending = overlayEnsureQueue.get(tokenId);
+  if (!pending) {
+    pending = { timer: null, running: false, waiters: [] };
+    overlayEnsureQueue.set(tokenId, pending);
+  }
 
-  overlayEnsureQueue.set(tokenId, next);
+  return new Promise((resolve, reject) => {
+    pending.waiters.push({ resolve, reject });
+    if (pending.running) return;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      pending.timer = null;
+      void flushOverlayEnsure(tokenId, pending);
+    }, OVERLAY_UPDATE_DELAY_MS);
+  });
+}
+
+async function flushOverlayEnsure(tokenId, pending) {
+  if (pending.running) return;
+  pending.running = true;
+  const waiters = pending.waiters.splice(0);
 
   try {
-    await next;
+    await ensureOverlayForTokenInternal(tokenId);
+    waiters.forEach(({ resolve }) => resolve());
+  } catch (error) {
+    waiters.forEach(({ reject }) => reject(error));
   } finally {
-    if (overlayEnsureQueue.get(tokenId) === next) {
+    pending.running = false;
+    if (pending.waiters.length) {
+      pending.timer = setTimeout(() => {
+        pending.timer = null;
+        void flushOverlayEnsure(tokenId, pending);
+      }, OVERLAY_UPDATE_DELAY_MS);
+    } else {
       overlayEnsureQueue.delete(tokenId);
     }
   }

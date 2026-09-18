@@ -2861,8 +2861,8 @@ function renderAmmunitionBlock(odyssey) {
 		<label class="field-stack"><span class="field-label">Reserve</span>
 		  <input type="number" min="0" max="999999" value="0" data-ammo-draft="quantity"></label>
 	  </div>
+	  <div class="ammo-actions"><button type="button" class="secondary" data-action="ammo-save">Save Ammo</button></div>
 	</div>
-    <div class="ammo-actions"><button type="button" class="secondary" data-action="ammo-save">Save Ammo</button></div>
   `, false);
 }
 

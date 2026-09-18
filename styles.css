@@ -584,7 +584,7 @@ select {
 }
 
 .ammo-actions button {
-  width: 100%;
+  flex: 1;
 }
 
 .weapon-form-grid {

@@ -2831,37 +2831,38 @@ function renderAmmunitionBlock(odyssey) {
   const numberField = (ammo, field, label, min = 0, max = 999) => `
     <label class="field-stack"><span class="field-label">${label}</span>
       <input type="number" min="${min}" max="${max}" step="1" value="${ammo[field]}"
-        data-ammo-id="${escapeHtml(ammo.id)}" data-ammo-edit="${field}"></label>`;
+        data-ammo-draft="${field}"></label>`;
   return renderCollapsibleSection("Ammunition", `
     ${(odyssey.ammunition ?? []).map((ammo) => `
-      <div class="ammo-entry">
+      <div class="ammo-entry" data-ammo-id="${escapeHtml(ammo.id)}">
         <label class="field-stack"><span class="field-label">Name</span>
-          <input type="text" value="${escapeHtml(ammo.name)}" data-ammo-id="${escapeHtml(ammo.id)}" data-ammo-edit="name"></label>
+          <input type="text" value="${escapeHtml(ammo.name)}" data-ammo-draft="name"></label>
         <div class="ammo-stats">
           ${numberField(ammo, "damage", "Damage / Round")}
           ${numberField(ammo, "penetration", "Armor Penetration", -999)}
           ${numberField(ammo, "quantity", "Reserve", 0, 999999)}
         </div>
         <div class="ammo-actions">
+          <button type="button" class="secondary" data-action="ammo-save" data-ammo-id="${escapeHtml(ammo.id)}">Save Ammo</button>
           <button type="button" class="danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}">Remove Ammo</button>
         </div>
       </div>`).join("") || '<div class="empty">No ammunition.</div>'}
-	<div class="ammo-new-form">
+	<div class="ammo-entry ammo-new-form">
 	  <label class="field-stack">
 		<span class="field-label">Ammunition Name</span>
-		<input type="text" data-ammo-field="new-name" placeholder="New ammunition">
+		<input type="text" data-ammo-draft="name" placeholder="New ammunition">
 	  </label>
 
 	  <div class="ammo-stats">
 		<label class="field-stack"><span class="field-label">Damage / Round</span>
-		  <input type="number" min="0" max="999" value="0" data-ammo-field="new-damage"></label>
+		  <input type="number" min="0" max="999" value="0" data-ammo-draft="damage"></label>
 		<label class="field-stack"><span class="field-label">Armor Penetration</span>
-		  <input type="number" min="-999" max="999" value="0" data-ammo-field="new-penetration"></label>
+		  <input type="number" min="-999" max="999" value="0" data-ammo-draft="penetration"></label>
 		<label class="field-stack"><span class="field-label">Reserve</span>
-		  <input type="number" min="0" max="999999" value="0" data-ammo-field="new-quantity"></label>
+		  <input type="number" min="0" max="999999" value="0" data-ammo-draft="quantity"></label>
 	  </div>
 	</div>
-    <div class="ammo-actions"><button type="button" class="secondary" data-action="ammo-add">Add Ammunition</button></div>
+    <div class="ammo-actions"><button type="button" class="secondary" data-action="ammo-save">Save Ammo</button></div>
   `, false);
 }
 
@@ -2967,6 +2968,36 @@ async function saveWeapon(node) {
     return next;
   });
 }
+
+async function saveAmmunition(node) {
+  if (!isEditable()) throw new Error("Only the GM can edit ammunition.");
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a token first.");
+
+  const row = node.closest(".ammo-entry");
+  if (!row) throw new Error("Ammunition form is missing.");
+  const read = (field) => row.querySelector(`[data-ammo-draft="${field}"]`);
+  const name = String(read("name")?.value ?? "").trim();
+  const ammoId = node.dataset.ammoId;
+  if (!name) throw new Error("Enter an ammunition name first.");
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    const ammunition = next.odyssey.ammunition ??= [];
+    const ammo = ammunition.find((item) => item.id === ammoId);
+    if (ammunition.some((item) => item !== ammo && item.name === name)) throw new Error("Ammunition with this name already exists.");
+    const values = {
+      name,
+      damage: clamp(Number(read("damage")?.value) || 0, 0, 999),
+      penetration: clamp(Number(read("penetration")?.value) || 0, -999, 999),
+      quantity: clamp(Number(read("quantity")?.value) || 0, 0, 999999),
+    };
+    if (ammo) Object.assign(ammo, values);
+    else ammunition.push({ id: crypto.randomUUID(), ...values });
+    return next;
+  });
+}
+
 function renderEnglishWeaponsBlock(data, disabledAttr) {
   const ammunition = data.odyssey.ammunition ?? [];
   const weapons = [
@@ -2994,56 +3025,18 @@ function renderAttackAmmunition(token, draft, manual, disabledAttr) {
       <input type="number" min="1" max="${weapon.loaded}" step="1" value="${Math.min(Number(draft.rounds) || 1, weapon.loaded) || 1}" ${prefix}="rounds" ${disabledAttr} ${weapon.loaded ? "" : "disabled"}></label>`;
 }
 
-async function editAmmunition(action, node, draft = null) {
+async function editAmmunition(action, node) {
   if (!isEditable()) throw new Error("Only the GM can edit ammunition and reload weapons.");
   const token = getCharacterById(activeTokenId);
   if (!token) throw new Error("Select a token first.");
   const index = Number(node.dataset.rangedIndex);
   const ammoId = node.dataset.ammoId;
-  const value = node.type === "checkbox" ? node.checked : node.value;
-  const newId = crypto.randomUUID();
   const reloadId = action === "ammo-reload" ? getActionFieldValue(`[data-reload-ammo="${index}"]`) : "";
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     const data = next.odyssey;
     data.ammunition ??= [];
     const weapon = data.weapons.ranged[index];
-    const ammo = data.ammunition.find((item) => item.id === ammoId);
-	if (action === "ammo-add") {
-	  const name = String(draft?.name ?? "").trim();
-
-	  if (!name) {
-		throw new Error("Enter an ammunition name first.");
-	  }
-
-	  if (data.ammunition.some((item) => item.name === name)) {
-		throw new Error("Ammunition with this name already exists.");
-	  }
-
-	  data.ammunition.push({
-		id: newId,
-		name,
-		damage: clamp(
-		  Number(draft?.damage) || 0,
-		  0,
-		  999,
-		),
-		penetration: clamp(
-		  Number(draft?.penetration) || 0,
-		  -999,
-		  999,
-		),
-		quantity: clamp(
-		  Number(draft?.quantity) || 0,
-		  0,
-		  999999,
-		),
-	  });
-	}
-    if (action === "ammo-edit" && ammo) {
-      const field = node.dataset.ammoEdit;
-      if (["name", "damage", "penetration", "quantity"].includes(field)) ammo[field] = value;
-    }
     if (action === "ammo-remove") {
       if (data.weapons.ranged.some((item) => item.loadedAmmoId === ammoId && item.loaded > 0)) throw new Error("Unload this ammunition before removing it.");
       data.ammunition = data.ammunition.filter((item) => item.id !== ammoId);
@@ -4741,6 +4734,13 @@ function bindUiEvents() {
 	  return;
 	}
 
+	if (action === "ammo-save") {
+	  void saveAmmunition(actionNode).catch((error) => {
+		setStatus(error.message, "error");
+	  });
+	  return;
+	}
+
 	if (action === "weapon-remove") {
 	  const type = actionNode.dataset.weaponType;
 	  const weaponIndex = Number(actionNode.dataset.weaponIndex ?? -1);
@@ -4754,14 +4754,8 @@ function bindUiEvents() {
 	  return;
 	}
 	
-    if (["ammo-add", "ammo-remove", "ammo-reload", "ammo-unload"].includes(action)) {
-      const draft = action === "ammo-add" ? {
-        name: getActionFieldValue('[data-ammo-field="new-name"]'),
-        damage: getActionFieldValue('[data-ammo-field="new-damage"]'),
-        penetration: getActionFieldValue('[data-ammo-field="new-penetration"]'),
-        quantity: getActionFieldValue('[data-ammo-field="new-quantity"]'),
-      } : null;
-      void editAmmunition(action, actionNode, draft).catch((error) => {
+    if (["ammo-remove", "ammo-reload", "ammo-unload"].includes(action)) {
+      void editAmmunition(action, actionNode).catch((error) => {
         setStatus(error.message, "error");
         scheduleRender();
       });
@@ -4910,8 +4904,8 @@ function bindUiEvents() {
       toggleWeaponDraftFields(target);
       return;
     }
-    if (target.dataset.ammoEdit || target.dataset.rangedEdit) {
-      void editAmmunition(target.dataset.ammoEdit ? "ammo-edit" : "ranged-edit", target).catch((error) => {
+    if (target.dataset.rangedEdit) {
+      void editAmmunition("ranged-edit", target).catch((error) => {
         setStatus(error.message, "error");
         scheduleRender();
       });

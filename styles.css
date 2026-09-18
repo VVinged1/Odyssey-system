@@ -629,6 +629,82 @@ select {
   width: 100%;
 }
 
+.combat-form-grid,
+.combat-modifiers {
+  display: grid;
+  gap: 8px;
+}
+
+.combat-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.combat-modifiers {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 10px;
+  background: rgba(7, 16, 31, 0.42);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.combat-value {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 7px 8px;
+  background: rgba(59, 130, 246, 0.09);
+  border: 1px solid rgba(147, 197, 253, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.combat-notes {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.combat-notes summary {
+  cursor: pointer;
+}
+
+.combat-notes > div {
+  padding-top: 7px;
+  line-height: 1.4;
+}
+
+.combat-action button {
+  width: 100%;
+}
+
+.dice-rolls {
+  display: grid;
+  gap: 10px;
+}
+
+.dice-roll-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dice-roll-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 8px;
+}
+
+.dice-roll-fields-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dice-roll-row > button {
+  min-width: 122px;
+}
+
 .ammo-choice {
   display: flex;
   align-items: center;
@@ -659,6 +735,18 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .combat-modifiers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dice-roll-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dice-roll-row > button {
+    width: 100%;
+  }
+
   .weapon-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -677,6 +765,13 @@ select {
 
 @media (max-width: 380px) {
   .weapon-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-form-grid,
+  .combat-modifiers,
+  .dice-roll-fields,
+  .dice-roll-fields-three {
     grid-template-columns: 1fr;
   }
 

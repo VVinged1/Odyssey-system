@@ -3081,7 +3081,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "Attack",
     `
-      <div class="form-grid">
+      <div class="combat-form-grid">
         <input type="hidden" value="${escapeHtml(draft.targetTokenId)}" data-attack-field="targetTokenId">
         <label class="field-stack">
           <span class="field-label">Attack Skill</span>
@@ -3093,7 +3093,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         </label>
         <label class="field-stack">
           <span class="field-label">Current Target</span>
-          <div class="hint-box">${escapeHtml(targetName)}</div>
+          <div class="combat-value">${escapeHtml(targetName)}</div>
         </label>
         <label class="field-stack">
           <span class="field-label">Pick On Map</span>
@@ -3117,8 +3117,10 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         ${renderAttackAmmunition(token, draft, false, disabledAttr)}
         <label class="field-stack">
           <span class="field-label">Weapon Accuracy</span>
-          <div class="hint-box" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
+          <div class="combat-value" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
         </label>
+      </div>
+      <div class="combat-modifiers">
         <label class="field-stack">
           <span class="field-label">Attack Bonus</span>
           <input type="number" value="${draft.attackBonuses}" data-attack-field="attackBonuses" ${disabledAttr}>
@@ -3148,15 +3150,11 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           </select>
         </label>
       </div>
-      <div class="muted">${
-        targetCharacters.length
-          ? "Attack goes from the selected attacker token to the saved target chosen on the map."
-          : "No visible target tokens found. You can still keep a saved target or use No Target Attack below."
-      }</div>
-      <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
-      <div class="muted">Automatic called-shot penalties: Head -30, arms/legs -15.</div>
-      <div class="muted">Strength is added to weapon damage only for attack skills with STR Bonus enabled. ${escapeHtml(PARRY_SKILL_NAME)} is always added to defense unless Parry Mode is set to Do Not Count Parry.</div>
-      <div class="row row-gap">
+      <details class="combat-notes">
+        <summary>Attack rules</summary>
+        <div>Weapon Accuracy is added to Attack Bonus. Called shots: Head -30, arms/legs -15. STR Bonus affects enabled attack skills; ${escapeHtml(PARRY_SKILL_NAME)} is counted unless disabled.</div>
+      </details>
+      <div class="combat-action">
         <button type="button" class="success" data-action="perform-attack" ${attackDisabledAttr}>Attack</button>
       </div>
     `,
@@ -3179,7 +3177,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "No Target Attack",
     `
-      <div class="form-grid">
+      <div class="combat-form-grid">
         <label class="field-stack">
           <span class="field-label">Attack Skill</span>
           <select data-manual-attack-field="skill" ${disabledAttr}>${skillOptions}</select>
@@ -3204,8 +3202,10 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         ${renderAttackAmmunition(token, draft, true, disabledAttr)}
         <label class="field-stack">
           <span class="field-label">Weapon Accuracy</span>
-          <div class="hint-box" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
+          <div class="combat-value" data-weapon-accuracy-display>${weaponAccuracyDisplay >= 0 ? "+" : ""}${weaponAccuracyDisplay}</div>
         </label>
+      </div>
+      <div class="combat-modifiers">
         <label class="field-stack">
           <span class="field-label">Attack Bonus</span>
           <input type="number" value="${draft.manualAttackBonuses}" data-manual-attack-field="attackBonuses" ${disabledAttr}>
@@ -3223,10 +3223,11 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
           <input type="number" min="0" max="10" value="${draft.manualParry}" data-manual-attack-field="manualParry" ${disabledAttr}>
         </label>
       </div>
-      <div class="muted">Uses the manual attack values below and the defense settings above, but ignores the saved Pick On Map target.</div>
-      <div class="muted">Saved target for this token stays unchanged.</div>
-      <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
-      <div class="row row-gap">
+      <details class="combat-notes">
+        <summary>Manual defense</summary>
+        <div>Uses Armor and Parry entered here and does not change the saved map target. Weapon Accuracy is added to Attack Bonus.</div>
+      </details>
+      <div class="combat-action">
         <button type="button" class="success" data-action="perform-manual-attack" ${disabledAttr}>No Target Attack</button>
       </div>
     `,
@@ -3265,50 +3266,29 @@ function renderEnglishDiceBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "Dice",
     `
-      <div class="form-grid">
-        <label class="field-stack">
-          <span class="field-label">Dice Sides</span>
-          <input type="number" min="2" value="20" data-roll-field="dice">
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Dice Count</span>
-          <input type="number" min="1" max="100" value="1" data-roll-field="count">
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Modifier</span>
-          <input type="number" value="0" data-roll-field="modifier">
-        </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" data-action="perform-roll-dice">Roll Dice</button>
-      </div>
-
-      <div class="form-grid">
-        <label class="field-stack">
-          <span class="field-label">Characteristic</span>
-          <select data-roll-char-field="attribute" ${tokenLockedAttr}>${attributeOptions}</select>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Bonus / Penalty</span>
-          <input type="number" value="0" data-roll-char-field="modifier" ${tokenLockedAttr}>
-        </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" data-action="perform-roll-char" ${tokenLockedAttr}>Roll Characteristic</button>
-      </div>
-
-      <div class="form-grid">
-        <label class="field-stack">
-          <span class="field-label">Skill</span>
-          <select data-roll-skill-field="skill" ${tokenLockedAttr}>${skillOptions}</select>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Bonus / Penalty</span>
-          <input type="number" value="0" data-roll-skill-field="modifier" ${tokenLockedAttr}>
-        </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" data-action="perform-roll-skill" ${tokenLockedAttr}>Roll Skill</button>
+      <div class="dice-rolls">
+        <div class="dice-roll-row">
+          <div class="dice-roll-fields dice-roll-fields-three">
+            <label class="field-stack"><span class="field-label">Dice Sides</span><input type="number" min="2" value="20" data-roll-field="dice"></label>
+            <label class="field-stack"><span class="field-label">Dice Count</span><input type="number" min="1" max="100" value="1" data-roll-field="count"></label>
+            <label class="field-stack"><span class="field-label">Modifier</span><input type="number" value="0" data-roll-field="modifier"></label>
+          </div>
+          <button type="button" data-action="perform-roll-dice">Roll Dice</button>
+        </div>
+        <div class="dice-roll-row">
+          <div class="dice-roll-fields">
+            <label class="field-stack"><span class="field-label">Characteristic</span><select data-roll-char-field="attribute" ${tokenLockedAttr}>${attributeOptions}</select></label>
+            <label class="field-stack"><span class="field-label">Bonus / Penalty</span><input type="number" value="0" data-roll-char-field="modifier" ${tokenLockedAttr}></label>
+          </div>
+          <button type="button" data-action="perform-roll-char" ${tokenLockedAttr}>Roll Characteristic</button>
+        </div>
+        <div class="dice-roll-row">
+          <div class="dice-roll-fields">
+            <label class="field-stack"><span class="field-label">Skill</span><select data-roll-skill-field="skill" ${tokenLockedAttr}>${skillOptions}</select></label>
+            <label class="field-stack"><span class="field-label">Bonus / Penalty</span><input type="number" value="0" data-roll-skill-field="modifier" ${tokenLockedAttr}></label>
+          </div>
+          <button type="button" data-action="perform-roll-skill" ${tokenLockedAttr}>Roll Skill</button>
+        </div>
       </div>
     `,
     false,

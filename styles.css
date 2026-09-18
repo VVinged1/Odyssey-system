@@ -559,6 +559,14 @@ select {
   min-width: 0;
 }
 
+.weapon-entry {
+  border-bottom: 1px solid var(--border, #555);
+  padding: 12px 0;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
 .ammo-choice {
   display: flex;
   align-items: center;

@@ -6488,29 +6488,30 @@ function renderAmmunitionBlock(odyssey) {
 }
 function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
   const ranged = type === "ranged";
+  const identity = weapon ? `data-weapon-type="${type}" data-weapon-index="${index}"` : "";
   return `
-    <div class="weapon-entry">
+    <div class="weapon-entry" ${identity}>
       <div class="form-grid">
+        <label class="field-stack"><span class="field-label">Type</span>
+          <select data-weapon-draft="type" ${disabledAttr}>
+            <option value="melee" ${!ranged ? "selected" : ""}>Melee</option>
+            <option value="ranged" ${ranged ? "selected" : ""}>Ranged</option>
+          </select></label>
         <label class="field-stack"><span class="field-label">Weapon</span>
-          <input type="text" value="${escapeHtml(weapon.name)}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="name" ${disabledAttr}></label>
+          <input type="text" value="${escapeHtml(weapon?.name ?? "")}" data-weapon-draft="name" ${disabledAttr}></label>
         <label class="field-stack"><span class="field-label">Accuracy</span>
-          <input type="number" min="-999" max="999" value="${weapon.accuracy}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="accuracy" ${disabledAttr}></label>
-        <label class="field-stack checkbox-stack"><span class="field-label">Ranged</span>
-          <input type="checkbox" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="ranged" ${ranged ? "checked" : ""} ${disabledAttr}></label>
-        ${ranged ? `
-          <label class="field-stack"><span class="field-label">Magazine Capacity</span>
-            <input type="number" min="${weapon.loaded}" max="999" step="1" value="${weapon.capacity}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="capacity" ${disabledAttr}></label>
-          <div class="field-stack"><span class="field-label">Loaded</span>
-            <span>${weapon.loaded} / ${weapon.capacity} (${escapeHtml(ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId)?.name || "Empty")})</span></div>
-        ` : `
-          <label class="field-stack"><span class="field-label">Weapon Damage</span>
-            <input type="number" min="-999" max="999" value="${weapon.damage}" data-weapon-type="${type}" data-weapon-index="${index}" data-weapon-edit="damage" ${disabledAttr}></label>
-        `}
+          <input type="number" min="-999" max="999" value="${weapon?.accuracy ?? 0}" data-weapon-draft="accuracy" ${disabledAttr}></label>
+        <label class="field-stack weapon-melee-fields ${ranged ? "hidden" : ""}"><span class="field-label">Weapon Damage</span>
+          <input type="number" min="-999" max="999" value="${weapon?.damage ?? 0}" data-weapon-draft="damage" ${disabledAttr}></label>
+        <label class="field-stack weapon-ranged-fields ${ranged ? "" : "hidden"}"><span class="field-label">Magazine Capacity</span>
+          <input type="number" min="0" max="999" step="1" value="${weapon?.capacity ?? 0}" data-weapon-draft="capacity" ${disabledAttr}></label>
+        ${weapon && ranged ? `<div class="field-stack"><span class="field-label">Loaded</span>
+          <span>${weapon.loaded} / ${weapon.capacity} (${escapeHtml(ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId)?.name || "Empty")})</span></div>` : ""}
       </div>
-      ${ranged ? `
+      ${weapon && ranged ? `
         <details data-section-key="ammo-compatible:${escapeHtml(weapon.id)}"><summary>Compatible Ammunition</summary>
           ${ammunition.map((ammo) => `<label class="ammo-choice"><input type="checkbox"
-            data-weapon-type="ranged" data-weapon-index="${index}" data-weapon-edit="compatible" data-ammo-id="${escapeHtml(ammo.id)}"
+            data-weapon-draft="compatible" data-ammo-id="${escapeHtml(ammo.id)}"
             ${weapon.ammoIds.includes(ammo.id) ? "checked" : ""} ${disabledAttr}>${escapeHtml(ammo.name)}</label>`).join("")}
         </details>
         <div class="form-grid">
@@ -6522,75 +6523,58 @@ function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
           <button type="button" class="secondary" data-action="ammo-unload" data-ranged-index="${index}" ${disabledAttr}>Unload</button>
         </div>
       ` : ""}
-      <button type="button" class="danger" data-action="weapon-remove" data-weapon-type="${type}" data-weapon-index="${index}" ${disabledAttr}>Remove Weapon</button>
+      <button type="button" class="secondary" data-action="weapon-save" ${identity} ${disabledAttr}>Save Weapon</button>
+      ${weapon ? `<button type="button" class="danger" data-action="weapon-remove" ${identity} ${disabledAttr}>Remove Weapon</button>` : ""}
     </div>`;
 }
-async function editWeapon(node) {
+function toggleWeaponDraftFields(select) {
+  const row = select.closest(".weapon-entry");
+  if (!row) return;
+  const ranged = select.value === "ranged";
+  row.querySelectorAll(".weapon-melee-fields").forEach((field) => field.classList.toggle("hidden", ranged));
+  row.querySelectorAll(".weapon-ranged-fields").forEach((field) => field.classList.toggle("hidden", !ranged));
+}
+async function saveWeapon(node) {
   if (!isEditable()) {
     throw new Error("Only the GM can edit weapons.");
   }
   const token = getCharacterById(activeTokenId);
   if (!token) throw new Error("Select a token first.");
+  const row = node.closest(".weapon-entry");
+  if (!row) throw new Error("Weapon form is missing.");
+  const read = (field) => row.querySelector(`[data-weapon-draft="${field}"]`);
+  const name = String(read("name")?.value ?? "").trim();
+  const nextType = read("type")?.value === "ranged" ? "ranged" : "melee";
   const type = node.dataset.weaponType;
   const index = Number(node.dataset.weaponIndex);
-  const field = node.dataset.weaponEdit;
-  const value = node.type === "checkbox" ? node.checked : node.value;
+  const accuracy = clamp(Number(read("accuracy")?.value) || 0, -999, 999);
+  const damage = clamp(Number(read("damage")?.value) || 0, -999, 999);
+  const capacity = clamp(Number(read("capacity")?.value) || 0, 0, 999);
+  const ammoIds = Array.from(row.querySelectorAll('[data-weapon-draft="compatible"]:checked')).map((field) => field.dataset.ammoId);
+  if (!name) throw new Error("Enter a weapon name first.");
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
-    const source = next.odyssey.weapons[type] ?? [];
-    const weapon = source[index];
-    if (!weapon) return next;
-    if (field === "ranged") {
-      if (value && type === "melee") {
-        source.splice(index, 1);
-        next.odyssey.weapons.ranged.push({
-          id: crypto.randomUUID(),
-          name: weapon.name,
-          damage: 0,
-          accuracy: weapon.accuracy ?? 0,
-          capacity: 0,
-          loaded: 0,
-          loadedAmmoId: "",
-          ammoIds: []
-        });
+    const source = type ? next.odyssey.weapons[type] ?? [] : [];
+    const weapon = Number.isInteger(index) ? source[index] : null;
+    const allWeapons = [...next.odyssey.weapons.melee ?? [], ...next.odyssey.weapons.ranged ?? []];
+    if (allWeapons.some((item) => item !== weapon && item.name === name)) throw new Error("A weapon with this name already exists.");
+    if (weapon && type !== nextType) {
+      if (type === "ranged" && weapon.loaded > 0) {
+        const loadedAmmo = next.odyssey.ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId);
+        if (loadedAmmo) loadedAmmo.quantity += weapon.loaded;
       }
-      if (!value && type === "ranged") {
-        const loadedAmmo = next.odyssey.ammunition.find(
-          (ammo) => ammo.id === weapon.loadedAmmoId
-        );
-        if (loadedAmmo) {
-          loadedAmmo.quantity += weapon.loaded;
-        }
-        source.splice(index, 1);
-        next.odyssey.weapons.melee.push({
-          name: weapon.name,
-          damage: 0,
-          accuracy: weapon.accuracy ?? 0
-        });
-      }
-      return next;
+      source.splice(index, 1);
     }
-    if (field === "compatible") {
-      weapon.ammoIds = value ? [.../* @__PURE__ */ new Set([...weapon.ammoIds, node.dataset.ammoId])] : weapon.ammoIds.filter((id) => id !== node.dataset.ammoId);
-      return next;
-    }
-    if (field === "capacity") {
-      const capacity = clamp(Number(value) || 0, weapon.loaded, 999);
-      weapon.capacity = capacity;
-      return next;
-    }
-    if (field === "damage" && type === "melee") {
-      weapon.damage = clamp(Number(value) || 0, -999, 999);
-      return next;
-    }
-    if (field === "accuracy") {
-      weapon.accuracy = clamp(Number(value) || 0, -999, 999);
-      return next;
-    }
-    if (field === "name") {
-      const name = String(value).trim();
-      if (!name) throw new Error("Weapon name cannot be empty.");
-      weapon.name = name;
+    if (nextType === "ranged") {
+      const ranged = weapon && type === "ranged" ? weapon : { id: crypto.randomUUID(), loaded: 0, loadedAmmoId: "", ammoIds: [], damage: 0 };
+      if (capacity < ranged.loaded) throw new Error("Unload rounds before reducing capacity.");
+      if (ranged.loaded > 0 && !ammoIds.includes(ranged.loadedAmmoId)) throw new Error("Loaded ammunition must remain compatible.");
+      Object.assign(ranged, { name, accuracy, capacity, ammoIds });
+      if (!weapon || type !== "ranged") next.odyssey.weapons.ranged.push(ranged);
+    } else {
+      const melee = weapon && type === "melee" ? weapon : {};
+      Object.assign(melee, { name, damage, accuracy });
+      if (!weapon || type !== "melee") next.odyssey.weapons.melee.push(melee);
     }
     return next;
   });
@@ -6603,17 +6587,7 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
   ].join("");
   return renderCollapsibleSection("Weapons", `
     ${weapons || '<div class="empty">No weapons yet.</div>'}
-    <div class="form-grid">
-      <label class="field-stack"><span class="field-label">Weapon Name</span>
-        <input type="text" data-weapon-field="new-name" placeholder="New weapon" ${disabledAttr}></label>
-      <label class="field-stack"><span class="field-label">Weapon Damage</span>
-        <input type="number" min="-999" max="999" value="0" data-weapon-field="new-damage" ${disabledAttr}></label>
-      <label class="field-stack"><span class="field-label">Weapon Accuracy</span>
-        <input type="number" min="-999" max="999" value="0" data-weapon-field="new-accuracy" ${disabledAttr}></label>
-      <label class="field-stack checkbox-stack"><span class="field-label">Ranged</span>
-        <input type="checkbox" data-weapon-field="new-ranged" ${disabledAttr}></label>
-    </div>
-    <button type="button" class="secondary" data-action="add-weapon" ${disabledAttr}>Add Weapon</button>
+    ${renderWeaponRow(null, "melee", -1, ammunition, disabledAttr)}
   `, false);
 }
 function renderAttackAmmunition(token, draft2, manual, disabledAttr) {
@@ -6630,7 +6604,7 @@ function renderAttackAmmunition(token, draft2, manual, disabledAttr) {
     <label class="field-stack"><span class="field-label">Rounds / Attack</span>
       <input type="number" min="1" max="${weapon.loaded}" step="1" value="${Math.min(Number(draft2.rounds) || 1, weapon.loaded) || 1}" ${prefix}="rounds" ${disabledAttr} ${weapon.loaded ? "" : "disabled"}></label>`;
 }
-async function editAmmunition(action, node) {
+async function editAmmunition(action, node, draft2 = null) {
   if (!isEditable()) throw new Error("Only the GM can edit ammunition and reload weapons.");
   const token = getCharacterById(activeTokenId);
   if (!token) throw new Error("Select a token first.");
@@ -6646,7 +6620,7 @@ async function editAmmunition(action, node) {
     const weapon = data.weapons.ranged[index];
     const ammo = data.ammunition.find((item) => item.id === ammoId);
     if (action === "ammo-add") {
-      const name = getActionFieldValue('[data-ammo-field="new-name"]').trim();
+      const name = String(draft2?.name ?? "").trim();
       if (!name) {
         throw new Error("Enter an ammunition name first.");
       }
@@ -6657,17 +6631,17 @@ async function editAmmunition(action, node) {
         id: newId,
         name,
         damage: clamp(
-          Number(getActionFieldValue('[data-ammo-field="new-damage"]')) || 0,
+          Number(draft2?.damage) || 0,
           0,
           999
         ),
         penetration: clamp(
-          Number(getActionFieldValue('[data-ammo-field="new-penetration"]')) || 0,
+          Number(draft2?.penetration) || 0,
           -999,
           999
         ),
         quantity: clamp(
-          Number(getActionFieldValue('[data-ammo-field="new-quantity"]')) || 0,
+          Number(draft2?.quantity) || 0,
           0,
           999999
         )
@@ -8080,6 +8054,12 @@ function bindUiEvents() {
     const actionNode = target.closest("[data-action]");
     if (!(actionNode instanceof HTMLElement)) return;
     const action = actionNode.dataset.action;
+    if (action === "weapon-save") {
+      void saveWeapon(actionNode).catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
     if (action === "weapon-remove") {
       const type = actionNode.dataset.weaponType;
       const weaponIndex = Number(actionNode.dataset.weaponIndex ?? -1);
@@ -8090,7 +8070,13 @@ function bindUiEvents() {
       return;
     }
     if (["ammo-add", "ammo-remove", "ammo-reload", "ammo-unload"].includes(action)) {
-      void editAmmunition(action, actionNode).catch((error) => {
+      const draft2 = action === "ammo-add" ? {
+        name: getActionFieldValue('[data-ammo-field="new-name"]'),
+        damage: getActionFieldValue('[data-ammo-field="new-damage"]'),
+        penetration: getActionFieldValue('[data-ammo-field="new-penetration"]'),
+        quantity: getActionFieldValue('[data-ammo-field="new-quantity"]')
+      } : null;
+      void editAmmunition(action, actionNode, draft2).catch((error) => {
         setStatus(error.message, "error");
         scheduleRender();
       });
@@ -8215,11 +8201,8 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
-    if (target.dataset.weaponEdit) {
-      void editWeapon(target).catch((error) => {
-        setStatus(error.message, "error");
-        scheduleRender();
-      });
+    if (target.dataset.weaponDraft === "type") {
+      toggleWeaponDraftFields(target);
       return;
     }
     if (target.dataset.ammoEdit || target.dataset.rangedEdit) {

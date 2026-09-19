@@ -124,8 +124,8 @@ function clamp(value, min, max) {
 
 function normalizeWindowSize(width, height) {
   return {
-    width: clamp(Number(width) || DEFAULT_WINDOW_SIZE.width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH),
-    height: clamp(Number(height) || DEFAULT_WINDOW_SIZE.height, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT),
+    width: Math.round(clamp(Number(width) || DEFAULT_WINDOW_SIZE.width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH)),
+    height: Math.round(clamp(Number(height) || DEFAULT_WINDOW_SIZE.height, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT)),
   };
 }
 

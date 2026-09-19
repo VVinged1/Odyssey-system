@@ -226,10 +226,14 @@ select {
   justify-content: end;
 }
 
-.visibility-field {
-  justify-content: end;
-  align-items: flex-start;
-  padding-top: 20px;
+.roll-visibility-action {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.roll-visibility-action button {
+  min-width: 0;
 }
 
 .field-label {

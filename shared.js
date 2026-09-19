@@ -105,6 +105,8 @@ export const DEFAULT_TRACKER_DATA = {
     skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
     skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
+    skillLabels: {},
+    skillPerks: {},
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -289,6 +291,8 @@ export function sanitizeOdysseyData(raw) {
     raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object"
       ? raw.skillStrengthBonuses
       : {};
+  const rawSkillLabels = raw.skillLabels && typeof raw.skillLabels === "object" ? raw.skillLabels : {};
+  const rawSkillPerks = raw.skillPerks && typeof raw.skillPerks === "object" ? raw.skillPerks : {};
 
   const migratedMeleeValue = Math.max(
     Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
@@ -341,6 +345,16 @@ export function sanitizeOdysseyData(raw) {
         ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0
         : raw.attributes?.[key] ?? 0;
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
+  }
+
+  for (const skillName of Object.keys(next.skills)) {
+    next.skillLabels[skillName] = String(rawSkillLabels[skillName] ?? skillName).trim().slice(0, 40) || skillName;
+    next.skillPerks[skillName] = Array.isArray(rawSkillPerks[skillName])
+      ? rawSkillPerks[skillName]
+          .map((perk) => String(perk ?? "").trim().slice(0, 40))
+          .filter(Boolean)
+          .slice(0, 12)
+      : [];
   }
 
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);

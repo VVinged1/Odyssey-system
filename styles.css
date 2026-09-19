@@ -621,7 +621,7 @@ select {
 
 .skill-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px minmax(110px, 150px) auto;
+  grid-template-columns: minmax(100px, 1fr) 64px minmax(96px, 130px) auto;
   gap: 8px;
   align-items: center;
   padding: 8px 4px;
@@ -633,6 +633,78 @@ select {
 
 .skill-row:last-child {
   border-bottom: 0;
+}
+
+.skill-name input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-weight: 700;
+}
+
+.skill-name input:focus {
+  border-bottom-color: #93c5fd;
+}
+
+.skill-perks {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 0;
+}
+
+.skill-perk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid rgba(134, 239, 172, 0.4);
+  border-radius: 4px;
+  background: rgba(22, 101, 52, 0.22);
+  color: #bbf7d0;
+  font-size: 11px;
+}
+
+.skill-perk button {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fecaca;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.skill-perk-editor {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-perk-editor input {
+  min-width: 0;
+  flex: 1;
+}
+
+.skill-perk-add {
+  grid-column: 1 / -1;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 4px;
+  color: #86efac;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .skill-group {
@@ -652,6 +724,18 @@ select {
 }
 
 .skill-add-form {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.skill-add-actions {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+}
+
+.ownership-transfer {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--line);

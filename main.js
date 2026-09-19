@@ -126,6 +126,8 @@ let gmPrivateEntries = [];
 let ammunitionAddOpen = false;
 let weaponAddOpen = false;
 let bodyPartAddOpen = false;
+let skillAddOpen = false;
+let skillPerkAddSkill = "";
 const pendingLocalDebugEntryIds = new Set();
 let pendingLocalDebugClear = false;
 const collapsibleSectionState = new Map();
@@ -263,6 +265,10 @@ function getSkillStrengthBonusFlag(odyssey, skillName) {
   return Boolean(odyssey?.skillStrengthBonuses?.[skillName]);
 }
 
+function getSkillLabel(odyssey, skillName) {
+  return String(odyssey?.skillLabels?.[skillName] ?? skillName).trim() || skillName;
+}
+
 function getSortedSkillEntries(odyssey) {
   return Object.entries(odyssey?.skills ?? {}).sort(([left], [right]) =>
     left.localeCompare(right),
@@ -293,20 +299,20 @@ function getAppliedSkillEntries(odyssey) {
   );
 }
 
-function buildSkillOptions(skillEntries, selectedValue = "") {
+function buildSkillOptions(skillEntries, selectedValue = "", odyssey = null) {
   return skillEntries
     .map(
       ([key, value]) => `<option value="${escapeHtml(key)}" ${
         key === selectedValue ? "selected" : ""
-      }>${escapeHtml(key)} (${value})</option>`,
+      }>${escapeHtml(getSkillLabel(odyssey, key))} (${value})</option>`,
     )
     .join("");
 }
 
 function buildGroupedSkillOptions(odyssey, selectedValue = "") {
-  const combatOptions = buildSkillOptions(getCombatSkillEntries(odyssey), selectedValue);
-  const abilitiesOptions = buildSkillOptions(getAbilitiesSkillEntries(odyssey), selectedValue);
-  const appliedOptions = buildSkillOptions(getAppliedSkillEntries(odyssey), selectedValue);
+  const combatOptions = buildSkillOptions(getCombatSkillEntries(odyssey), selectedValue, odyssey);
+  const abilitiesOptions = buildSkillOptions(getAbilitiesSkillEntries(odyssey), selectedValue, odyssey);
+  const appliedOptions = buildSkillOptions(getAppliedSkillEntries(odyssey), selectedValue, odyssey);
 
   return [
     combatOptions ? `<optgroup label="Combat">${combatOptions}</optgroup>` : "",
@@ -1284,6 +1290,8 @@ function buildTokenExportPayload(token) {
         skills: structuredClone(odyssey.skills ?? {}),
         skillCategories: structuredClone(odyssey.skillCategories ?? {}),
         skillStrengthBonuses: structuredClone(odyssey.skillStrengthBonuses ?? {}),
+        skillLabels: structuredClone(odyssey.skillLabels ?? {}),
+        skillPerks: structuredClone(odyssey.skillPerks ?? {}),
         attributes: structuredClone(odyssey.attributes ?? {}),
         weapons: structuredClone(odyssey.weapons ?? { melee: [], ranged: [] }),
         ammunition: structuredClone(odyssey.ammunition ?? []),
@@ -1313,6 +1321,8 @@ function normalizeImportedTokenPayload(raw) {
       skills: source.odyssey?.skills,
       skillCategories: source.odyssey?.skillCategories,
       skillStrengthBonuses: source.odyssey?.skillStrengthBonuses,
+      skillLabels: source.odyssey?.skillLabels,
+      skillPerks: source.odyssey?.skillPerks,
       attributes: source.odyssey?.attributes,
       weapons: source.odyssey?.weapons,
       ammunition: source.odyssey?.ammunition,
@@ -1328,6 +1338,8 @@ function normalizeImportedTokenPayload(raw) {
       skills: structuredClone(normalized.odyssey.skills),
       skillCategories: structuredClone(normalized.odyssey.skillCategories),
       skillStrengthBonuses: structuredClone(normalized.odyssey.skillStrengthBonuses),
+      skillLabels: structuredClone(normalized.odyssey.skillLabels),
+      skillPerks: structuredClone(normalized.odyssey.skillPerks),
       attributes: structuredClone(normalized.odyssey.attributes),
       weapons: structuredClone(normalized.odyssey.weapons),
       ammunition: structuredClone(normalized.odyssey.ammunition),
@@ -1420,6 +1432,8 @@ async function importSelectedTokenData(file) {
     next.odyssey.skills = structuredClone(imported.odyssey.skills);
     next.odyssey.skillCategories = structuredClone(imported.odyssey.skillCategories);
     next.odyssey.skillStrengthBonuses = structuredClone(imported.odyssey.skillStrengthBonuses);
+    next.odyssey.skillLabels = structuredClone(imported.odyssey.skillLabels);
+    next.odyssey.skillPerks = structuredClone(imported.odyssey.skillPerks);
     next.odyssey.attributes = structuredClone(imported.odyssey.attributes);
     next.odyssey.weapons = structuredClone(imported.odyssey.weapons);
     next.odyssey.ammunition = structuredClone(imported.odyssey.ammunition);
@@ -1998,6 +2012,14 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
           <select data-action="select-owner-player" ${disabledAttr}>${playerOptions}</select>
         </label>
       </div>
+      <div class="ownership-transfer">
+        <div class="field-label">Import / Export</div>
+        <div class="row row-gap">
+          <button type="button" class="secondary" data-action="export-token-data" ${disabledAttr}>Export Token Data</button>
+          <button type="button" class="secondary" data-action="open-token-import" ${disabledAttr}>Import Token Data</button>
+        </div>
+        <input type="file" accept=".json,.txt,.odyssey-token.json" data-token-import-input hidden>
+      </div>
     `,
     false,
   );
@@ -2567,9 +2589,12 @@ function renderDiceBlock(token, data, tokenLocked) {
 function renderOdysseySkillRows(odyssey, skillEntries, disabledAttr) {
   return skillEntries
     .map(
-      ([key, value]) => `
+      ([key, value]) => {
+        const perks = Array.isArray(odyssey.skillPerks?.[key]) ? odyssey.skillPerks[key] : [];
+        const canRemove = !CORE_COMBAT_SKILLS.includes(key);
+        return `
         <div class="skill-row">
-          <div class="skill-name">${escapeHtml(key)}</div>
+          <div class="skill-name"><input type="text" value="${escapeHtml(getSkillLabel(odyssey, key))}" data-action="rename-odyssey-skill" data-skill="${escapeHtml(key)}" maxlength="40" ${disabledAttr}></div>
           <input type="number" min="0" max="10" value="${value}" data-action="set-odyssey-skill" data-skill="${escapeHtml(key)}" ${disabledAttr}>
           <label class="skill-toggle">
             <input type="checkbox" data-action="set-skill-strength-bonus" data-skill="${escapeHtml(key)}" ${disabledAttr} ${
@@ -2577,10 +2602,12 @@ function renderOdysseySkillRows(odyssey, skillEntries, disabledAttr) {
             }>
             <span>STR Bonus</span>
           </label>
-          <button type="button" class="danger" data-action="remove-skill" data-skill="${escapeHtml(key)}" ${
-            CORE_COMBAT_SKILLS.includes(key) ? "disabled" : disabledAttr
-          }>${CORE_COMBAT_SKILLS.includes(key) ? "Core" : "Remove"}</button>
-        </div>`
+          ${canRemove ? `<button type="button" class="square-icon-button danger" data-action="remove-skill" data-skill="${escapeHtml(key)}" title="Remove skill" aria-label="Remove ${escapeHtml(getSkillLabel(odyssey, key))}" ${disabledAttr}>×</button>` : ""}
+          <div class="skill-perks">${perks.map((perk, perkIndex) => `<span class="skill-perk">${escapeHtml(perk)}<button type="button" data-action="remove-skill-perk" data-skill="${escapeHtml(key)}" data-perk-index="${perkIndex}" title="Remove perk" aria-label="Remove perk">-</button></span>`).join("")}</div>
+          ${skillPerkAddSkill === key ? `<div class="skill-perk-editor"><input type="text" maxlength="40" placeholder="Perk name" data-skill-perk-field="name"><button type="button" class="square-icon-button" data-action="save-skill-perk" data-skill="${escapeHtml(key)}" title="Save perk" aria-label="Save perk">▣</button><button type="button" class="square-icon-button danger" data-action="cancel-skill-perk" title="Cancel" aria-label="Cancel">×</button></div>` : ""}
+          <button type="button" class="skill-perk-add" data-action="open-skill-perk" data-skill="${escapeHtml(key)}" title="Add perk" aria-label="Add perk" ${disabledAttr}>+</button>
+        </div>`;
+      },
     )
     .join("");
 }
@@ -2637,7 +2664,7 @@ function renderOdysseyAttackBlock(token, data, tokenLocked) {
   const disabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft = getAttackDraft(token, data, targetCharacters);
   const combatSkillEntries = getCombatSkillEntries(data.odyssey);
-  const skillOptions = buildSkillOptions(combatSkillEntries, draft.skill);
+  const skillOptions = buildSkillOptions(combatSkillEntries, draft.skill, data.odyssey);
 
   return renderCollapsibleSection(
     "РђС‚Р°РєР°",
@@ -2787,7 +2814,7 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
       <div class="skill-group"><div class="skill-group-title">Combat</div><div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div></div>
       <div class="skill-group"><div class="skill-group-title">Abilities</div><div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div></div>
       <div class="skill-group"><div class="skill-group-title">Applied</div><div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div></div>
-      <div class="skill-add-form form-grid">
+      ${skillAddOpen ? `<div class="skill-add-form form-grid">
         <label class="field-stack">
           <span class="field-label">Skill Name</span>
           <input type="text" data-skill-field="new-name" placeholder="New skill" ${disabledAttr}>
@@ -2811,10 +2838,9 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
             <span>Enable for attack damage</span>
           </label>
         </label>
-      </div>
-      <div class="row row-gap">
-        <button type="button" class="secondary" data-action="add-skill" ${disabledAttr}>Add Skill</button>
-      </div>
+        <div class="skill-add-actions"><button type="button" class="square-icon-button" data-action="add-skill" title="Save skill" aria-label="Save skill" ${disabledAttr}>▣</button><button type="button" class="square-icon-button danger" data-action="close-skill-add" title="Cancel" aria-label="Cancel" ${disabledAttr}>×</button></div>
+      </div>` : ""}
+      <div class="item-toolbar item-toolbar-bottom"><button type="button" class="square-icon-button" data-action="open-skill-add" title="Add skill" aria-label="Add skill" ${disabledAttr}>+</button></div>
     `,
     false,
   );
@@ -3062,7 +3088,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const disabledAttr = tokenLocked ? "disabled" : "";
   const pickDisabledAttr = tokenLocked || !targetCharacters.length ? "disabled" : "";
   const draft = getAttackDraft(token, data, targetCharacters);
-  const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
+  const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill, data.odyssey);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
   const selectedTargetData = selectedTarget ? getTrackerData(selectedTarget) : null;
@@ -3165,7 +3191,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
     (item) => item.id !== token.id && item.visible !== false,
   );
   const draft = getAttackDraft(token, data, targetCharacters);
-  const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
+  const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill, data.odyssey);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const disabledAttr = tokenLocked ? "disabled" : "";
   const weaponAccuracyDisplay = Number(draft.weaponAccuracy) || 0;
@@ -3398,7 +3424,6 @@ function renderSelectedToken() {
       }
       ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${isEditable() ? renderAmmunitionBlock(odyssey) : ""}
-      ${isEditable() ? renderTokenTransferBlock(gmOnlyDisabled) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
@@ -3844,6 +3869,51 @@ async function setOdysseySkillStrengthBonus(skill, enabled) {
     const next = structuredClone(current);
     next.odyssey.skillStrengthBonuses ??= {};
     next.odyssey.skillStrengthBonuses[skill] = Boolean(enabled);
+    return next;
+  });
+}
+
+async function renameOdysseySkill(skill, label) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!isEditable()) throw new Error("Only the GM can edit Odyssey skills.");
+  const nextLabel = String(label ?? "").trim().slice(0, 40);
+  if (!nextLabel) throw new Error("Enter a skill name first.");
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    if (!next.odyssey.skills[skill] && next.odyssey.skills[skill] !== 0) return next;
+    next.odyssey.skillLabels ??= {};
+    next.odyssey.skillLabels[skill] = nextLabel;
+    return next;
+  });
+}
+
+async function addOdysseySkillPerk(skill, perk) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!isEditable()) throw new Error("Only the GM can edit skill perks.");
+  const name = String(perk ?? "").trim().slice(0, 40);
+  if (!name) throw new Error("Enter a perk name first.");
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    next.odyssey.skillPerks ??= {};
+    const perks = next.odyssey.skillPerks[skill] ??= [];
+    if (!perks.includes(name) && perks.length < 12) perks.push(name);
+    return next;
+  });
+}
+
+async function removeOdysseySkillPerk(skill, perkIndex) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!isEditable()) throw new Error("Only the GM can edit skill perks.");
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    const perks = next.odyssey.skillPerks?.[skill];
+    if (Array.isArray(perks)) perks.splice(perkIndex, 1);
     return next;
   });
 }
@@ -4551,6 +4621,8 @@ async function addOdysseySkill() {
     next.odyssey.skills[name] = value;
     next.odyssey.skillCategories ??= {};
     next.odyssey.skillStrengthBonuses ??= {};
+    next.odyssey.skillLabels ??= {};
+    next.odyssey.skillPerks ??= {};
     next.odyssey.skillCategories[name] = category;
     next.odyssey.skillStrengthBonuses[name] =
       name === MELEE_SKILL_NAME
@@ -4558,6 +4630,8 @@ async function addOdysseySkill() {
         : name === PARRY_SKILL_NAME
           ? false
           : Boolean(addStrengthBonus);
+    next.odyssey.skillLabels[name] = name;
+    next.odyssey.skillPerks[name] = [];
     return next;
   });
   setStatus(`Skill "${name}" saved for ${getCharacterName(token)}.`, "success");
@@ -4584,6 +4658,8 @@ async function removeOdysseySkill(skillName) {
     delete next.odyssey.skills[skillName];
     delete next.odyssey.skillCategories?.[skillName];
     delete next.odyssey.skillStrengthBonuses?.[skillName];
+    delete next.odyssey.skillLabels?.[skillName];
+    delete next.odyssey.skillPerks?.[skillName];
     return next;
   });
   setStatus(`Skill "${skillName}" removed.`, "success");
@@ -4789,6 +4865,47 @@ function bindUiEvents() {
       return;
     }
 
+    if (action === "open-skill-add") {
+      skillAddOpen = true;
+      scheduleRender();
+      return;
+    }
+
+    if (action === "close-skill-add") {
+      skillAddOpen = false;
+      scheduleRender();
+      return;
+    }
+
+    if (action === "open-skill-perk") {
+      skillPerkAddSkill = actionNode.dataset.skill ?? "";
+      scheduleRender();
+      return;
+    }
+
+    if (action === "cancel-skill-perk") {
+      skillPerkAddSkill = "";
+      scheduleRender();
+      return;
+    }
+
+    if (action === "save-skill-perk") {
+      const row = actionNode.closest(".skill-row");
+      const field = row?.querySelector('[data-skill-perk-field="name"]');
+      void addOdysseySkillPerk(actionNode.dataset.skill ?? "", field?.value ?? "").then(() => {
+        skillPerkAddSkill = "";
+        scheduleRender();
+      }).catch((error) => setStatus(error.message, "error"));
+      return;
+    }
+
+    if (action === "remove-skill-perk") {
+      void removeOdysseySkillPerk(actionNode.dataset.skill ?? "", Number(actionNode.dataset.perkIndex ?? -1)).catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
+
 	if (action === "weapon-save") {
 	  void saveWeapon(actionNode).then(() => {
         if (actionNode.dataset.weaponType == null) {
@@ -4952,7 +5069,10 @@ function bindUiEvents() {
     }
 
     if (action === "add-skill") {
-      void addOdysseySkill().catch((error) => {
+      void addOdysseySkill().then(() => {
+        skillAddOpen = false;
+        scheduleRender();
+      }).catch((error) => {
         setStatus(error?.message ?? "Unable to add skill.", "error");
       });
       return;
@@ -5071,6 +5191,16 @@ function bindUiEvents() {
       if (!skill) return;
       void setOdysseySkill(skill, target.value).catch((error) => {
         setStatus(error?.message ?? "Unable to save skill.", "error");
+      });
+      return;
+    }
+
+    if (target.dataset.action === "rename-odyssey-skill") {
+      const skill = target.dataset.skill;
+      if (!skill) return;
+      void renameOdysseySkill(skill, target.value).catch((error) => {
+        setStatus(error.message, "error");
+        scheduleRender();
       });
       return;
     }

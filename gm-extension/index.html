@@ -46,10 +46,10 @@
                   <span class="field-label">Modifier</span>
                   <input id="publicDiceModifier" type="number" value="0">
                 </label>
-              </div>
-              <div class="row row-gap">
-                <label class="visibility-eye" title="Visible to players"><input id="publicDicePrivate" type="checkbox"><span></span></label>
-                <button id="publicDiceBtn" type="button">Roll GM Dice</button>
+                <div class="roll-visibility-action">
+                  <label class="visibility-eye" title="Visible to players"><input id="publicDicePrivate" type="checkbox"><span></span></label>
+                  <button id="publicDiceBtn" type="button">Roll GM Dice</button>
+                </div>
               </div>
               <div class="muted">Eye on: players see the roll in the shared Odyssey Combat Log. Eye off: only the GM sees it.</div>
             </div>
@@ -73,10 +73,10 @@
                   <span class="field-label">Modifier</span>
                   <input id="skillModifier" type="number" value="0">
                 </label>
-                <div class="field-stack visibility-field"><label class="visibility-eye" title="Visible to players"><input id="skillPrivate" type="checkbox"><span></span></label></div>
-              </div>
-              <div class="row row-gap">
-                <button id="skillRollBtn" type="button">Roll GM Skill</button>
+                <div class="roll-visibility-action">
+                  <label class="visibility-eye" title="Visible to players"><input id="skillPrivate" type="checkbox"><span></span></label>
+                  <button id="skillRollBtn" type="button">Roll GM Skill</button>
+                </div>
               </div>
               <div class="muted">Modifier is applied only to the first d100 roll, exactly like the normal Odyssey skill check.</div>
               <div class="muted">Eye on: players see the result in the shared Odyssey Combat Log. Eye off: only the GM sees it.</div>
@@ -142,6 +142,6 @@
 
     <button type="button" class="action-resize-handle" data-action-resize title="Resize window" aria-label="Resize window"></button>
 
-    <script type="module" src="./assets/main.js?v=1.0.13"></script>
+    <script type="module" src="./assets/main.js?v=1.0.15"></script>
   </body>
 </html>

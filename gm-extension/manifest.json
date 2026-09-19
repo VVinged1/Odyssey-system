@@ -1,14 +1,14 @@
 {
   "name": "Odyssey GM Tools",
-  "version": "1.0.13",
+  "version": "1.0.15",
   "manifest_version": 1,
   "description": "GM-only dice and environment attack tools for Odyssey System.",
   "author": "Codex",
-  "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.4.34",
+  "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.4.35",
   "action": {
     "title": "Odyssey GM Tools",
-    "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.4.34",
-    "popover": "https://VVinged1.github.io/Odyssey-system/gm-extension/index.html?v=1.0.13",
+    "icon": "https://VVinged1.github.io/Odyssey-system/icon.svg?v=1.4.35",
+    "popover": "https://VVinged1.github.io/Odyssey-system/gm-extension/index.html?v=1.0.15",
     "height": 1200,
     "width": 1200
   }

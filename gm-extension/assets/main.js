@@ -4110,22 +4110,25 @@ function getBodyPartAttackPenalty(dataOrBody, partName) {
   const slot = getPartSlot(partName, part);
   return slot === "other" ? clamp(numberOrFallback(part?.attackPenalty, 0), 0, 999) : getSlotAttackPenalty(slot);
 }
-function getEffectiveSize(token) {
+function getEffectiveSize(token, sceneGridDpi) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
-  const imageWidth = Number(token.image?.width) || Number(token.width) || 140;
-  const imageHeight = Number(token.image?.height) || Number(token.height) || 140;
+  const imageWidth = Number(token.image?.width);
+  const imageHeight = Number(token.image?.height);
+  const imageGridDpi = Number(token.grid?.dpi);
+  const baseWidth = imageWidth > 0 && imageGridDpi > 0 ? imageWidth / imageGridDpi * sceneGridDpi : Number(token.width) || sceneGridDpi;
+  const baseHeight = imageHeight > 0 && imageGridDpi > 0 ? imageHeight / imageGridDpi * sceneGridDpi : Number(token.height) || sceneGridDpi;
   return {
-    width: imageWidth * scaleX,
-    height: imageHeight * scaleY
+    width: baseWidth * scaleX,
+    height: baseHeight * scaleY
   };
 }
 async function getTokenMetrics(token, data) {
-  const effectiveSize = getEffectiveSize(token);
+  const gridDpi = await getCachedGridDpi();
+  const effectiveSize = getEffectiveSize(token, gridDpi);
   const center = token.position;
   const width = effectiveSize.width;
   const height = effectiveSize.height;
-  const gridDpi = await getCachedGridDpi();
   const scaleFactor = Math.max(
     Math.abs(token.scale?.x ?? 1),
     Math.abs(token.scale?.y ?? 1),

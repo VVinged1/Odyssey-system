@@ -4033,22 +4033,25 @@ function hasConfiguredSpecial(dataOrBody) {
   if (!special || typeof special !== "object") return false;
   return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0;
 }
-function getEffectiveSize(token) {
+function getEffectiveSize(token, sceneGridDpi) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
-  const imageWidth = Number(token.image?.width) || Number(token.width) || 140;
-  const imageHeight = Number(token.image?.height) || Number(token.height) || 140;
+  const imageWidth = Number(token.image?.width);
+  const imageHeight = Number(token.image?.height);
+  const imageGridDpi = Number(token.grid?.dpi);
+  const baseWidth = imageWidth > 0 && imageGridDpi > 0 ? imageWidth / imageGridDpi * sceneGridDpi : Number(token.width) || sceneGridDpi;
+  const baseHeight = imageHeight > 0 && imageGridDpi > 0 ? imageHeight / imageGridDpi * sceneGridDpi : Number(token.height) || sceneGridDpi;
   return {
-    width: imageWidth * scaleX,
-    height: imageHeight * scaleY
+    width: baseWidth * scaleX,
+    height: baseHeight * scaleY
   };
 }
 async function getTokenMetrics(token, data) {
-  const effectiveSize = getEffectiveSize(token);
+  const gridDpi = await getCachedGridDpi();
+  const effectiveSize = getEffectiveSize(token, gridDpi);
   const center = token.position;
   const width = effectiveSize.width;
   const height = effectiveSize.height;
-  const gridDpi = await getCachedGridDpi();
   const scaleFactor = Math.max(
     Math.abs(token.scale?.x ?? 1),
     Math.abs(token.scale?.y ?? 1),
@@ -4524,21 +4527,9 @@ async function applyRemoteRollEvent(event) {
 }
 async function syncTrackedOverlays() {
   const items = await lib_default.scene.items.getItems();
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const overlaysByTokenId = /* @__PURE__ */ new Map();
-  for (const item of items.filter(isOverlayItem)) {
-    const tokenId = String(item.metadata?.[OVERLAY_KEY] ?? "");
-    if (!tokenId) continue;
-    const bucket = overlaysByTokenId.get(tokenId) ?? [];
-    bucket.push(item);
-    overlaysByTokenId.set(tokenId, bucket);
-  }
-  const staleOverlayIds = items.filter(isOverlayItem).filter((item) => {
-    const token = byId.get(item.metadata[OVERLAY_KEY]);
-    return !token || !isTrackedCharacter(token) || token.visible === false || Number(item.metadata?.visualVersion ?? 0) !== VISUAL_VERSION;
-  }).map((item) => item.id);
-  if (staleOverlayIds.length) {
-    await lib_default.scene.items.deleteItems(staleOverlayIds);
+  const overlayIds = items.filter(isOverlayItem).map((item) => item.id);
+  if (overlayIds.length) {
+    await lib_default.scene.items.deleteItems(overlayIds);
   }
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {

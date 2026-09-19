@@ -3384,161 +3384,6 @@ var BroadcastApi = class {
 };
 var BroadcastApi_default = BroadcastApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/builders/GenericItemBuilder.js
-var GenericItemBuilder = class {
-  constructor(player) {
-    this._item = {
-      createdUserId: player.id,
-      id: v4_default(),
-      name: "Item",
-      zIndex: Date.now(),
-      lastModified: (/* @__PURE__ */ new Date()).toISOString(),
-      lastModifiedUserId: player.id,
-      locked: false,
-      metadata: {},
-      position: { x: 0, y: 0 },
-      rotation: 0,
-      scale: { x: 1, y: 1 },
-      type: "ITEM",
-      visible: true,
-      layer: "POPOVER"
-    };
-  }
-  createdUserId(createdUserId) {
-    this._item.createdUserId = createdUserId;
-    return this.self();
-  }
-  id(id) {
-    this._item.id = id;
-    return this.self();
-  }
-  name(name) {
-    this._item.name = name;
-    return this.self();
-  }
-  description(description) {
-    this._item.description = description;
-    return this.self();
-  }
-  lastModified(lastModified) {
-    this._item.lastModified = lastModified;
-    return this.self();
-  }
-  zIndex(zIndex) {
-    this._item.zIndex = zIndex;
-    return this.self();
-  }
-  lastModifiedUserId(lastModifiedUserId) {
-    this._item.lastModifiedUserId = lastModifiedUserId;
-    return this.self();
-  }
-  locked(locked) {
-    this._item.locked = locked;
-    return this.self();
-  }
-  metadata(metadata) {
-    this._item.metadata = metadata;
-    return this.self();
-  }
-  position(position) {
-    this._item.position = position;
-    return this.self();
-  }
-  rotation(rotation) {
-    this._item.rotation = rotation;
-    return this.self();
-  }
-  scale(scale) {
-    this._item.scale = scale;
-    return this.self();
-  }
-  visible(visible) {
-    this._item.visible = visible;
-    return this.self();
-  }
-  attachedTo(attachedTo) {
-    this._item.attachedTo = attachedTo;
-    return this.self();
-  }
-  layer(layer) {
-    this._item.layer = layer;
-    return this.self();
-  }
-  disableHit(disable) {
-    this._item.disableHit = disable;
-    return this.self();
-  }
-  disableAutoZIndex(disable) {
-    this._item.disableAutoZIndex = disable;
-    return this.self();
-  }
-  disableAttachmentBehavior(disable) {
-    this._item.disableAttachmentBehavior = disable;
-    return this.self();
-  }
-  self() {
-    return this;
-  }
-};
-
-// ../node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
-var PathBuilder = class extends GenericItemBuilder {
-  constructor(player) {
-    super(player);
-    this._commands = [];
-    this._fillRule = "nonzero";
-    this._style = {
-      fillColor: "black",
-      fillOpacity: 1,
-      strokeColor: "white",
-      strokeOpacity: 1,
-      strokeWidth: 5,
-      strokeDash: []
-    };
-    this._item.name = "Path";
-    this._item.layer = "DRAWING";
-  }
-  commands(commands) {
-    this._commands = commands;
-    return this.self();
-  }
-  fillRule(fillRule) {
-    this._fillRule = fillRule;
-    return this.self();
-  }
-  style(style) {
-    this._style = style;
-    return this.self();
-  }
-  fillColor(fillColor) {
-    this._style.fillColor = fillColor;
-    return this.self();
-  }
-  fillOpacity(fillOpacity) {
-    this._style.fillOpacity = fillOpacity;
-    return this.self();
-  }
-  strokeColor(strokeColor) {
-    this._style.strokeColor = strokeColor;
-    return this.self();
-  }
-  strokeOpacity(strokeOpacity) {
-    this._style.strokeOpacity = strokeOpacity;
-    return this.self();
-  }
-  strokeWidth(strokeWidth) {
-    this._style.strokeWidth = strokeWidth;
-    return this.self();
-  }
-  strokeDash(strokeDash) {
-    this._style.strokeDash = strokeDash;
-    return this.self();
-  }
-  build() {
-    return Object.assign(Object.assign({}, this._item), { type: "PATH", commands: this._commands, fillRule: this._fillRule, style: this._style });
-  }
-};
-
 // ../node_modules/js-base64/base64.mjs
 var _TD = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { ignoreBOM: true }) : void 0;
 var _TE = typeof TextEncoder === "function" ? new TextEncoder() : void 0;
@@ -3628,11 +3473,6 @@ function getDetails() {
   return { origin, roomId };
 }
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/types/items/Image.js
-function isImage(item) {
-  return item.type === "IMAGE";
-}
-
 // ../node_modules/@owlbear-rodeo/sdk/lib/types/items/Path.js
 var Command;
 (function(Command2) {
@@ -3691,1197 +3531,58 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildPath() {
-  return new PathBuilder(playerApi);
-}
 var lib_default = OBR;
-
-// ../ammunition.js
-var integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
-var modifier = (value) => Math.min(999, Math.max(-999, Math.trunc(Number(value) || 0)));
-function sanitizeAmmunition(raw) {
-  const seen = /* @__PURE__ */ new Set();
-  return (Array.isArray(raw) ? raw : []).filter((item) => {
-    if (!item || typeof item.id !== "string" || !item.id || seen.has(item.id)) return false;
-    seen.add(item.id);
-    return true;
-  }).map((item) => ({
-    id: item.id,
-    name: String(item.name || "Ammo").trim() || "Ammo",
-    damage: integer(item.damage, 999),
-    penetration: modifier(item.penetration),
-    quantity: integer(item.quantity)
-  }));
-}
-function sanitizeMagazine(weapon) {
-  const capacity = integer(weapon.capacity, 999);
-  return {
-    ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
-    capacity,
-    loadedAmmoId: String(weapon.loadedAmmoId || ""),
-    loaded: integer(weapon.loaded, capacity)
-  };
-}
-
-// ../shared.js
-var EXTENSION_ID = "com.codex.body-hp";
-var META_KEY = `${EXTENSION_ID}/data`;
-var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
-var SHIELD_PART_NAME = "Shield";
-var SPECIAL_PART_NAME = "Special";
-var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
-var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
-var BODY_PART_SLOTS = ["head", "left-arm", "right-arm", "left-leg", "right-leg", "other"];
-var BODY_SLOT_BY_PART = {
-  Head: "head",
-  "L.Arm": "left-arm",
-  "R.Arm": "right-arm",
-  "L.Leg": "left-leg",
-  "R.Leg": "right-leg",
-  Torso: "torso"
-};
-var BODY_SLOT_LAYOUT = [
-  { slot: "head", angle: -90 },
-  { slot: "right-arm", angle: -18 },
-  { slot: "right-leg", angle: 54 },
-  { slot: "left-leg", angle: 126 },
-  { slot: "left-arm", angle: 198 }
-];
-var ROLL_HISTORY_LIMIT = 12;
-var COMBAT_SKILL_CATEGORY = "combat";
-var APPLIED_SKILL_CATEGORY = "applied";
-var ABILITIES_SKILL_CATEGORY = "abilities";
-var MELEE_SKILL_NAME = "Melee";
-var PARRY_SKILL_NAME = "Parry";
-var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
-var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 15;
-var SPECIAL_RING_COLOR = "#57D8FF";
-var HP_COLOR_STOPS = [
-  { ratio: 1, color: "#73FF5A" },
-  { ratio: 0.75, color: "#FFF243" },
-  { ratio: 0.5, color: "#FFAF22" },
-  { ratio: 0.25, color: "#AC0004" },
-  { ratio: 0, color: "#000000" }
-];
-var RING_COLORS = {
-  base: "#000000",
-  border: "#050505"
-};
-var OVERLAY_STROKE_WIDTH = 0.75;
-var overlayEnsureQueue = /* @__PURE__ */ new Map();
-var OVERLAY_UPDATE_DELAY_MS = 75;
-var cachedGridDpi = null;
-var DEFAULT_ODYSSEY_SKILLS = {
-  [MELEE_SKILL_NAME]: 0,
-  [PARRY_SKILL_NAME]: 0
-};
-var DEFAULT_ODYSSEY_SKILL_CATEGORIES = {
-  [MELEE_SKILL_NAME]: COMBAT_SKILL_CATEGORY,
-  [PARRY_SKILL_NAME]: COMBAT_SKILL_CATEGORY
-};
-var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
-  [MELEE_SKILL_NAME]: true,
-  [PARRY_SKILL_NAME]: false
-};
-var BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false, label: "Torso" },
-  [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
-  [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
-};
-var DEFAULT_TRACKER_DATA = {
-  enabled: true,
-  minor: 0,
-  serious: 0,
-  body: structuredClone(BODY_DEFAULTS),
-  identity: {
-    playerId: "",
-    characterId: ""
-  },
-  lastRoll: null,
-  history: [],
-  sync: {
-    lastEventId: 0,
-    lastSyncedAt: null
-  },
-  odyssey: {
-    owner: {
-      playerId: "",
-      playerName: ""
-    },
-    attackDraft: {
-      targetTokenId: "",
-      targetTokenName: ""
-    },
-    skills: structuredClone(DEFAULT_ODYSSEY_SKILLS),
-    skillCategories: structuredClone(DEFAULT_ODYSSEY_SKILL_CATEGORIES),
-    skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
-    attributes: {
-      Strength: 0,
-      Agility: 0,
-      Reaction: 0,
-      Endurance: 0,
-      Perception: 0,
-      Intelligence: 0,
-      Charisma: 0,
-      Willpower: 0,
-      Magic: 0
-    },
-    ammunition: [],
-    weapons: {
-      melee: [],
-      ranged: []
-    }
-  }
-};
-function deepClone(value) {
-  return structuredClone(value);
-}
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight }) {
-  if (!(handle instanceof HTMLElement)) return;
-  const readSavedSize = () => {
-    try {
-      return JSON.parse(localStorage.getItem(storageKey) ?? "null");
-    } catch {
-      return null;
-    }
-  };
-  const savedSize = readSavedSize();
-  const initialWidth = clamp(Number(savedSize?.width) || defaultWidth, 360, 1200);
-  const initialHeight = clamp(Number(savedSize?.height) || defaultHeight, 500, 1200);
-  let currentWidth = initialWidth;
-  let currentHeight = initialHeight;
-  void lib_default.action.setWidth(initialWidth);
-  void lib_default.action.setHeight(initialHeight);
-  handle.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    handle.setPointerCapture?.(event.pointerId);
-    const startWidth = currentWidth;
-    const startHeight = currentHeight;
-    const startX = event.clientX;
-    const startY = event.clientY;
-    let nextWidth = startWidth;
-    let nextHeight = startHeight;
-    let frame = null;
-    const applySize = () => {
-      frame = null;
-      currentWidth = nextWidth;
-      currentHeight = nextHeight;
-      void lib_default.action.setWidth(nextWidth);
-      void lib_default.action.setHeight(nextHeight);
-    };
-    const move = (moveEvent) => {
-      nextWidth = clamp(startWidth + moveEvent.clientX - startX, 360, 1200);
-      nextHeight = clamp(startHeight + moveEvent.clientY - startY, 500, 1200);
-      if (frame == null) frame = requestAnimationFrame(applySize);
-    };
-    const stop = () => {
-      if (frame != null) {
-        cancelAnimationFrame(frame);
-        applySize();
-      }
-      try {
-        localStorage.setItem(storageKey, JSON.stringify({ width: nextWidth, height: nextHeight }));
-      } catch {
-      }
-      if (handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", stop);
-    };
-    document.addEventListener("pointermove", move);
-    document.addEventListener("pointerup", stop, { once: true });
-  });
-}
-function numberOrFallback(value, fallback) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-function getSlotAttackPenalty(slot) {
-  if (slot === "head") return 30;
-  if (["left-arm", "right-arm", "left-leg", "right-leg"].includes(slot)) return 15;
-  return 0;
-}
-function getPartSlot(partName, source) {
-  if (partName === "Torso") return "torso";
-  return BODY_PART_SLOTS.includes(source?.slot) ? source.slot : BODY_SLOT_BY_PART[partName] ?? "other";
-}
-function sanitizeTrackerData(raw) {
-  const next = deepClone(DEFAULT_TRACKER_DATA);
-  if (!raw || typeof raw !== "object") return next;
-  next.enabled = raw.enabled !== false;
-  next.minor = clamp(Number(raw.minor ?? 0) || 0, 0, 4);
-  next.serious = clamp(Number(raw.serious ?? 0) || 0, 0, 2);
-  next.identity.playerId = String(raw.identity?.playerId ?? "").trim();
-  next.identity.characterId = String(raw.identity?.characterId ?? "").trim();
-  next.lastRoll = sanitizeRollSummary(raw.lastRoll);
-  next.history = Array.isArray(raw.history) ? raw.history.map(sanitizeRollSummary).filter(Boolean).slice(0, ROLL_HISTORY_LIMIT) : [];
-  next.sync.lastEventId = Math.max(0, Number(raw.sync?.lastEventId ?? 0) || 0);
-  next.sync.lastSyncedAt = raw.sync?.lastSyncedAt ? String(raw.sync.lastSyncedAt) : null;
-  next.odyssey = sanitizeOdysseyData(raw.odyssey);
-  for (const partName of Object.keys(BODY_DEFAULTS)) {
-    const source = raw.body?.[partName] ?? {};
-    const part = next.body[partName];
-    part.max = clamp(numberOrFallback(source.max, part.max), 0, 999);
-    part.current = clamp(
-      numberOrFallback(source.current, part.current),
-      0,
-      part.max
-    );
-    part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
-    part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
-    part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
-    part.slot = getPartSlot(partName, source);
-    part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getSlotAttackPenalty(part.slot)), 0, 999);
-    if (part.slot !== "other") part.attackPenalty = getSlotAttackPenalty(part.slot);
-    part.hidden = partName === "Torso" ? false : source.hidden === true;
-    part.label = String(source.label ?? partName).trim().slice(0, 40) || partName;
-  }
-  for (const [partName, source] of Object.entries(raw.body ?? {})) {
-    if (Object.hasOwn(next.body, partName)) continue;
-    const name = String(partName).trim().slice(0, 40);
-    if (!name) continue;
-    const max = clamp(Number(source?.max) || 0, 0, 999);
-    next.body[name] = {
-      current: clamp(Number(source?.current) || 0, 0, max),
-      max,
-      armor: clamp(Number(source?.armor) || 0, 0, 999),
-      minor: clamp(Number(source?.minor) || 0, 0, 3),
-      serious: clamp(Number(source?.serious) || 0, 0, 1),
-      slot: getPartSlot(name, source),
-      attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getSlotAttackPenalty(getPartSlot(name, source))), 0, 999),
-      hidden: source?.hidden === true,
-      label: String(source?.label ?? name).trim().slice(0, 40) || name
-    };
-    if (next.body[name].slot !== "other") {
-      next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
-    }
-  }
-  return next;
-}
-function sanitizeOdysseyData(raw) {
-  const next = deepClone(DEFAULT_TRACKER_DATA.odyssey);
-  if (!raw || typeof raw !== "object") return next;
-  next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
-  next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
-  next.attackDraft.targetTokenId = String(raw.attackDraft?.targetTokenId ?? "").trim();
-  next.attackDraft.targetTokenName = String(raw.attackDraft?.targetTokenName ?? "").trim();
-  const rawSkills = raw.skills && typeof raw.skills === "object" ? raw.skills : {};
-  const rawSkillCategories = raw.skillCategories && typeof raw.skillCategories === "object" ? raw.skillCategories : {};
-  const rawSkillStrengthBonuses = raw.skillStrengthBonuses && typeof raw.skillStrengthBonuses === "object" ? raw.skillStrengthBonuses : {};
-  const migratedMeleeValue = Math.max(
-    Number(rawSkills[MELEE_SKILL_NAME] ?? 0) || 0,
-    ...Array.from(LEGACY_MELEE_SKILL_NAMES).map((skillName) => Number(rawSkills[skillName] ?? 0) || 0),
-    Number(DEFAULT_ODYSSEY_SKILLS[MELEE_SKILL_NAME] ?? 0) || 0
-  );
-  const migratedParryValue = Math.max(
-    Number(rawSkills[PARRY_SKILL_NAME] ?? 0) || 0,
-    Number(raw.attributes?.Parry ?? 0) || 0,
-    Number(DEFAULT_ODYSSEY_SKILLS[PARRY_SKILL_NAME] ?? 0) || 0
-  );
-  next.skills[MELEE_SKILL_NAME] = clamp(migratedMeleeValue, 0, 10);
-  next.skillCategories[MELEE_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
-  next.skillStrengthBonuses[MELEE_SKILL_NAME] = true;
-  next.skills[PARRY_SKILL_NAME] = clamp(migratedParryValue, 0, 10);
-  next.skillCategories[PARRY_SKILL_NAME] = COMBAT_SKILL_CATEGORY;
-  next.skillStrengthBonuses[PARRY_SKILL_NAME] = false;
-  for (const [key, value] of Object.entries(rawSkills)) {
-    const normalizedKey = String(key).trim();
-    if (!normalizedKey) continue;
-    if (normalizedKey === MELEE_SKILL_NAME || normalizedKey === PARRY_SKILL_NAME || LEGACY_MELEE_SKILL_NAMES.has(normalizedKey) || LEGACY_REMOVED_SKILLS.has(normalizedKey)) {
-      continue;
-    }
-    next.skills[normalizedKey] = clamp(Number(value) || 0, 0, 10);
-    const categoryValue = String(
-      rawSkillCategories[normalizedKey] ?? rawSkillCategories[key] ?? ""
-    ).toLowerCase();
-    next.skillCategories[normalizedKey] = categoryValue === COMBAT_SKILL_CATEGORY ? COMBAT_SKILL_CATEGORY : categoryValue === ABILITIES_SKILL_CATEGORY ? ABILITIES_SKILL_CATEGORY : APPLIED_SKILL_CATEGORY;
-    next.skillStrengthBonuses[normalizedKey] = Boolean(
-      rawSkillStrengthBonuses[normalizedKey] ?? rawSkillStrengthBonuses[key] ?? false
-    );
-  }
-  for (const key of Object.keys(next.attributes)) {
-    const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;
-    next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
-  }
-  next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
-  next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
-  next.ammunition = sanitizeAmmunition(raw.ammunition);
-  return next;
-}
-function sanitizeWeapons(raw, ranged = false) {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
-    name: String(item.name ?? "").trim() || "Weapon",
-    damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
-    accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
-    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
-  })).slice(0, 20);
-}
-function sanitizeRollSummary(raw) {
-  if (!raw || typeof raw !== "object") return null;
-  const eventId = Math.max(0, Number(raw.eventId ?? 0) || 0);
-  const summary = String(raw.summary ?? "").trim();
-  const actorName = String(raw.actorName ?? "").trim();
-  const outcome = String(raw.outcome ?? "").trim();
-  const total = raw.total == null ? null : Number(raw.total) || 0;
-  const targetPart = String(raw.targetPart ?? "").trim();
-  const timestamp = raw.timestamp ? String(raw.timestamp) : null;
-  const source = String(raw.source ?? "bridge").trim();
-  if (!summary && !actorName && total == null && !outcome) {
-    return null;
-  }
-  return {
-    eventId,
-    summary,
-    actorName,
-    outcome,
-    total,
-    targetPart,
-    timestamp,
-    source
-  };
-}
-function getTrackerData(item) {
-  return sanitizeTrackerData(item?.metadata?.[META_KEY]);
-}
-function isCharacterToken(item) {
-  return Boolean(item) && isImage(item) && item.layer === "CHARACTER";
-}
-function isTrackedCharacter(item) {
-  return isCharacterToken(item) && item.metadata?.[META_KEY]?.enabled === true;
-}
-function getCharacterName(item) {
-  if (!item) return "Unnamed character";
-  const byName = typeof item.name === "string" ? item.name.trim() : "";
-  if (byName) return byName;
-  return `Character ${item.id.slice(0, 6)}`;
-}
-function sortCharacters(items) {
-  return [...items].sort(
-    (left, right) => getCharacterName(left).localeCompare(getCharacterName(right))
-  );
-}
-function getOdysseyData(item) {
-  return sanitizeOdysseyData(getTrackerData(item).odyssey);
-}
-function getBodyPartNames(dataOrBody) {
-  const body = dataOrBody?.body ?? dataOrBody ?? {};
-  const names = Object.keys(body).filter((partName) => partName !== SHIELD_PART_NAME && partName !== SPECIAL_PART_NAME);
-  return names.sort((left, right) => {
-    if (left === "Torso") return -1;
-    if (right === "Torso") return 1;
-    const leftIndex = BODY_TOTAL_ORDER.indexOf(left);
-    const rightIndex = BODY_TOTAL_ORDER.indexOf(right);
-    if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
-    return left.localeCompare(right);
-  });
-}
-function getBodyPartLabel(dataOrBody, partName) {
-  const body = dataOrBody?.body ?? dataOrBody ?? {};
-  return String(body?.[partName]?.label ?? partName).trim() || partName;
-}
-function hasConfiguredShield(dataOrBody) {
-  const body = dataOrBody?.body ?? dataOrBody;
-  const shield = body?.[SHIELD_PART_NAME];
-  if (!shield || typeof shield !== "object") return false;
-  return (Number(shield.max) || 0) > 0 || (Number(shield.current) || 0) > 0 || (Number(shield.armor) || 0) > 0;
-}
-function hasConfiguredSpecial(dataOrBody) {
-  const body = dataOrBody?.body ?? dataOrBody;
-  const special = body?.[SPECIAL_PART_NAME];
-  if (!special || typeof special !== "object") return false;
-  return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0;
-}
-function getTargetableBodyParts(dataOrBody, includeHidden = false) {
-  const body = dataOrBody?.body ?? dataOrBody ?? {};
-  const parts = getBodyPartNames(body).filter(
-    (partName) => includeHidden || body[partName]?.hidden !== true
-  );
-  return parts.length ? parts : ["Torso"];
-}
-function getBodyPartAttackPenalty(dataOrBody, partName) {
-  const body = dataOrBody?.body ?? dataOrBody ?? {};
-  const part = body?.[partName];
-  const slot = getPartSlot(partName, part);
-  return slot === "other" ? clamp(numberOrFallback(part?.attackPenalty, 0), 0, 999) : getSlotAttackPenalty(slot);
-}
-function getEffectiveSize(token) {
-  const scaleX = Math.abs(token.scale?.x ?? 1);
-  const scaleY = Math.abs(token.scale?.y ?? 1);
-  return {
-    width: (token.width || 140) * scaleX,
-    height: (token.height || 140) * scaleY
-  };
-}
-async function getTokenMetrics(token, data) {
-  const effectiveSize = getEffectiveSize(token);
-  const center = token.position;
-  const width = effectiveSize.width;
-  const height = effectiveSize.height;
-  const gridDpi = await getCachedGridDpi();
-  const scaleFactor = Math.max(
-    Math.abs(token.scale?.x ?? 1),
-    Math.abs(token.scale?.y ?? 1),
-    1
-  );
-  const visibleDiameter = Math.max(
-    width,
-    height,
-    effectiveSize.width,
-    effectiveSize.height,
-    gridDpi * scaleFactor,
-    56
-  );
-  const tokenRadius = visibleDiameter / 2;
-  const tokenGap = 0;
-  const torsoThickness = Math.max(5, visibleDiameter * 0.035);
-  const torsoInnerRadius = tokenRadius + tokenGap;
-  const torsoOuterRadius = torsoInnerRadius + torsoThickness;
-  const ringGap = 0;
-  const outerThickness = Math.max(8, visibleDiameter * 0.08);
-  const outerInnerRadius = torsoOuterRadius + ringGap;
-  const outerRadius = outerInnerRadius + outerThickness;
-  const otherParts = getBodyPartNames(data).filter(
-    (partName) => data.body?.[partName]?.slot === "other" && data.body?.[partName]?.hidden !== true
-  );
-  const extraInnerRadius = outerRadius + Math.max(4, visibleDiameter * 0.03);
-  const extraOuterRadius = extraInnerRadius + outerThickness;
-  const specialThickness = Math.max(4, visibleDiameter * 0.03);
-  const specialInnerRadius = otherParts.length ? extraOuterRadius : outerRadius;
-  const specialOuterRadius = specialInnerRadius + specialThickness;
-  const shieldThickness = Math.max(4, visibleDiameter * 0.028);
-  const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
-  const shieldInnerRadius = Math.max(4, shieldOuterRadius - shieldThickness);
-  const shieldOffsetY = -(specialOuterRadius + shieldOuterRadius + Math.max(5, visibleDiameter * 0.035));
-  return {
-    center,
-    visibleDiameter,
-    outerRadius,
-    outerInnerRadius,
-    extraInnerRadius,
-    extraOuterRadius,
-    torsoOuterRadius,
-    torsoInnerRadius,
-    specialOuterRadius,
-    specialInnerRadius,
-    shieldOuterRadius,
-    shieldInnerRadius,
-    shieldOffsetY
-  };
-}
-function getOverlayPartLayout(data, metrics) {
-  const visibleParts = getBodyPartNames(data).filter(
-    (partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true
-  );
-  const layouts = [];
-  for (const { slot, angle } of BODY_SLOT_LAYOUT) {
-    const parts = visibleParts.filter((partName) => data.body?.[partName]?.slot === slot);
-    const span = 60 / Math.max(parts.length, 1);
-    parts.forEach((partName, index) => {
-      layouts.push({
-        partName,
-        angle: angle - 30 + span * (index + 0.5),
-        span,
-        innerRadius: metrics.outerInnerRadius,
-        outerRadius: metrics.outerRadius
-      });
-    });
-  }
-  const otherParts = visibleParts.filter((partName) => data.body?.[partName]?.slot === "other");
-  const otherSpan = Math.min(60, 360 / Math.max(otherParts.length, 1) * 0.8);
-  otherParts.forEach((partName, index) => {
-    layouts.push({
-      partName,
-      angle: -90 + otherSpan * index,
-      span: otherSpan,
-      innerRadius: metrics.extraInnerRadius,
-      outerRadius: metrics.extraOuterRadius
-    });
-  });
-  return layouts;
-}
-async function getCachedGridDpi(forceRefresh = false) {
-  if (!forceRefresh && Number.isFinite(cachedGridDpi) && cachedGridDpi > 0) {
-    return cachedGridDpi;
-  }
-  let gridDpi = 150;
-  try {
-    gridDpi = await lib_default.scene.grid.getDpi() || gridDpi;
-  } catch (error) {
-    console.warn("[Body HP] Unable to read grid dpi, using fallback size", error);
-  }
-  cachedGridDpi = Math.max(1, Number(gridDpi) || 150);
-  return cachedGridDpi;
-}
-function polar(radius, angle) {
-  const radians = angle * Math.PI / 180;
-  return {
-    x: radius * Math.cos(radians),
-    y: radius * Math.sin(radians)
-  };
-}
-function arcPoints(radius, startAngle, endAngle, segments = 18) {
-  const points = [];
-  for (let index = 0; index <= segments; index += 1) {
-    const ratio = index / segments;
-    const angle = startAngle + (endAngle - startAngle) * ratio;
-    points.push(polar(radius, angle));
-  }
-  return points;
-}
-function buildAnnulusCommands(radiusOuter, radiusInner, offsetX = 0, offsetY = 0) {
-  const outer = arcPoints(radiusOuter, -180, 180, 36).map((point) => ({
-    x: point.x + offsetX,
-    y: point.y + offsetY
-  }));
-  const inner = arcPoints(radiusInner, -180, 180, 36).map((point) => ({
-    x: point.x + offsetX,
-    y: point.y + offsetY
-  }));
-  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
-  for (const point of outer.slice(1)) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  commands.push([Command.CLOSE]);
-  commands.push([Command.MOVE, inner[0].x, inner[0].y]);
-  for (const point of inner) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  commands.push([Command.CLOSE]);
-  return commands;
-}
-function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
-  const startAngle = centerAngle - spanAngle / 2;
-  const endAngle = centerAngle + spanAngle / 2;
-  const segments = Math.max(10, Math.ceil(Math.abs(spanAngle) / 5));
-  const outer = arcPoints(radiusOuter, startAngle, endAngle, segments);
-  const inner = arcPoints(radiusInner, endAngle, startAngle, segments);
-  const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
-  for (const point of outer.slice(1)) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  for (const point of inner) {
-    commands.push([Command.LINE, point.x, point.y]);
-  }
-  commands.push([Command.CLOSE]);
-  return commands;
-}
-function hexToRgb(hex) {
-  const normalized = String(hex).replace("#", "");
-  const value = normalized.length === 3 ? normalized.split("").map((char) => `${char}${char}`).join("") : normalized;
-  return {
-    r: Number.parseInt(value.slice(0, 2), 16) || 0,
-    g: Number.parseInt(value.slice(2, 4), 16) || 0,
-    b: Number.parseInt(value.slice(4, 6), 16) || 0
-  };
-}
-function rgbToHex({ r, g, b }) {
-  return `#${[r, g, b].map(
-    (channel) => clamp(Math.round(channel), 0, 255).toString(16).padStart(2, "0").toUpperCase()
-  ).join("")}`;
-}
-function mixHexColors(startHex, endHex, ratio) {
-  const safeRatio = clamp(ratio, 0, 1);
-  const start = hexToRgb(startHex);
-  const end = hexToRgb(endHex);
-  return rgbToHex({
-    r: start.r + (end.r - start.r) * safeRatio,
-    g: start.g + (end.g - start.g) * safeRatio,
-    b: start.b + (end.b - start.b) * safeRatio
-  });
-}
-function getHpColor(ratio) {
-  const safeRatio = clamp(ratio, 0, 1);
-  for (let index = 0; index < HP_COLOR_STOPS.length - 1; index += 1) {
-    const upper = HP_COLOR_STOPS[index];
-    const lower = HP_COLOR_STOPS[index + 1];
-    if (safeRatio > upper.ratio || safeRatio < lower.ratio) {
-      continue;
-    }
-    const span = upper.ratio - lower.ratio;
-    if (span <= 0) return upper.color;
-    const progress = (safeRatio - lower.ratio) / span;
-    return mixHexColors(lower.color, upper.color, progress);
-  }
-  return HP_COLOR_STOPS.at(-1)?.color ?? RING_COLORS.base;
-}
-function getPartColor(part) {
-  if (part.max <= 0) {
-    return (Number(part?.armor) || 0) > 0 ? getHpColor(1) : getHpColor(0);
-  }
-  return getHpColor(part.current / part.max);
-}
-function getSpecialPartColor(part) {
-  const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
-  return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
-}
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "", itemVisible = true) {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(OVERLAY_STROKE_WIDTH).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind,
-    visualVersion: VISUAL_VERSION,
-    signature
-  }).build();
-}
-function applyOverlayItemState(target, source) {
-  target.name = source.name;
-  target.commands = source.commands;
-  target.fillRule = source.fillRule;
-  target.fillColor = source.fillColor;
-  target.fillOpacity = source.fillOpacity;
-  target.strokeColor = source.strokeColor;
-  target.strokeOpacity = source.strokeOpacity;
-  target.strokeWidth = source.strokeWidth;
-  target.position = source.position;
-  target.rotation = source.rotation;
-  target.zIndex = source.zIndex;
-  target.visible = source.visible;
-  target.metadata = {
-    ...target.metadata ?? {},
-    ...source.metadata ?? {}
-  };
-}
-function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
-  if (overlayItems.length !== expectedKinds.length) {
-    return false;
-  }
-  const seenKinds = /* @__PURE__ */ new Set();
-  return overlayItems.every((item) => {
-    const kind = String(item.metadata?.kind ?? "");
-    const valid = item.attachedTo === token.id && Number(item.metadata?.visualVersion ?? 0) === VISUAL_VERSION && expectedKinds.includes(kind) && !seenKinds.has(kind);
-    seenKinds.add(kind);
-    return valid;
-  });
-}
-function roundMetric(value) {
-  return Math.round((Number(value) || 0) * 100) / 100;
-}
-function buildOverlaySignature(token, data, metrics) {
-  const bodySignature = getBodyPartNames(data).map((partName) => {
-    const part = data.body?.[partName] ?? {};
-    return `${partName}:${part.slot ?? "other"}:${part.hidden === true}:${getPartColor(part)}`;
-  }).join("|");
-  return [
-    VISUAL_VERSION,
-    roundMetric(metrics.visibleDiameter),
-    roundMetric(metrics.outerRadius),
-    roundMetric(metrics.outerInnerRadius),
-    roundMetric(metrics.extraInnerRadius),
-    roundMetric(metrics.extraOuterRadius),
-    roundMetric(metrics.torsoOuterRadius),
-    roundMetric(metrics.torsoInnerRadius),
-    roundMetric(metrics.specialOuterRadius),
-    roundMetric(metrics.specialInnerRadius),
-    roundMetric(metrics.shieldOuterRadius),
-    roundMetric(metrics.shieldInnerRadius),
-    roundMetric(metrics.shieldOffsetY),
-    hasConfiguredSpecial(data),
-    hasConfiguredShield(data),
-    bodySignature
-  ].join(";");
-}
-async function updateTrackerData(tokenId, updater) {
-  await lib_default.scene.items.updateItems([tokenId], (items) => {
-    const token = items[0];
-    if (!token) return;
-    token.metadata ?? (token.metadata = {});
-    token.metadata[META_KEY] = sanitizeTrackerData(
-      updater(getTrackerData(token))
-    );
-  });
-}
-function buildOverlayItems(token, data, metrics, signature = "") {
-  const items = [];
-  const specialVisible = hasConfiguredSpecial(data);
-  const shieldVisible = hasConfiguredShield(data);
-  for (const segment of getOverlayPartLayout(data, metrics)) {
-    const part = data.body[segment.partName];
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `part-${segment.partName}`,
-        buildSectorCommands(
-          segment.outerRadius,
-          segment.innerRadius,
-          segment.angle,
-          segment.span
-        ),
-        getPartColor(part),
-        1,
-        "nonzero",
-        signature,
-        true
-      )
-    );
-  }
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd",
-      signature,
-      true
-    )
-  );
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "special-ring",
-      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      3,
-      "evenodd",
-      signature,
-      specialVisible
-    )
-  );
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "shield-ring",
-      buildAnnulusCommands(
-        metrics.shieldOuterRadius,
-        metrics.shieldInnerRadius,
-        0,
-        metrics.shieldOffsetY
-      ),
-      getPartColor(data.body[SHIELD_PART_NAME]),
-      4,
-      "evenodd",
-      signature,
-      shieldVisible
-    )
-  );
-  return items;
-}
-function getExpectedOverlayKinds(data) {
-  return [
-    ...getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true).map((partName) => `part-${partName}`),
-    "torso-ring",
-    "special-ring",
-    "shield-ring"
-  ];
-}
-async function removeOverlaysForToken(tokenId, items) {
-  const sceneItems2 = items ?? await lib_default.scene.items.getItems();
-  const overlayIds = sceneItems2.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId).map((item) => item.id);
-  if (overlayIds.length) {
-    await lib_default.scene.items.deleteItems(overlayIds);
-  }
-}
-async function ensureOverlayForTokenInternal(tokenId, items) {
-  const sceneItems2 = items ?? await lib_default.scene.items.getItems();
-  const token = sceneItems2.find((item) => item.id === tokenId);
-  if (!token || !isCharacterToken(token)) return;
-  const overlayItems = sceneItems2.filter((item) => item.metadata?.[OVERLAY_KEY] === tokenId);
-  if (!isTrackedCharacter(token) || token.visible === false) {
-    if (overlayItems.length) {
-      await removeOverlaysForToken(tokenId, sceneItems2);
-    }
-    return;
-  }
-  const data = getTrackerData(token);
-  const metrics = await getTokenMetrics(token, data);
-  const overlaySignature = buildOverlaySignature(token, data, metrics);
-  const expectedKinds = getExpectedOverlayKinds(data);
-  if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
-    const signaturesMatch = overlayItems.every(
-      (item) => String(item.metadata?.signature ?? "") === overlaySignature
-    );
-    if (signaturesMatch) {
-      return;
-    }
-    const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
-    const nextOverlayByKind = new Map(
-      nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item])
-    );
-    try {
-      await lib_default.scene.items.updateItems(
-        overlayItems.map((item) => item.id),
-        (itemsToUpdate) => {
-          for (const overlayItem of itemsToUpdate) {
-            const kind = String(overlayItem.metadata?.kind ?? "");
-            const nextItem = nextOverlayByKind.get(kind);
-            if (!nextItem) continue;
-            applyOverlayItemState(overlayItem, nextItem);
-          }
-        }
-      );
-      return;
-    } catch (error) {
-      console.warn("[Body HP] Overlay patch failed, falling back to rebuild", error);
-    }
-  }
-  await removeOverlaysForToken(tokenId);
-  await lib_default.scene.items.addItems(
-    buildOverlayItems(token, data, metrics, overlaySignature)
-  );
-}
-function ensureOverlayForToken(tokenId) {
-  let pending = overlayEnsureQueue.get(tokenId);
-  if (!pending) {
-    pending = { timer: null, running: false, waiters: [] };
-    overlayEnsureQueue.set(tokenId, pending);
-  }
-  return new Promise((resolve, reject) => {
-    pending.waiters.push({ resolve, reject });
-    if (pending.running) return;
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = setTimeout(() => {
-      pending.timer = null;
-      void flushOverlayEnsure(tokenId, pending);
-    }, OVERLAY_UPDATE_DELAY_MS);
-  });
-}
-async function flushOverlayEnsure(tokenId, pending) {
-  if (pending.running) return;
-  pending.running = true;
-  const waiters = pending.waiters.splice(0);
-  try {
-    await ensureOverlayForTokenInternal(tokenId);
-    waiters.forEach(({ resolve }) => resolve());
-  } catch (error) {
-    waiters.forEach(({ reject }) => reject(error));
-  } finally {
-    pending.running = false;
-    if (pending.waiters.length) {
-      pending.timer = setTimeout(() => {
-        pending.timer = null;
-        void flushOverlayEnsure(tokenId, pending);
-      }, OVERLAY_UPDATE_DELAY_MS);
-    } else {
-      overlayEnsureQueue.delete(tokenId);
-    }
-  }
-}
-
-// ../odyssey_rules.js
-function rollPercent() {
-  return Math.floor(Math.random() * 100) + 1;
-}
-function rollDice(sides, modifier2 = 0, count = 1) {
-  const safeSides = clamp(Number(sides) || 0, 2, Number.MAX_SAFE_INTEGER);
-  const safeCount = clamp(Number(count) || 0, 1, 100);
-  const rolls = Array.from({ length: safeCount }, () => Math.floor(Math.random() * safeSides) + 1);
-  const subtotal = rolls.reduce((sum, roll) => sum + roll, 0);
-  return {
-    roll: rolls[0] ?? 0,
-    rolls,
-    count: safeCount,
-    sides: safeSides,
-    subtotal,
-    modifier: Number(modifier2) || 0,
-    total: subtotal + (Number(modifier2) || 0)
-  };
-}
-function calculateAccuracy(attackSkill, attackBonuses = 0, attackPenalties = 0, defenseBonuses = 0, defensePenalties = 0, parry = 0) {
-  const attackRoll = rollPercent();
-  const defenseRoll = rollPercent();
-  const attackTotal = attackRoll + clamp(Number(attackSkill) || 0, 0, 10) * 10 + (Number(attackBonuses) || 0) - (Number(attackPenalties) || 0);
-  const defenseTotal = defenseRoll + (Number(defenseBonuses) || 0) - (Number(defensePenalties) || 0) + clamp(Number(parry) || 0, 0, 10) * 10;
-  return {
-    attackRoll,
-    defenseRoll,
-    attackTotal,
-    defenseTotal
-  };
-}
-function calculateDamage(attackResult, defenseResult, weaponDamage = 0, armor = 0) {
-  const totalAttack = (Number(attackResult) || 0) + (Number(weaponDamage) || 0);
-  const totalDefense = (Number(defenseResult) || 0) + (Number(armor) || 0);
-  const damageDiff = totalAttack - totalDefense;
-  let label = "No damage.";
-  let crit = 0;
-  let serious = 0;
-  let minor = 0;
-  if (damageDiff >= 31) {
-    crit = Math.ceil(damageDiff / 30) - 1;
-    label = `Critical damage: ${crit} Crit.`;
-  } else if (damageDiff >= 6) {
-    label = "Serious hit.";
-    serious = 1;
-  } else if (damageDiff > 0) {
-    label = "Minor damage.";
-    minor = 1;
-  }
-  return {
-    totalAttack,
-    totalDefense,
-    damageDiff,
-    label,
-    crit,
-    serious,
-    minor
-  };
-}
-function getAttackOutcomeIcon(outcome) {
-  switch (outcome) {
-    case "critical-success":
-      return "\u{1F3AF}";
-    case "success":
-      return "\u2705";
-    case "critical-failure":
-      return "\u{1F480}";
-    default:
-      return "\u274C";
-  }
-}
-function formatAttackOutcomeLabel(outcome) {
-  switch (outcome) {
-    case "critical-success":
-      return `${getAttackOutcomeIcon(outcome)} Critical Success`;
-    case "success":
-      return `${getAttackOutcomeIcon(outcome)} Success`;
-    case "critical-failure":
-      return `${getAttackOutcomeIcon(outcome)} Critical Failure`;
-    default:
-      return `${getAttackOutcomeIcon(outcome)} Failure`;
-  }
-}
-function resolveAttack({
-  attackSkill = 0,
-  weaponDamage = 0,
-  defenseBonuses = 0,
-  defensePenalties = 0,
-  attackBonuses = 0,
-  attackPenalties = 0,
-  parry = 0,
-  targetPart = "Torso",
-  targetArmor = 0
-}) {
-  const requestedPart = String(targetPart ?? "").trim();
-  const part = requestedPart && requestedPart !== SPECIAL_PART_NAME ? requestedPart : "Torso";
-  const accuracy = calculateAccuracy(
-    attackSkill,
-    attackBonuses,
-    attackPenalties,
-    defenseBonuses,
-    defensePenalties,
-    parry
-  );
-  const criticalSuccess = accuracy.attackRoll >= 95;
-  const criticalFailure = accuracy.attackRoll <= 5;
-  const hit = criticalSuccess || !criticalFailure && accuracy.attackTotal > accuracy.defenseTotal;
-  let outcome = "failure";
-  let damage = null;
-  let bodyDelta = 0;
-  if (criticalSuccess) {
-    outcome = "critical-success";
-    const baseDamage = calculateDamage(
-      accuracy.attackTotal,
-      accuracy.defenseTotal,
-      weaponDamage,
-      targetArmor
-    );
-    const crit = Math.max(baseDamage.crit || 0, 2);
-    damage = {
-      ...baseDamage,
-      label: `Critical hit: ${crit} Crit.`,
-      crit,
-      serious: 0,
-      minor: 0
-    };
-    bodyDelta = -crit;
-  } else if (criticalFailure) {
-    outcome = "critical-failure";
-  } else if (hit) {
-    outcome = "success";
-    damage = calculateDamage(accuracy.attackTotal, accuracy.defenseTotal, weaponDamage, targetArmor);
-    bodyDelta = -(damage.crit || 0);
-  }
-  return {
-    ...accuracy,
-    targetPart: part,
-    targetArmor: Number(targetArmor) || 0,
-    weaponDamage: Number(weaponDamage) || 0,
-    outcome,
-    hit,
-    damage,
-    bodyDelta,
-    summary: buildAttackSummary({
-      part,
-      outcome,
-      damage,
-      attackRoll: accuracy.attackRoll,
-      attackTotal: accuracy.attackTotal,
-      defenseTotal: accuracy.defenseTotal
-    })
-  };
-}
-function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, defenseTotal }) {
-  if (outcome === "critical-success") {
-    return `${getAttackOutcomeIcon(outcome)} Critical success to ${part}. Roll ${attackRoll}; ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
-  }
-  if (outcome === "critical-failure") {
-    return `${getAttackOutcomeIcon(outcome)} Critical failure. Roll ${attackRoll}.`;
-  }
-  if (outcome === "success") {
-    return `${getAttackOutcomeIcon(outcome)} Hit ${part}. ${attackTotal} vs ${defenseTotal}. ${damage?.label ?? ""}`.trim();
-  }
-  return `${getAttackOutcomeIcon(outcome)} Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
-}
 
 // main.js
 var DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 var DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
-var DEBUG_ENTRY_LIMIT = 50;
-var TARGET_PICK_TOOL_ID = "com.codex.body-hp/gm-target-picker";
-var TARGET_PICK_MODE_ID = "pick-gm-target";
-var DEFAULT_TARGET_PART = "Torso";
-var EXTENSION_ICON_URL = new URL("../icon.svg", window.location.href).href;
-var TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-    <circle cx="16" cy="16" r="3.25" fill="#ef4444" stroke="#7f1d1d" stroke-width="1.5"/>
-    <path d="M16 2v8M16 22v8M2 16h8M22 16h8" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/>
-    <path d="M16 6v4M16 22v4M6 16h4M22 16h4" stroke="#7f1d1d" stroke-width="1.2" stroke-linecap="round"/>
-  </svg>`
-)}") 16 16, crosshair`;
+var ENTRY_LIMIT = 50;
+var POLL_INTERVAL_MS = 2e3;
+var SIZE_STORAGE_KEY = "odyssey-combat-log/window-size";
+var VIEW_CUTOFF_STORAGE_KEY = "odyssey-combat-log/view-cutoff-id";
+var DEFAULT_WINDOW_SIZE = { width: 520, height: 780 };
+var COMPACT_WINDOW_SIZE = { width: 440, height: 640 };
+var LARGE_WINDOW_SIZE = { width: 660, height: 960 };
+var WIDTH_STEP = 40;
+var HEIGHT_STEP = 60;
+var MIN_WINDOW_WIDTH = 420;
+var MAX_WINDOW_WIDTH = 960;
+var MIN_WINDOW_HEIGHT = 560;
+var MAX_WINDOW_HEIGHT = 1200;
 var ui = {
-  roleBadge: document.getElementById("roleBadge"),
   refreshBtn: document.getElementById("refreshBtn"),
+  clearViewBtn: document.getElementById("clearViewBtn"),
+  restoreViewBtn: document.getElementById("restoreViewBtn"),
+  clearBtn: document.getElementById("clearBtn"),
+  sizeLabel: document.getElementById("sizeLabel"),
+  sizeCompactBtn: document.getElementById("sizeCompactBtn"),
+  sizeDefaultBtn: document.getElementById("sizeDefaultBtn"),
+  sizeLargeBtn: document.getElementById("sizeLargeBtn"),
+  widthDownBtn: document.getElementById("widthDownBtn"),
+  widthUpBtn: document.getElementById("widthUpBtn"),
+  heightDownBtn: document.getElementById("heightDownBtn"),
+  heightUpBtn: document.getElementById("heightUpBtn"),
+  liveBadge: document.getElementById("liveBadge"),
+  entryCount: document.getElementById("entryCount"),
   statusBox: document.getElementById("statusBox"),
-  gmOnlyNotice: document.getElementById("gmOnlyNotice"),
-  gmContent: document.getElementById("gmContent"),
-  publicDiceSides: document.getElementById("publicDiceSides"),
-  publicDiceCount: document.getElementById("publicDiceCount"),
-  publicDiceModifier: document.getElementById("publicDiceModifier"),
-  publicDicePrivate: document.getElementById("publicDicePrivate"),
-  publicDiceBtn: document.getElementById("publicDiceBtn"),
-  skillLabel: document.getElementById("skillLabel"),
-  skillLevel: document.getElementById("skillLevel"),
-  skillModifier: document.getElementById("skillModifier"),
-  skillPrivate: document.getElementById("skillPrivate"),
-  skillRollBtn: document.getElementById("skillRollBtn"),
-  attackSourceName: document.getElementById("attackSourceName"),
-  attackSkill: document.getElementById("attackSkill"),
-  weaponDamage: document.getElementById("weaponDamage"),
-  weaponAccuracy: document.getElementById("weaponAccuracy"),
-  attackBonuses: document.getElementById("attackBonuses"),
-  attackPenalties: document.getElementById("attackPenalties"),
-  defenseBonuses: document.getElementById("defenseBonuses"),
-  defensePenalties: document.getElementById("defensePenalties"),
-  parryMode: document.getElementById("parryMode"),
-  targetName: document.getElementById("targetName"),
-  pickTargetBtn: document.getElementById("pickTargetBtn"),
-  clearTargetBtn: document.getElementById("clearTargetBtn"),
-  targetPart: document.getElementById("targetPart"),
-  environmentAttackBtn: document.getElementById("environmentAttackBtn")
+  viewerName: document.getElementById("viewerName"),
+  viewerRole: document.getElementById("viewerRole"),
+  lastSync: document.getElementById("lastSync"),
+  emptyState: document.getElementById("emptyState"),
+  emptyTitle: document.getElementById("emptyTitle"),
+  emptyBody: document.getElementById("emptyBody"),
+  logEntries: document.getElementById("logEntries"),
+  resizeHandle: document.getElementById("resizeHandle")
 };
-var playerRole = "PLAYER";
-var playerName = "";
-var sceneItems = [];
-var characterList = [];
-var charactersById = /* @__PURE__ */ new Map();
-var selectedTargetTokenId = "";
-var privateEntries = [];
-var targetPickState = {
-  active: false,
-  previousToolId: "",
-  previousModeId: void 0,
-  toolReady: false,
-  restoring: false
-};
+var sharedEntries = [];
+var viewerName = "Unknown";
+var viewerRole = "PLAYER";
+var lastSyncLabel = "Not synced yet";
+var roomRefreshTimer = null;
+var windowSize = { ...DEFAULT_WINDOW_SIZE };
+var localViewCutoffId = 0;
 function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-}
-function setStatus(message, kind = "info") {
-  ui.statusBox.textContent = message;
-  ui.statusBox.className = `status ${kind}`;
-}
-function setSceneItems(items) {
-  sceneItems = Array.isArray(items) ? items : [];
-  characterList = sortCharacters(sceneItems.filter(isCharacterToken));
-  charactersById = new Map(characterList.map((item) => [item.id, item]));
-  syncSelectedTarget();
-}
-function getCharacters() {
-  return characterList.filter((item) => item.visible !== false);
-}
-function getCharacterById(id) {
-  return charactersById.get(id) ?? null;
-}
-function getSelectedTarget() {
-  return selectedTargetTokenId ? getCharacterById(selectedTargetTokenId) : null;
-}
-function syncSelectedTarget() {
-  const target = getSelectedTarget();
-  if (!target || target.visible === false || !isCharacterToken(target)) {
-    selectedTargetTokenId = "";
-  }
-}
-function formatRawDiceRolls(result) {
-  return result.rolls.join(", ");
-}
-function formatDiceRollsWithModifier(result) {
-  const modifier2 = Number(result.modifier) || 0;
-  return result.rolls.map((roll) => (Number(roll) || 0) + modifier2).join(", ");
-}
-function buildDiceRollSummary(diceLabel, result) {
-  return `Rolled ${diceLabel}: raw [${formatRawDiceRolls(result)}], sum ${result.subtotal}, with modifier ${formatDiceRollsWithModifier(result)}`;
-}
-function getResolvedCheckResultIcon(resultLabel) {
-  const normalized = String(resultLabel).trim();
-  if (normalized === "Critical Success") return "\u{1F3AF}";
-  if (normalized === "Critical Failure") return "\u{1F480}";
-  if (normalized === "Check Passed") return "\u2705";
-  return "\u274C";
-}
-function isResolvedCheckResultSuccess(resultLabel) {
-  const normalized = String(resultLabel).trim();
-  return normalized === "Check Passed" || normalized === "Critical Success";
-}
-function formatDiceDebug(label, result) {
-  return [
-    `Actor: ${label}`,
-    `Dice: ${result.count}d${result.sides}`,
-    `Raw Dice: ${formatRawDiceRolls(result)}`,
-    `Dice Sum: ${result.subtotal}`,
-    `With Modifier: ${formatDiceRollsWithModifier(result)}`
-  ].join("\n");
-}
-function rollSkillCheck(skillValue, modifier2 = 0) {
-  const baseSkill = clamp(Number(skillValue) || 0, 0, 10);
-  const rollPrimary = Math.floor(Math.random() * 100) + 1;
-  const rollSecondary = Math.floor(Math.random() * 100) + 1;
-  const totalPrimary = rollPrimary + baseSkill * 10 + (Number(modifier2) || 0);
-  const totalSecondary = rollSecondary;
-  let result = totalPrimary > totalSecondary ? "Check Passed" : "Check Failed";
-  let outcome = result === "Check Passed" ? "success" : "failure";
-  if (rollPrimary >= 95) {
-    result = "Critical Success";
-    outcome = "critical-success";
-  } else if (rollPrimary <= 5) {
-    result = "Critical Failure";
-    outcome = "critical-failure";
-  }
-  return {
-    rollPrimary,
-    rollSecondary,
-    baseSkill,
-    modifier: Number(modifier2) || 0,
-    totalPrimary,
-    totalSecondary,
-    result,
-    outcome
-  };
-}
-function formatSkillDebug(label, result) {
-  return [
-    `Skill Label: ${label}`,
-    `${getResolvedCheckResultIcon(result.result)} ${result.result}`,
-    `First Roll: ${result.rollPrimary} + ${result.baseSkill * 10} + ${result.modifier} = ${result.totalPrimary}`,
-    `Second Roll: ${result.rollSecondary} = ${result.totalSecondary}`
-  ].join("\n");
 }
 function sanitizeDebugEntries(raw) {
   if (!Array.isArray(raw)) return [];
@@ -4891,7 +3592,7 @@ function sanitizeDebugEntries(raw) {
     body: String(entry.body ?? ""),
     kind: String(entry.kind ?? "info"),
     timestamp: String(entry.timestamp ?? "")
-  })).slice(0, DEBUG_ENTRY_LIMIT);
+  })).slice(0, ENTRY_LIMIT);
 }
 function mergeDebugEntries(...entryGroups) {
   const merged = /* @__PURE__ */ new Map();
@@ -4900,630 +3601,393 @@ function mergeDebugEntries(...entryGroups) {
       merged.set(entry.id, entry);
     }
   }
-  return [...merged.values()].sort((left, right) => Number(right.id) - Number(left.id)).slice(0, DEBUG_ENTRY_LIMIT);
+  return [...merged.values()].sort((left, right) => Number(right.id) - Number(left.id)).slice(0, ENTRY_LIMIT);
 }
-async function pushSharedLogEntry(title, body, kind = "info") {
-  if (playerRole !== "GM") {
-    throw new Error("Only the GM can write to the shared Odyssey log.");
+function kindClass(kind) {
+  switch (kind) {
+    case "success":
+      return "kind-success";
+    case "error":
+      return "kind-error";
+    case "warning":
+      return "kind-warning";
+    default:
+      return "kind-info";
   }
-  const entry = {
-    id: Date.now() * 1e3 + Math.floor(Math.random() * 1e3),
-    title,
-    body,
-    kind,
-    timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString()
+}
+function formatKind(kind) {
+  switch (kind) {
+    case "success":
+      return "Success";
+    case "error":
+      return "Error";
+    case "warning":
+      return "Warning";
+    default:
+      return "Info";
+  }
+}
+function setStatus(message) {
+  ui.statusBox.textContent = message;
+}
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function normalizeWindowSize(width, height) {
+  return {
+    width: clamp(Number(width) || DEFAULT_WINDOW_SIZE.width, MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH),
+    height: clamp(Number(height) || DEFAULT_WINDOW_SIZE.height, MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT)
   };
+}
+function formatWindowSize(size = windowSize) {
+  return `${size.width} x ${size.height}`;
+}
+function renderWindowSize() {
+  if (ui.sizeLabel) {
+    ui.sizeLabel.textContent = formatWindowSize();
+  }
+}
+function saveWindowSize(size = windowSize) {
+  try {
+    window.localStorage.setItem(SIZE_STORAGE_KEY, JSON.stringify(size));
+  } catch (error) {
+    console.warn("[Odyssey Combat Log] Unable to store window size", error);
+  }
+}
+function loadStoredWindowSize() {
+  try {
+    const raw = window.localStorage.getItem(SIZE_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_WINDOW_SIZE };
+    const parsed = JSON.parse(raw);
+    return normalizeWindowSize(parsed?.width, parsed?.height);
+  } catch (error) {
+    console.warn("[Odyssey Combat Log] Unable to read stored window size", error);
+    return { ...DEFAULT_WINDOW_SIZE };
+  }
+}
+function saveViewCutoff() {
+  try {
+    window.localStorage.setItem(VIEW_CUTOFF_STORAGE_KEY, String(localViewCutoffId));
+  } catch (error) {
+    console.warn("[Odyssey Combat Log] Unable to store local view cutoff", error);
+  }
+}
+function loadStoredViewCutoff() {
+  try {
+    const raw = window.localStorage.getItem(VIEW_CUTOFF_STORAGE_KEY);
+    return Math.max(0, Number(raw) || 0);
+  } catch (error) {
+    console.warn("[Odyssey Combat Log] Unable to read local view cutoff", error);
+    return 0;
+  }
+}
+function getVisibleEntries() {
+  return sharedEntries.filter((entry) => Number(entry.id) > localViewCutoffId).slice(0, ENTRY_LIMIT);
+}
+function hasHiddenEntries() {
+  return sharedEntries.some((entry) => Number(entry.id) <= localViewCutoffId);
+}
+async function applyWindowSize(nextSize, label = "Window resized") {
+  const normalized = normalizeWindowSize(nextSize?.width, nextSize?.height);
+  await Promise.all([
+    lib_default.action.setWidth(normalized.width),
+    lib_default.action.setHeight(normalized.height)
+  ]);
+  windowSize = normalized;
+  saveWindowSize(windowSize);
+  renderWindowSize();
+  if (label) setStatus(`${label}: ${formatWindowSize(windowSize)}.`);
+}
+function bindPointerResize() {
+  const handle = ui.resizeHandle;
+  if (!handle) return;
+  let startX = 0;
+  let startY = 0;
+  let startSize = { ...windowSize };
+  let pendingSize = null;
+  let frame = 0;
+  const commit = () => {
+    frame = 0;
+    if (!pendingSize) return;
+    void applyWindowSize(pendingSize, "").catch((error) => {
+      console.warn("[Odyssey Combat Log] Pointer resize failed", error);
+    });
+    pendingSize = null;
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    startX = event.clientX;
+    startY = event.clientY;
+    startSize = { ...windowSize };
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    pendingSize = normalizeWindowSize(
+      startSize.width + event.clientX - startX,
+      startSize.height + event.clientY - startY
+    );
+    if (!frame) frame = window.requestAnimationFrame(commit);
+  });
+  const finish = (event) => {
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    if (frame) window.cancelAnimationFrame(frame);
+    frame = 0;
+    if (pendingSize) {
+      const finalSize = pendingSize;
+      pendingSize = null;
+      void applyWindowSize(finalSize, "Window resized").catch((error) => {
+        setStatus(error?.message ?? "Unable to resize window.");
+      });
+    }
+  };
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+}
+function setSyncState(label) {
+  lastSyncLabel = `${label} at ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
+  ui.lastSync.textContent = lastSyncLabel;
+  ui.liveBadge.textContent = label;
+}
+function renderHeader() {
+  ui.viewerName.textContent = viewerName;
+  ui.viewerRole.textContent = viewerRole;
+  const visibleEntries = getVisibleEntries();
+  ui.entryCount.textContent = `${visibleEntries.length} ${visibleEntries.length === 1 ? "entry" : "entries"}`;
+  ui.lastSync.textContent = lastSyncLabel;
+}
+function renderControlState() {
+  if (ui.clearViewBtn) {
+    ui.clearViewBtn.disabled = !getVisibleEntries().length;
+  }
+  if (ui.restoreViewBtn) {
+    ui.restoreViewBtn.disabled = !hasHiddenEntries();
+  }
+}
+function renderEntries() {
+  renderWindowSize();
+  renderHeader();
+  renderControlState();
+  const visibleEntries = getVisibleEntries();
+  if (!visibleEntries.length) {
+    ui.emptyState.hidden = false;
+    ui.logEntries.innerHTML = "";
+    if (sharedEntries.length && hasHiddenEntries()) {
+      ui.emptyTitle.textContent = "Log view cleared";
+      ui.emptyBody.textContent = "Current entries are hidden only on this client. New events will appear automatically, or use Restore View.";
+    } else {
+      ui.emptyTitle.textContent = "No combat entries yet";
+      ui.emptyBody.textContent = "As soon as the main Odyssey extension rolls attacks or checks, the shared room log will appear here.";
+    }
+    return;
+  }
+  ui.emptyState.hidden = true;
+  ui.logEntries.innerHTML = visibleEntries.map(
+    (entry) => `
+        <article class="entry-card">
+          <div class="entry-head">
+            <div class="entry-title">${escapeHtml(entry.title)}</div>
+            <div class="entry-time">${escapeHtml(entry.timestamp || "Unknown time")}</div>
+          </div>
+          <div class="kind-pill ${kindClass(entry.kind)}">${escapeHtml(formatKind(entry.kind))}</div>
+          <pre class="entry-body">${escapeHtml(entry.body)}</pre>
+        </article>`
+  ).join("");
+}
+function haveEntriesChanged(nextEntries) {
+  if (sharedEntries.length !== nextEntries.length) return true;
+  return sharedEntries.some((entry, index) => entry.id !== nextEntries[index]?.id);
+}
+async function refreshFromRoom(label = "Room refresh", options = {}) {
+  const { quiet = false } = options;
   const metadata = await lib_default.room.getMetadata();
-  const nextEntries = mergeDebugEntries([entry], metadata?.[DEBUG_LOG_KEY]);
+  const nextEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+  const changed = haveEntriesChanged(nextEntries);
+  sharedEntries = nextEntries;
+  if (!sharedEntries.length && localViewCutoffId) {
+    localViewCutoffId = 0;
+    saveViewCutoff();
+  }
+  if (quiet && !changed) return;
+  setSyncState(label);
+  setStatus("Connected to the shared Odyssey combat log.");
+  renderEntries();
+}
+function clearLocalView() {
+  if (!getVisibleEntries().length) {
+    setStatus("There are no visible combat entries to clear.");
+    return;
+  }
+  localViewCutoffId = Math.max(
+    localViewCutoffId,
+    ...sharedEntries.map((entry) => Number(entry.id) || 0)
+  );
+  saveViewCutoff();
+  setSyncState("Local view cleared");
+  setStatus("Log output cleared locally. New entries will still appear.");
+  renderEntries();
+}
+function restoreLocalView() {
+  if (!hasHiddenEntries()) {
+    setStatus("There are no hidden combat entries to restore.");
+    return;
+  }
+  localViewCutoffId = 0;
+  saveViewCutoff();
+  setSyncState("View restored");
+  setStatus("Hidden combat entries restored to this client.");
+  renderEntries();
+}
+async function clearSharedLog() {
+  if (viewerRole !== "GM") {
+    setStatus("Only the GM can clear the shared combat log.");
+    return;
+  }
+  sharedEntries = [];
+  setSyncState("Log cleared");
+  setStatus("Shared Odyssey combat log cleared.");
+  renderEntries();
   await lib_default.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,
-    { type: "debug-entry", entry },
+    { type: "debug-clear" },
     { destination: "ALL" }
   );
   await lib_default.room.setMetadata({
-    [DEBUG_LOG_KEY]: nextEntries
+    [DEBUG_LOG_KEY]: []
   });
 }
-function pushPrivateEntry(title, body) {
-  privateEntries = [
-    {
-      id: Date.now(),
-      title,
-      body,
-      timestamp: (/* @__PURE__ */ new Date()).toLocaleTimeString()
-    },
-    ...privateEntries
-  ].slice(0, 20);
-  renderPrivateEntries();
-}
-function renderPrivateEntries() {
-  if (!ui.privateLog) return;
-  if (!privateEntries.length) {
-    ui.privateLog.innerHTML = '<div class="empty">Private GM rolls will stay visible only here.</div>';
-    return;
-  }
-  ui.privateLog.innerHTML = privateEntries.map(
-    (entry) => `
-        <div class="debug-entry">
-          <div class="debug-head">
-            <div class="debug-title">${escapeHtml(entry.title)}</div>
-            <div class="muted">${escapeHtml(entry.timestamp)}</div>
-          </div>
-          <pre class="console-output">${escapeHtml(entry.body)}</pre>
-        </div>`
-  ).join("");
-}
-function renderRoleGate() {
-  ui.roleBadge.textContent = playerRole;
-  const isGm = playerRole === "GM";
-  ui.gmOnlyNotice.hidden = isGm;
-  ui.gmContent.hidden = !isGm;
-}
-function renderTargetPartOptions() {
-  const target = getSelectedTarget();
-  const targetParts = getTargetableBodyParts(target ? getTrackerData(target) : null, true);
-  const currentValue = ui.targetPart.value;
-  const nextValue = targetParts.includes(currentValue) ? currentValue : DEFAULT_TARGET_PART;
-  ui.targetPart.innerHTML = targetParts.map(
-    (partName) => `<option value="${escapeHtml(partName)}" ${partName === nextValue ? "selected" : ""}>${escapeHtml(getBodyPartLabel(target ? getTrackerData(target) : null, partName))}</option>`
-  ).join("");
-  if (targetParts.length && !targetParts.includes(ui.targetPart.value)) {
-    ui.targetPart.value = nextValue;
-  }
-}
-function renderTargetState() {
-  const target = getSelectedTarget();
-  const isPicking = targetPickState.active;
-  ui.targetName.textContent = target ? getCharacterName(target) : "No target selected";
-  ui.pickTargetBtn.textContent = isPicking ? "Cancel Target Pick" : "Pick Target On Map";
-  ui.pickTargetBtn.disabled = playerRole !== "GM" || !getCharacters().length;
-  ui.clearTargetBtn.disabled = playerRole !== "GM" || !target;
-  ui.environmentAttackBtn.disabled = playerRole !== "GM" || !target;
-  renderTargetPartOptions();
-}
-function render() {
-  renderRoleGate();
-  renderPrivateEntries();
-  renderTargetState();
-}
-function getParryDivisor(mode) {
-  if (mode === "off") return 0;
-  const numeric = Number(mode);
-  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 5) {
-    return numeric;
-  }
-  return 1;
-}
-function getParryModeLabel(mode) {
-  if (mode === "off") return "Ignore Parry";
-  const divisor = getParryDivisor(mode);
-  return `${divisor} Opponent${divisor === 1 ? "" : "s"}`;
-}
-function formatAppliedDamageLabel(damage, critApplied = 0) {
-  const parts = [];
-  const totalCrit = Math.max(0, Number(critApplied) || 0);
-  const serious = Math.max(0, Number(damage?.serious) || 0);
-  const minor = Math.max(0, Number(damage?.minor) || 0);
-  if (totalCrit > 0) parts.push(`${totalCrit} Crit`);
-  if (serious > 0) parts.push(`${serious} Serious`);
-  if (minor > 0) parts.push(`${minor} Minor`);
-  return parts.length ? parts.join(", ") : "No Damage";
-}
-function formatStateTransition(before, after) {
-  if (before == null || after == null) return "-";
-  return `${before} -> ${after}`;
-}
-function getNormalizedPartState(part) {
-  return {
-    current: Number(part?.current) || 0,
-    max: Number(part?.max) || 0,
-    armor: Number(part?.armor) || 0,
-    minor: Number(part?.minor) || 0,
-    serious: Number(part?.serious) || 0
-  };
-}
-function projectPartDamage(part, damage) {
-  const next = getNormalizedPartState(part);
-  next.minor = Math.max(0, next.minor + (Number(damage?.minor) || 0));
-  next.serious = Math.max(0, next.serious + (Number(damage?.serious) || 0));
-  const promotedSerious = Math.floor(next.minor / 4);
-  next.minor %= 4;
-  next.serious += promotedSerious;
-  const convertedCrit = Math.floor(next.serious / 2);
-  next.serious %= 2;
-  const directCrit = Math.max(0, Number(damage?.crit) || 0);
-  const totalCrit = directCrit + convertedCrit;
-  next.current = clamp(next.current - totalCrit, 0, next.max);
-  return {
-    ...next,
-    critApplied: totalCrit
-  };
-}
-function projectDamageWithSpecialProtection({
-  specialPart,
-  targetPart,
-  damage,
-  targetPartName
-}) {
-  const normalizedSpecial = getNormalizedPartState(specialPart);
-  const normalizedTarget = getNormalizedPartState(targetPart);
-  if (!damage) {
-    return {
-      specialProjectedState: normalizedSpecial,
-      projectedTargetState: {
-        ...normalizedTarget,
-        critApplied: 0
-      },
-      specialActive: false,
-      specialArmor: 0,
-      damageAppliedLabel: "No Damage"
-    };
-  }
-  const specialActive = hasConfiguredSpecial({ body: { [SPECIAL_PART_NAME]: normalizedSpecial } }) && normalizedSpecial.max > 0 && normalizedSpecial.current > 0;
-  if (!specialActive) {
-    const projectedTargetState2 = projectPartDamage(normalizedTarget, damage);
-    return {
-      specialProjectedState: normalizedSpecial,
-      projectedTargetState: projectedTargetState2,
-      specialActive: false,
-      specialArmor: 0,
-      damageAppliedLabel: formatAppliedDamageLabel(damage, projectedTargetState2.critApplied ?? 0)
-    };
-  }
-  const specialProjectedState = projectPartDamage(normalizedSpecial, damage);
-  const absorbedHp = Math.max(0, normalizedSpecial.current - specialProjectedState.current);
-  const totalSpecialCrit = Math.max(0, Number(specialProjectedState.critApplied) || 0);
-  const specialCritApplied = Math.min(totalSpecialCrit, absorbedHp);
-  const overflowCrit = Math.max(0, totalSpecialCrit - specialCritApplied);
-  const overflowDamage = overflowCrit > 0 ? { crit: overflowCrit, serious: 0, minor: 0 } : null;
-  const projectedTargetState = overflowDamage ? projectPartDamage(normalizedTarget, overflowDamage) : { ...normalizedTarget, critApplied: 0 };
-  const specialAppliedLabel = formatAppliedDamageLabel(
-    {
-      serious: damage.serious,
-      minor: damage.minor
-    },
-    specialCritApplied
-  );
-  const targetAppliedLabel = overflowDamage ? formatAppliedDamageLabel(overflowDamage, projectedTargetState.critApplied ?? 0) : "No Damage";
-  let damageAppliedLabel = "No Damage";
-  if (specialAppliedLabel !== "No Damage") {
-    damageAppliedLabel = `Special ${specialAppliedLabel}`;
-  }
-  if (targetAppliedLabel !== "No Damage") {
-    damageAppliedLabel = damageAppliedLabel === "No Damage" ? `${targetPartName} ${targetAppliedLabel}` : `${damageAppliedLabel}; ${targetPartName} ${targetAppliedLabel}`;
-  }
-  return {
-    specialProjectedState,
-    projectedTargetState,
-    specialActive: true,
-    specialArmor: normalizedSpecial.armor,
-    damageAppliedLabel
-  };
-}
-function formatEnvironmentAttackDebug({
-  sourceName,
-  targetName,
-  targetPart,
-  attackSkill,
-  weaponDamage,
-  weaponAccuracy,
-  manualAttackBonuses,
-  totalAttackBonuses,
-  manualAttackPenalties,
-  automaticTargetPenalty,
-  totalAttackPenalties,
-  defenseBonuses,
-  defensePenalties,
-  baseTargetParry,
-  targetParry,
-  parryMode,
-  targetArmor,
-  specialArmor,
-  specialActive,
-  result,
-  beforeHp,
-  afterHp,
-  specialBeforeHp,
-  specialAfterHp,
-  damageAppliedLabel
-}) {
-  const lines = [
-    `Source: ${sourceName}`,
-    `Target: ${targetName} -> ${targetPart}`,
-    `Result: ${formatAttackOutcomeLabel(result.outcome)}`,
-    `Damage Applied: ${damageAppliedLabel}`,
-    "",
-    `Accuracy: ${result.attackRoll} + ${attackSkill * 10} + ${totalAttackBonuses} - ${totalAttackPenalties} = ${result.attackTotal}`,
-    `Defense: ${result.defenseRoll} + ${targetParry * 10} + ${defenseBonuses} - ${defensePenalties} = ${result.defenseTotal}`,
-    `Damage: ${result.attackTotal} + ${weaponDamage} vs ${result.defenseTotal} + ${targetArmor}`,
-    "",
-    `Weapon Accuracy: ${weaponAccuracy}`,
-    `Manual Attack Bonus: ${manualAttackBonuses}`,
-    `Manual Attack Penalty: ${manualAttackPenalties}`,
-    `Auto Target Penalty: ${automaticTargetPenalty}`,
-    `Parry Mode: ${getParryModeLabel(parryMode)}`,
-    `Base Parry: ${baseTargetParry}`,
-    `Effective Parry: ${targetParry}`,
-    `Armor: ${targetArmor}`,
-    `Target HP: ${formatStateTransition(beforeHp, afterHp)}`
-  ];
-  if (specialActive) {
-    lines.push(`Special Armor: ${specialArmor}`);
-    lines.push(`Special HP: ${formatStateTransition(specialBeforeHp, specialAfterHp)}`);
-  }
-  return lines.join("\n");
-}
-async function performPublicGmRoll() {
-  if (playerRole !== "GM") {
-    setStatus("Only the GM can use this extension.", "error");
-    return;
-  }
-  const dice = Number(ui.publicDiceSides.value) || 20;
-  const count = Number(ui.publicDiceCount.value) || 1;
-  const modifier2 = Number(ui.publicDiceModifier.value) || 0;
-  const result = rollDice(dice, modifier2, count);
-  const diceLabel = `${result.count}d${result.sides}`;
-  const summary = buildDiceRollSummary(diceLabel, result);
-  const isPrivate = Boolean(ui.publicDicePrivate?.checked);
-  if (isPrivate) {
-    pushPrivateEntry(`GM Private ${diceLabel}`, formatDiceDebug(playerName || "GM Private Dice", result));
-    setStatus(`Private roll. ${summary}`, "success");
-    return;
-  }
-  await pushSharedLogEntry(
-    `GM Dice ${diceLabel}`,
-    formatDiceDebug(playerName || "GM Dice", result),
-    "success"
-  );
-  setStatus(summary, "success");
-}
-async function performPublicSkillRoll() {
-  if (playerRole !== "GM") {
-    setStatus("Only the GM can use this extension.", "error");
-    return;
-  }
-  const label = ui.skillLabel.value.trim() || "Skill Check";
-  const skillLevel = clamp(Number(ui.skillLevel.value) || 0, 0, 10);
-  const modifier2 = Number(ui.skillModifier.value) || 0;
-  const isPrivate = Boolean(ui.skillPrivate?.checked);
-  const result = rollSkillCheck(skillLevel, modifier2);
-  const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${label}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
-  const debugBody = formatSkillDebug(label, result);
-  const statusKind = isResolvedCheckResultSuccess(result.result) ? "success" : "error";
-  if (isPrivate) {
-    pushPrivateEntry(
-      `${getResolvedCheckResultIcon(result.result)} GM Private skill ${label}`,
-      debugBody
-    );
-    setStatus(`Private skill roll. ${summary}`, statusKind);
-    return;
-  }
-  await pushSharedLogEntry(
-    `${getResolvedCheckResultIcon(result.result)} GM skill ${label}`,
-    debugBody,
-    isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info"
-  );
-  setStatus(summary, statusKind);
-}
-async function performEnvironmentAttack() {
-  if (playerRole !== "GM") {
-    setStatus("Only the GM can resolve environment attacks.", "error");
-    return;
-  }
-  const target = getSelectedTarget();
-  if (!target) {
-    setStatus("Pick a target on the map first.", "error");
-    return;
-  }
-  if (target.visible === false) {
-    setStatus("Hidden tokens cannot be targeted.", "error");
-    return;
-  }
-  const targetData = getTrackerData(target);
-  const targetOdyssey = getOdysseyData(target);
-  const sourceName = ui.attackSourceName.value.trim() || "Environment";
-  const attackSkill = clamp(Number(ui.attackSkill.value) || 0, 0, 10);
-  const weaponDamage = Number(ui.weaponDamage.value) || 0;
-  const weaponAccuracy = Number(ui.weaponAccuracy.value) || 0;
-  const manualAttackBonuses = Number(ui.attackBonuses.value) || 0;
-  const totalAttackBonuses = manualAttackBonuses + weaponAccuracy;
-  const manualAttackPenalties = Number(ui.attackPenalties.value) || 0;
-  const requestedTargetPart = ui.targetPart.value || DEFAULT_TARGET_PART;
-  const availableTargetParts = getTargetableBodyParts(targetData, true);
-  const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : DEFAULT_TARGET_PART;
-  const automaticTargetPenalty = getBodyPartAttackPenalty(targetData, targetPart);
-  const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
-  const defenseBonuses = Number(ui.defenseBonuses.value) || 0;
-  const defensePenalties = Number(ui.defensePenalties.value) || 0;
-  const parryMode = ui.parryMode.value || "1";
-  const parryDivisor = getParryDivisor(parryMode);
-  const specialPartState = targetData?.body?.[SPECIAL_PART_NAME] ?? null;
-  const specialWasActive = hasConfiguredSpecial(targetData) && (Number(specialPartState?.max) || 0) > 0 && (Number(specialPartState?.current) || 0) > 0;
-  const targetArmor = (Number(targetData?.body?.[targetPart]?.armor) || 0) + (specialWasActive ? Number(specialPartState?.armor) || 0 : 0);
-  const targetPartState = targetData?.body?.[targetPart] ?? { current: 0, max: 0, armor: 0, minor: 0, serious: 0 };
-  const beforeHp = targetPartState.current ?? 0;
-  const specialBeforeHp = specialWasActive ? Number(specialPartState?.current) || 0 : null;
-  const baseTargetParry = targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0;
-  const targetParry = parryDivisor <= 0 ? 0 : Math.max(Math.floor((Number(baseTargetParry) || 0) / parryDivisor), 0);
-  const result = resolveAttack({
-    attackSkill,
-    weaponDamage,
-    defenseBonuses,
-    defensePenalties,
-    attackBonuses: totalAttackBonuses,
-    attackPenalties: totalAttackPenalties,
-    parry: targetParry,
-    targetPart,
-    targetArmor
-  });
-  const specialResolution = result.hit && result.damage ? projectDamageWithSpecialProtection({
-    specialPart: specialPartState,
-    targetPart: targetPartState,
-    damage: result.damage,
-    targetPartName: targetPart
-  }) : {
-    specialProjectedState: specialPartState ? getNormalizedPartState(specialPartState) : null,
-    projectedTargetState: {
-      ...getNormalizedPartState(targetPartState),
-      critApplied: 0
-    },
-    specialActive: false,
-    specialArmor: 0,
-    damageAppliedLabel: "No Damage"
-  };
-  const projectedPartState = specialResolution.projectedTargetState;
-  const projectedSpecialState = specialResolution.specialProjectedState;
-  const afterHp = projectedPartState.current ?? beforeHp;
-  const specialAfterHp = specialWasActive ? projectedSpecialState?.current ?? specialBeforeHp : null;
-  const resolvedAttackSummary = specialResolution.specialActive && result.hit && specialResolution.damageAppliedLabel !== "No Damage" ? `${result.summary} Applied: ${specialResolution.damageAppliedLabel}.` : result.summary;
-  await updateTrackerData(target.id, (current2) => {
-    const next = structuredClone(current2);
-    if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
-      next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
-      next.body[SPECIAL_PART_NAME].minor = projectedSpecialState.minor;
-      next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
-    }
-    if (result.hit && next.body[result.targetPart]) {
-      next.body[result.targetPart].current = projectedPartState.current;
-      next.body[result.targetPart].minor = projectedPartState.minor;
-      next.body[result.targetPart].serious = projectedPartState.serious;
-    }
-    next.lastRoll = {
-      eventId: 0,
-      actorName: sourceName,
-      summary: resolvedAttackSummary,
-      outcome: result.outcome,
-      total: result.attackTotal,
-      targetPart: result.targetPart,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      source: "owlbear-extension"
-    };
-    next.history = [next.lastRoll, ...next.history ?? []].slice(0, 12);
-    return next;
-  });
-  if (result.hit) {
-    await ensureOverlayForToken(target.id);
-  }
-  await pushSharedLogEntry(
-    `${getAttackOutcomeIcon(result.outcome)} ${sourceName} attacks ${getCharacterName(target)}`,
-    formatEnvironmentAttackDebug({
-      sourceName,
-      targetName: getCharacterName(target),
-      targetPart,
-      attackSkill,
-      weaponDamage,
-      weaponAccuracy,
-      manualAttackBonuses,
-      totalAttackBonuses,
-      manualAttackPenalties,
-      automaticTargetPenalty,
-      totalAttackPenalties,
-      defenseBonuses,
-      defensePenalties,
-      baseTargetParry,
-      targetParry,
-      parryMode,
-      targetArmor,
-      specialArmor: specialResolution.specialArmor,
-      specialActive: specialResolution.specialActive,
-      result,
-      beforeHp,
-      afterHp,
-      specialBeforeHp,
-      specialAfterHp,
-      damageAppliedLabel: specialResolution.damageAppliedLabel
-    }),
-    result.hit ? "success" : result.outcome === "critical-failure" ? "error" : "info"
-  );
-  setStatus(
-    `${sourceName} -> ${getCharacterName(target)}: ${resolvedAttackSummary}`,
-    result.hit ? "success" : "info"
-  );
-}
-async function teardownTargetPickerTool() {
-  if (!targetPickState.toolReady) return;
-  try {
-    await lib_default.tool.removeMode(TARGET_PICK_MODE_ID);
-  } catch (_error) {
-  }
-  try {
-    await lib_default.tool.remove(TARGET_PICK_TOOL_ID);
-  } catch (_error) {
-  }
-  targetPickState.toolReady = false;
-}
-async function restorePreviousTool() {
-  const previousToolId = targetPickState.previousToolId;
-  const previousModeId = targetPickState.previousModeId;
-  if (!previousToolId || previousToolId === TARGET_PICK_TOOL_ID) return;
-  targetPickState.restoring = true;
-  try {
-    await lib_default.tool.activateTool(previousToolId);
-    if (previousModeId) {
-      try {
-        await lib_default.tool.activateMode(previousToolId, previousModeId);
-      } catch (_error) {
-      }
-    }
-  } finally {
-    targetPickState.restoring = false;
-  }
-}
-async function stopTargetPick(statusMessage = "", statusKind = "info") {
-  const wasActive = targetPickState.active;
-  targetPickState.active = false;
-  renderTargetState();
-  if (wasActive) {
-    await restorePreviousTool();
-  }
-  await teardownTargetPickerTool();
-  targetPickState.previousToolId = "";
-  targetPickState.previousModeId = void 0;
-  if (statusMessage) {
-    setStatus(statusMessage, statusKind);
-  }
-}
-async function ensureTargetPickerTool() {
-  if (targetPickState.toolReady) return;
-  await lib_default.tool.create({
-    id: TARGET_PICK_TOOL_ID,
-    icons: [{ icon: EXTENSION_ICON_URL, label: "Pick GM Attack Target" }],
-    defaultMode: TARGET_PICK_MODE_ID,
-    disabled: { roles: ["PLAYER"] }
-  });
-  await lib_default.tool.createMode({
-    id: TARGET_PICK_MODE_ID,
-    icons: [{ icon: EXTENSION_ICON_URL, label: "Pick GM Attack Target" }],
-    disabled: { roles: ["PLAYER"] },
-    cursors: [{ cursor: TARGET_PICK_CURSOR }],
-    onToolClick: async (_context, event) => {
-      if (!targetPickState.active) return false;
-      const clickedTargetId = event.target?.id ?? "";
-      const liveItems = clickedTargetId ? await lib_default.scene.items.getItems() : [];
-      const target = (clickedTargetId ? liveItems.find((item) => item.id === clickedTargetId) : null) ?? event.target;
-      if (!target || !isCharacterToken(target)) {
-        setStatus("Click a visible character token to use it as target.", "error");
-        return false;
-      }
-      if (target.visible === false) {
-        setStatus("Hidden tokens cannot be targeted.", "error");
-        return false;
-      }
-      selectedTargetTokenId = target.id;
-      renderTargetState();
-      await stopTargetPick(`Target set to ${getCharacterName(target)}.`, "success");
-      return false;
-    },
-    onKeyDown: (_context, event) => {
-      if (event.key === "Escape" && targetPickState.active) {
-        void stopTargetPick("Target picking cancelled.", "info");
-      }
-    },
-    onDeactivate: () => {
-      if (targetPickState.active && !targetPickState.restoring) {
-        void stopTargetPick("Target picking cancelled.", "info");
-      }
-    }
-  });
-  targetPickState.toolReady = true;
-}
-async function startTargetPick() {
-  if (playerRole !== "GM") {
-    setStatus("Only the GM can pick targets here.", "error");
-    return;
-  }
-  const visibleTargets = getCharacters();
-  if (!visibleTargets.length) {
-    setStatus("Add at least one visible character token.", "error");
-    return;
-  }
-  if (targetPickState.active) {
-    await stopTargetPick("Target picking cancelled.", "info");
-    return;
-  }
-  targetPickState.previousToolId = await lib_default.tool.getActiveTool();
-  targetPickState.previousModeId = await lib_default.tool.getActiveToolMode();
-  targetPickState.active = true;
-  await ensureTargetPickerTool();
-  await lib_default.tool.activateTool(TARGET_PICK_TOOL_ID);
-  await lib_default.tool.activateMode(TARGET_PICK_TOOL_ID, TARGET_PICK_MODE_ID);
-  renderTargetState();
-  setStatus("Click a visible character token on the map to assign it.", "info");
-}
-async function refreshState(showStatus = false) {
-  const [role, name, items] = await Promise.all([
-    lib_default.player.getRole(),
-    lib_default.player.getName(),
-    lib_default.scene.items.getItems()
-  ]);
-  playerRole = role;
-  playerName = name ?? "";
-  setSceneItems(items);
-  render();
-  if (showStatus) {
-    setStatus(
-      playerRole === "GM" ? "GM tools refreshed." : "This extension is currently available only to the GM.",
-      playerRole === "GM" ? "success" : "error"
-    );
-  }
-}
-function bindEvents() {
-  ui.refreshBtn.addEventListener("click", () => {
-    void refreshState(true).catch((error) => {
-      setStatus(error?.message ?? "Refresh failed.", "error");
+function bindUiEvents() {
+  ui.refreshBtn?.addEventListener("click", () => {
+    setStatus("Refreshing combat log...");
+    void refreshFromRoom("Manual refresh").catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to refresh log", error);
+      setStatus(error?.message ?? "Unable to refresh combat log.");
     });
   });
-  ui.publicDiceBtn.addEventListener("click", () => {
-    void performPublicGmRoll().catch((error) => {
-      setStatus(error?.message ?? "Unable to roll GM dice.", "error");
+  ui.clearViewBtn?.addEventListener("click", () => {
+    clearLocalView();
+  });
+  ui.restoreViewBtn?.addEventListener("click", () => {
+    restoreLocalView();
+  });
+  ui.clearBtn?.addEventListener("click", () => {
+    setStatus("Clearing shared combat log...");
+    void clearSharedLog().catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to clear log", error);
+      setStatus(error?.message ?? "Unable to clear shared combat log.");
     });
   });
-  ui.skillRollBtn.addEventListener("click", () => {
-    void performPublicSkillRoll().catch((error) => {
-      setStatus(error?.message ?? "Unable to roll GM skill.", "error");
+  ui.sizeCompactBtn?.addEventListener("click", () => {
+    void applyWindowSize(COMPACT_WINDOW_SIZE, "Compact size").catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to apply compact size", error);
+      setStatus(error?.message ?? "Unable to resize window.");
     });
   });
-  ui.pickTargetBtn.addEventListener("click", () => {
-    void startTargetPick().catch((error) => {
-      setStatus(error?.message ?? "Unable to start target picking.", "error");
+  ui.sizeDefaultBtn?.addEventListener("click", () => {
+    void applyWindowSize(DEFAULT_WINDOW_SIZE, "Default size").catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to apply default size", error);
+      setStatus(error?.message ?? "Unable to resize window.");
     });
   });
-  ui.clearTargetBtn.addEventListener("click", () => {
-    selectedTargetTokenId = "";
-    renderTargetState();
-    setStatus("Target cleared.", "info");
+  ui.sizeLargeBtn?.addEventListener("click", () => {
+    void applyWindowSize(LARGE_WINDOW_SIZE, "Large size").catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to apply large size", error);
+      setStatus(error?.message ?? "Unable to resize window.");
+    });
   });
-  ui.environmentAttackBtn.addEventListener("click", () => {
-    void performEnvironmentAttack().catch((error) => {
-      setStatus(error?.message ?? "Unable to resolve environment attack.", "error");
+  ui.widthDownBtn?.addEventListener("click", () => {
+    void applyWindowSize(
+      { width: windowSize.width - WIDTH_STEP, height: windowSize.height },
+      "Width updated"
+    ).catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to reduce width", error);
+      setStatus(error?.message ?? "Unable to resize window.");
+    });
+  });
+  ui.widthUpBtn?.addEventListener("click", () => {
+    void applyWindowSize(
+      { width: windowSize.width + WIDTH_STEP, height: windowSize.height },
+      "Width updated"
+    ).catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to increase width", error);
+      setStatus(error?.message ?? "Unable to resize window.");
+    });
+  });
+  ui.heightDownBtn?.addEventListener("click", () => {
+    void applyWindowSize(
+      { width: windowSize.width, height: windowSize.height - HEIGHT_STEP },
+      "Height updated"
+    ).catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to reduce height", error);
+      setStatus(error?.message ?? "Unable to resize window.");
+    });
+  });
+  ui.heightUpBtn?.addEventListener("click", () => {
+    void applyWindowSize(
+      { width: windowSize.width, height: windowSize.height + HEIGHT_STEP },
+      "Height updated"
+    ).catch((error) => {
+      console.warn("[Odyssey Combat Log] Unable to increase height", error);
+      setStatus(error?.message ?? "Unable to resize window.");
     });
   });
 }
 lib_default.onReady(async () => {
   try {
-    enableActionResize(document.querySelector("[data-action-resize]"), {
-      storageKey: "com.codex.body-hp/gm-action-size",
-      defaultWidth: 560,
-      defaultHeight: 900
-    });
-    bindEvents();
-    await refreshState(false);
-    lib_default.scene.items.onChange((items) => {
-      setSceneItems(items);
-      render();
-    });
+    const [name, role] = await Promise.all([
+      lib_default.player.getName(),
+      lib_default.player.getRole()
+    ]);
+    viewerName = name ?? viewerName;
+    viewerRole = role ?? viewerRole;
+    windowSize = loadStoredWindowSize();
+    localViewCutoffId = loadStoredViewCutoff();
+    bindUiEvents();
+    bindPointerResize();
+    renderWindowSize();
+    renderEntries();
+    await applyWindowSize(windowSize, "Restored size");
+    await refreshFromRoom("Initial sync");
     lib_default.player.onChange((player) => {
-      playerRole = player.role;
-      playerName = player.name ?? playerName;
-      render();
+      viewerName = player?.name ?? viewerName;
+      viewerRole = player?.role ?? viewerRole;
+      renderHeader();
     });
-    render();
-    setStatus(
-      playerRole === "GM" ? "Ready. Use GM Dice or pick a target for environment attacks." : "This extension is currently available only to the GM.",
-      playerRole === "GM" ? "info" : "error"
-    );
+    lib_default.broadcast.onMessage(DEBUG_BROADCAST_CHANNEL, (event) => {
+      const payload = event?.data;
+      if (!payload || typeof payload !== "object") return;
+      if (payload.type === "debug-clear") {
+        sharedEntries = [];
+        localViewCutoffId = 0;
+        saveViewCutoff();
+        setSyncState("Live clear");
+        setStatus("Shared combat log cleared.");
+        renderEntries();
+        return;
+      }
+      if (payload.type !== "debug-entry") return;
+      sharedEntries = mergeDebugEntries([payload.entry], sharedEntries);
+      setSyncState("Live event");
+      setStatus("Received a live Odyssey combat event.");
+      renderEntries();
+    });
+    lib_default.room.onMetadataChange((metadata) => {
+      sharedEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+      if (!sharedEntries.length && localViewCutoffId) {
+        localViewCutoffId = 0;
+        saveViewCutoff();
+      }
+      setSyncState("Room update");
+      setStatus("Room log updated.");
+      renderEntries();
+    });
+    roomRefreshTimer = window.setInterval(() => {
+      void refreshFromRoom("Fallback poll", { quiet: true }).catch((error) => {
+        console.warn("[Odyssey Combat Log] Poll refresh failed", error);
+      });
+    }, POLL_INTERVAL_MS);
   } catch (error) {
-    console.error("[Odyssey GM Tools] Init failed", error);
-    setStatus(error?.message ?? "Failed to initialize GM tools.", "error");
+    console.error("[Odyssey Combat Log] Initialization failed", error);
+    setStatus(error?.message ?? "Combat log extension failed to initialize.");
   }
 });

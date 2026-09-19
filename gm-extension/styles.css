@@ -242,6 +242,51 @@ select {
   margin: 0;
 }
 
+.visibility-eye {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #36558f;
+  border-radius: 6px;
+  background: #172235;
+  cursor: pointer;
+}
+
+.visibility-eye input {
+  position: absolute;
+  opacity: 0;
+}
+
+.visibility-eye span {
+  width: 18px;
+  height: 11px;
+  border: 1.5px solid #93c5fd;
+  border-radius: 50%;
+  opacity: 0.35;
+  position: relative;
+}
+
+.visibility-eye span::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  top: 1.5px;
+  left: 5px;
+  border-radius: 50%;
+  background: #93c5fd;
+}
+
+.visibility-eye input:checked + span {
+  opacity: 1;
+}
+
+.visibility-eye input:focus-visible + span {
+  outline: 2px solid #bfdbfe;
+  outline-offset: 3px;
+}
+
 .hint-box {
   width: 100%;
   border: 1px solid var(--line);
@@ -251,6 +296,25 @@ select {
   min-height: 38px;
   display: flex;
   align-items: center;
+}
+
+.combat-form-grid,
+.combat-modifiers {
+  display: grid;
+  gap: 10px;
+}
+
+.combat-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.combat-modifiers {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(7, 16, 31, 0.42);
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
 
 .list {
@@ -325,6 +389,11 @@ select {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-form-grid,
+  .combat-modifiers {
     grid-template-columns: 1fr;
   }
 

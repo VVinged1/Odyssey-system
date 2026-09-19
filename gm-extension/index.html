@@ -48,36 +48,10 @@
                 </label>
               </div>
               <div class="row row-gap">
+                <label class="visibility-eye" title="Keep this roll private"><input id="publicDicePrivate" type="checkbox"><span></span></label>
                 <button id="publicDiceBtn" type="button">Roll GM Dice</button>
               </div>
-              <div class="muted">Public GM dice are written into the shared Odyssey Combat Log.</div>
-            </div>
-          </details>
-        </section>
-
-        <section class="panel">
-          <details class="collapsible-block">
-            <summary class="collapsible-title">GM Private Dice</summary>
-            <div class="collapsible-body">
-              <div class="form-grid">
-                <label class="field-stack">
-                  <span class="field-label">Dice Sides</span>
-                  <input id="privateDiceSides" type="number" min="2" value="20">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Dice Count</span>
-                  <input id="privateDiceCount" type="number" min="1" max="100" value="1">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Modifier</span>
-                  <input id="privateDiceModifier" type="number" value="0">
-                </label>
-              </div>
-              <div class="row row-gap">
-                <button id="privateDiceBtn" type="button">Roll Private Dice</button>
-              </div>
-              <div class="muted">Private GM dice stay visible only in this extension.</div>
-              <div id="privateLog" class="list private-roll-log"></div>
+              <div class="muted">The eye keeps the result private; otherwise it is written to the shared Odyssey Combat Log.</div>
             </div>
           </details>
         </section>
@@ -99,13 +73,7 @@
                   <span class="field-label">Modifier</span>
                   <input id="skillModifier" type="number" value="0">
                 </label>
-                <label class="field-stack checkbox-field">
-                  <span class="field-label">Visibility</span>
-                  <label class="checkbox-inline">
-                    <input id="skillPrivate" type="checkbox">
-                    <span>Private</span>
-                  </label>
-                </label>
+                <div class="field-stack checkbox-field"><span class="field-label">Private</span><label class="visibility-eye" title="Keep this roll private"><input id="skillPrivate" type="checkbox"><span></span></label></div>
               </div>
               <div class="row row-gap">
                 <button id="skillRollBtn" type="button">Roll GM Skill</button>
@@ -120,7 +88,7 @@
           <details class="collapsible-block" open>
             <summary class="collapsible-title">Environment Attack</summary>
             <div class="collapsible-body">
-              <div class="form-grid">
+              <div class="combat-form-grid">
                 <label class="field-stack">
                   <span class="field-label">Source Name</span>
                   <input id="attackSourceName" type="text" value="Environment" placeholder="Trap, explosion, etc.">
@@ -136,33 +104,6 @@
                 <label class="field-stack">
                   <span class="field-label">Weapon Accuracy</span>
                   <input id="weaponAccuracy" type="number" value="0">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Attack Bonus</span>
-                  <input id="attackBonuses" type="number" value="0">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Attack Penalty</span>
-                  <input id="attackPenalties" type="number" value="0">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Defense Bonus</span>
-                  <input id="defenseBonuses" type="number" value="0">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Defense Penalty</span>
-                  <input id="defensePenalties" type="number" value="0">
-                </label>
-                <label class="field-stack">
-                  <span class="field-label">Parry Mode</span>
-                  <select id="parryMode">
-                    <option value="off">Do Not Count Parry</option>
-                    <option value="1" selected>1 Opponent</option>
-                    <option value="2">2 Opponents</option>
-                    <option value="3">3 Opponents</option>
-                    <option value="4">4 Opponents</option>
-                    <option value="5">5 Opponents</option>
-                  </select>
                 </label>
                 <label class="field-stack">
                   <span class="field-label">Current Target</span>
@@ -181,6 +122,13 @@
                   <button id="clearTargetBtn" type="button" class="secondary">Clear Target</button>
                 </label>
               </div>
+              <div class="combat-modifiers">
+                <label class="field-stack"><span class="field-label">Attack Bonus</span><input id="attackBonuses" type="number" value="0"></label>
+                <label class="field-stack"><span class="field-label">Attack Penalty</span><input id="attackPenalties" type="number" value="0"></label>
+                <label class="field-stack"><span class="field-label">Defense Bonus</span><input id="defenseBonuses" type="number" value="0"></label>
+                <label class="field-stack"><span class="field-label">Defense Penalty</span><input id="defensePenalties" type="number" value="0"></label>
+                <label class="field-stack"><span class="field-label">Parry Mode</span><select id="parryMode"><option value="off">Ignore Parry</option><option value="1" selected>1 Opponent</option><option value="2">2 Opponents</option><option value="3">3 Opponents</option><option value="4">4 Opponents</option><option value="5">5 Opponents</option></select></label>
+              </div>
               <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
               <div class="muted">The selected body part's attack penalty is applied automatically.</div>
               <div class="row row-gap">
@@ -194,6 +142,6 @@
 
     <button type="button" class="action-resize-handle" data-action-resize title="Resize window" aria-label="Resize window"></button>
 
-    <script type="module" src="./assets/main.js?v=1.0.11"></script>
+    <script type="module" src="./assets/main.js?v=1.0.12"></script>
   </body>
 </html>

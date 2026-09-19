@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Odyssey Combat Log icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#12233d" />
+      <stop offset="100%" stop-color="#08111c" />
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8ed3ff" />
+      <stop offset="100%" stop-color="#d9f1ff" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)" />
+  <rect x="28" y="24" width="72" height="80" rx="12" fill="none" stroke="url(#ink)" stroke-width="8" />
+  <path d="M42 44h44M42 62h44M42 80h28" fill="none" stroke="url(#ink)" stroke-linecap="round" stroke-width="8" />
+  <circle cx="92" cy="84" r="8" fill="#8de6a4" />
+</svg>

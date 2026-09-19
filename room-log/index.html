@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Odyssey Combat Log</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="hero block-shell">
+        <details class="block-toggle" open>
+          <summary class="block-summary">
+            <div class="block-summary-copy">
+              <p class="eyebrow">Odyssey System</p>
+              <h1>Combat Log</h1>
+            </div>
+            <span class="block-summary-pill">Overview</span>
+          </summary>
+          <div class="block-content">
+            <p class="hero-sub">
+              Dedicated live log viewer for room-wide attacks, rolls, and debug combat tables.
+            </p>
+          </div>
+        </details>
+      </header>
+
+      <section class="controls-card block-shell">
+        <details class="block-toggle" open>
+          <summary class="block-summary">
+            <div class="block-summary-copy">
+              <p class="section-kicker">Actions</p>
+              <h2>Controls</h2>
+            </div>
+            <span class="block-summary-pill">Manage</span>
+          </summary>
+          <div class="block-content">
+            <div class="control-actions">
+              <button id="refreshBtn" type="button" class="ghost-button">Refresh</button>
+              <button id="clearViewBtn" type="button" class="ghost-button">Clear View</button>
+              <button id="restoreViewBtn" type="button" class="ghost-button">Restore View</button>
+            </div>
+
+            <div class="menu-section">
+              <div class="menu-label">Window Size</div>
+              <div id="sizeLabel" class="menu-value">520 x 780</div>
+              <div class="size-grid">
+                <button id="sizeCompactBtn" type="button" class="menu-action">Compact</button>
+                <button id="sizeDefaultBtn" type="button" class="menu-action">Default</button>
+                <button id="sizeLargeBtn" type="button" class="menu-action">Large</button>
+              </div>
+              <div class="size-adjust-grid">
+                <button id="widthDownBtn" type="button" class="menu-action">Width -</button>
+                <button id="widthUpBtn" type="button" class="menu-action">Width +</button>
+                <button id="heightDownBtn" type="button" class="menu-action">Height -</button>
+                <button id="heightUpBtn" type="button" class="menu-action">Height +</button>
+              </div>
+            </div>
+
+            <div class="control-actions">
+              <button id="clearBtn" type="button" class="menu-action danger-button">Clear Shared Log</button>
+            </div>
+            <p class="menu-note">GM only. Clears the shared Odyssey combat log for everyone.</p>
+            <p class="menu-note">Clear View only hides current entries on your client. New events will still appear automatically.</p>
+          </div>
+        </details>
+      </section>
+
+      <section class="log-shell block-shell">
+        <details class="block-toggle" open>
+          <summary class="block-summary">
+            <div class="block-summary-copy">
+              <p class="section-kicker">Room Feed</p>
+              <h2>Recent Events</h2>
+            </div>
+            <span id="entryCount" class="entry-count">0 entries</span>
+          </summary>
+          <div class="block-content">
+            <div id="emptyState" class="empty-state">
+              <p id="emptyTitle" class="empty-title">No combat entries yet</p>
+              <p id="emptyBody" class="empty-body">
+                As soon as the main Odyssey extension rolls attacks or checks, the shared room log will
+                appear here.
+              </p>
+            </div>
+
+            <div id="logEntries" class="log-entries"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="status-card block-shell">
+        <details class="block-toggle" open>
+          <summary class="block-summary">
+            <div class="block-summary-copy">
+              <p class="section-kicker">Connection</p>
+              <h2>Status</h2>
+            </div>
+            <span id="liveBadge" class="live-badge">Waiting</span>
+          </summary>
+          <div class="block-content">
+            <p id="statusBox" class="status-text">Connecting to room log...</p>
+            <div class="meta-grid">
+              <div class="meta-cell"><span class="meta-label">Viewer</span><span id="viewerName" class="meta-value">Loading...</span></div>
+              <div class="meta-cell"><span class="meta-label">Role</span><span id="viewerRole" class="meta-value">...</span></div>
+              <div class="meta-cell meta-cell-wide"><span class="meta-label">Last Sync</span><span id="lastSync" class="meta-value">Not synced yet</span></div>
+            </div>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <button type="button" class="action-resize-handle" id="resizeHandle" title="Resize window" aria-label="Resize window"></button>
+
+    <script type="module" src="./assets/main.js?v=0.1.6"></script>
+  </body>
+</html>

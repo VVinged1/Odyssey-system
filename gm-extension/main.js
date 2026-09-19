@@ -48,12 +48,8 @@ const ui = {
   publicDiceSides: document.getElementById("publicDiceSides"),
   publicDiceCount: document.getElementById("publicDiceCount"),
   publicDiceModifier: document.getElementById("publicDiceModifier"),
+  publicDicePrivate: document.getElementById("publicDicePrivate"),
   publicDiceBtn: document.getElementById("publicDiceBtn"),
-  privateDiceSides: document.getElementById("privateDiceSides"),
-  privateDiceCount: document.getElementById("privateDiceCount"),
-  privateDiceModifier: document.getElementById("privateDiceModifier"),
-  privateDiceBtn: document.getElementById("privateDiceBtn"),
-  privateLog: document.getElementById("privateLog"),
   skillLabel: document.getElementById("skillLabel"),
   skillLevel: document.getElementById("skillLevel"),
   skillModifier: document.getElementById("skillModifier"),
@@ -270,6 +266,7 @@ function pushPrivateEntry(title, body) {
 }
 
 function renderPrivateEntries() {
+  if (!ui.privateLog) return;
   if (!privateEntries.length) {
     ui.privateLog.innerHTML = '<div class="empty">Private GM rolls will stay visible only here.</div>';
     return;
@@ -541,6 +538,13 @@ async function performPublicGmRoll() {
   const result = rollDice(dice, modifier, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
+  const isPrivate = Boolean(ui.publicDicePrivate?.checked);
+
+  if (isPrivate) {
+    pushPrivateEntry(`GM Private ${diceLabel}`, formatDiceDebug(playerName || "GM Private Dice", result));
+    setStatus(`Private roll. ${summary}`, "success");
+    return;
+  }
 
   await pushSharedLogEntry(
     `GM Dice ${diceLabel}`,
@@ -584,23 +588,6 @@ async function performPublicSkillRoll() {
         : "info",
   );
   setStatus(summary, statusKind);
-}
-
-function performPrivateGmRoll() {
-  if (playerRole !== "GM") {
-    setStatus("Only the GM can use this extension.", "error");
-    return;
-  }
-
-  const dice = Number(ui.privateDiceSides.value) || 20;
-  const count = Number(ui.privateDiceCount.value) || 1;
-  const modifier = Number(ui.privateDiceModifier.value) || 0;
-  const result = rollDice(dice, modifier, count);
-  const diceLabel = `${result.count}d${result.sides}`;
-  const summary = buildDiceRollSummary(diceLabel, result);
-
-  pushPrivateEntry(`GM Private ${diceLabel}`, formatDiceDebug(playerName || "GM Private Dice", result));
-  setStatus(`Private roll. ${summary}`, "success");
 }
 
 async function performEnvironmentAttack() {
@@ -940,14 +927,6 @@ function bindEvents() {
     void performPublicSkillRoll().catch((error) => {
       setStatus(error?.message ?? "Unable to roll GM skill.", "error");
     });
-  });
-
-  ui.privateDiceBtn.addEventListener("click", () => {
-    try {
-      performPrivateGmRoll();
-    } catch (error) {
-      setStatus(error?.message ?? "Unable to roll private GM dice.", "error");
-    }
   });
 
   ui.pickTargetBtn.addEventListener("click", () => {

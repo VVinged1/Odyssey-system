@@ -3920,7 +3920,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 16;
+var VISUAL_VERSION = 17;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -4538,16 +4538,11 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
-function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "", itemVisible = true) {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(OVERLAY_STROKE_WIDTH).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-    [OVERLAY_KEY]: token.id,
-    kind,
-    visualVersion: VISUAL_VERSION,
-    signature
-  }).build();
-}
 function applyOverlayItemState(target, source) {
   target.name = source.name;
+  target.image = source.image;
+  target.grid = source.grid;
+  target.scale = source.scale;
   target.commands = source.commands;
   target.fillRule = source.fillRule;
   target.fillColor = source.fillColor;
@@ -4579,6 +4574,35 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
 function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
+function commandsToSvgPath(commands) {
+  return commands.map((command) => {
+    const [type, x = 0, y = 0] = command;
+    if (type === Command.MOVE) {
+      return `M ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.LINE) {
+      return `L ${roundMetric(x)} ${roundMetric(y)}`;
+    }
+    if (type === Command.CLOSE) {
+      return "Z";
+    }
+    return "";
+  }).filter(Boolean).join(" ");
+}
+function buildOverlayBounds(metrics, data) {
+  const specialActive = hasConfiguredSpecial(data);
+  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
+  const horizontalExtent = ringRadius;
+  const topExtent = ringRadius;
+  const bottomExtent = ringRadius;
+  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
+  return {
+    minX: -horizontalExtent - padding,
+    maxX: horizontalExtent + padding,
+    minY: -topExtent - padding,
+    maxY: bottomExtent + padding
+  };
+}
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
@@ -4595,13 +4619,58 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.torsoInnerRadius),
     roundMetric(metrics.specialOuterRadius),
     roundMetric(metrics.specialInnerRadius),
-    roundMetric(metrics.shieldOuterRadius),
-    roundMetric(metrics.shieldInnerRadius),
-    roundMetric(metrics.shieldOffsetY),
     hasConfiguredSpecial(data),
-    hasConfiguredShield(data),
     bodySignature
   ].join(";");
+}
+function buildOverlaySvgMarkup(token, data, metrics) {
+  const layers = [
+    {
+      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
+      fill: RING_COLORS.base,
+      fillRule: "evenodd"
+    },
+    ...getOverlayPartLayout(data, metrics).map((segment) => ({
+      d: commandsToSvgPath(
+        buildSectorCommands(
+          segment.outerRadius,
+          segment.innerRadius,
+          segment.angle,
+          segment.span
+        )
+      ),
+      fill: getPartColor(data.body[segment.partName]),
+      fillRule: "nonzero"
+    })),
+    {
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
+      ),
+      fill: getPartColor(data.body.Torso),
+      fillRule: "evenodd"
+    }
+  ];
+  if (hasConfiguredSpecial(data)) {
+    layers.push({
+      d: commandsToSvgPath(
+        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
+      ),
+      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
+      fillRule: "evenodd"
+    });
+  }
+  const bounds = buildOverlayBounds(metrics, data);
+  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
+  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
+    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
+  ).join("")}</svg>`;
+  return {
+    svg,
+    width,
+    height,
+    signature: buildOverlaySignature(token, data, metrics)
+  };
 }
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
@@ -4614,83 +4683,26 @@ async function updateTrackerData(tokenId, updater) {
   });
 }
 function buildOverlayItems(token, data, metrics, signature = "") {
-  const items = [];
-  const specialVisible = hasConfiguredSpecial(data);
-  const shieldVisible = hasConfiguredShield(data);
-  for (const segment of getOverlayPartLayout(data, metrics)) {
-    const part = data.body[segment.partName];
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `part-${segment.partName}`,
-        buildSectorCommands(
-          segment.outerRadius,
-          segment.innerRadius,
-          segment.angle,
-          segment.span
-        ),
-        getPartColor(part),
-        1,
-        "nonzero",
-        signature,
-        true
-      )
-    );
-  }
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd",
-      signature,
-      true
-    )
-  );
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "special-ring",
-      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      3,
-      "evenodd",
-      signature,
-      specialVisible
-    )
-  );
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "shield-ring",
-      buildAnnulusCommands(
-        metrics.shieldOuterRadius,
-        metrics.shieldInnerRadius,
-        0,
-        metrics.shieldOffsetY
-      ),
-      getPartColor(data.body[SHIELD_PART_NAME]),
-      4,
-      "evenodd",
-      signature,
-      shieldVisible
-    )
-  );
-  return items;
+  const overlay = buildOverlaySvgMarkup(token, data, metrics);
+  return [
+    buildImage(
+      {
+        url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(overlay.svg)}`,
+        width: overlay.width,
+        height: overlay.height,
+        mime: "image/svg+xml"
+      },
+      token.grid
+    ).name(`Odyssey Overlay: ${getCharacterName(token)}`).position(token.position).scale(token.scale ?? { x: 1, y: 1 }).rotation(0).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION", "SCALE"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+      [OVERLAY_KEY]: token.id,
+      kind: "overlay-image",
+      visualVersion: VISUAL_VERSION,
+      signature
+    }).build()
+  ];
 }
 function getExpectedOverlayKinds(data) {
-  return [
-    ...getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true).map((partName) => `part-${partName}`),
-    "torso-ring",
-    "special-ring",
-    "shield-ring"
-  ];
+  return ["overlay-image"];
 }
 async function removeOverlaysForToken(tokenId, items) {
   const sceneItems2 = items ?? await lib_default.scene.items.getItems();
@@ -7135,15 +7147,16 @@ function renderSelectedToken() {
                 <div class="body-table-wrap">
                   <table class="body-table body-table-compact">
                     <thead><tr><th>Part</th><th>HP</th><th>Max</th><th>Armor</th><th>Position</th><th>Other</th></tr></thead>
-                    <tbody>${getBodyPartNames(data).map((partName) => {
+                    <tbody>${[SPECIAL_PART_NAME, ...getBodyPartNames(data)].map((partName) => {
       const part = data.body[partName];
+      const fixedPart = partName === "Torso" || partName === SPECIAL_PART_NAME;
       const penaltyDisabled = part.slot !== "other" ? "disabled" : bodyFieldDisabled;
       return `<tr>
-                        <td><div class="body-part-name-line">${partName === "Torso" ? `<span class="body-part-eye-spacer" title="Always visible"></span>` : `<label class="check-label body-part-visible" title="Visible to players"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}><span></span></label>`}<input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(getBodyPartLabel(data, partName))}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>${partName === "Torso" ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>\xD7</button>`}</div></td>
+                        <td><div class="body-part-name-line">${fixedPart ? `<span class="body-part-eye-spacer" title="Always visible"></span>` : `<label class="check-label body-part-visible" title="Visible to players"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}><span></span></label>`}<input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(getBodyPartLabel(data, partName))}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${fixedPart ? "disabled" : bodyFieldDisabled}>${fixedPart ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>\xD7</button>`}</div></td>
                         <td><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" maxlength="3" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></td>
                         <td><input class="compact-input" type="text" inputmode="numeric" maxlength="3" value="${part.max}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="max" ${bodyFieldDisabled}></td>
                         <td><input class="compact-input" type="text" inputmode="numeric" maxlength="3" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="armor" ${bodyFieldDisabled}></td>
-                        <td>${partName === "Torso" ? "Main" : `<select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select>`}</td>
+                        <td>${partName === "Torso" ? "Main" : partName === SPECIAL_PART_NAME ? "Special" : `<select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select>`}</td>
                         <td><input class="compact-input" type="text" inputmode="numeric" maxlength="3" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></td>
                       </tr>`;
     }).join("")}</tbody>

@@ -1,4 +1,4 @@
-import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildImage, buildPath, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
 
 export { OBR };
@@ -42,7 +42,7 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 16;
+const VISUAL_VERSION = 17;
 const SPECIAL_RING_COLOR = "#57D8FF";
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -859,6 +859,9 @@ function buildRingItem(
 
 function applyOverlayItemState(target, source) {
   target.name = source.name;
+  target.image = source.image;
+  target.grid = source.grid;
+  target.scale = source.scale;
   target.commands = source.commands;
   target.fillRule = source.fillRule;
   target.fillColor = source.fillColor;
@@ -919,16 +922,9 @@ function commandsToSvgPath(commands) {
 
 function buildOverlayBounds(metrics, data) {
   const specialActive = hasConfiguredSpecial(data);
-  const shieldActive = hasConfiguredShield(data);
   const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
-  const horizontalExtent = Math.max(
-    ringRadius,
-    shieldActive ? metrics.shieldOuterRadius : 0,
-  );
-  const topExtent = Math.max(
-    ringRadius,
-    shieldActive ? Math.abs(metrics.shieldOffsetY) + metrics.shieldOuterRadius : 0,
-  );
+  const horizontalExtent = ringRadius;
+  const topExtent = ringRadius;
   const bottomExtent = ringRadius;
   const padding = Math.max(2, metrics.visibleDiameter * 0.02);
 
@@ -957,11 +953,7 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.torsoInnerRadius),
     roundMetric(metrics.specialOuterRadius),
     roundMetric(metrics.specialInnerRadius),
-    roundMetric(metrics.shieldOuterRadius),
-    roundMetric(metrics.shieldInnerRadius),
-    roundMetric(metrics.shieldOffsetY),
     hasConfiguredSpecial(data),
-    hasConfiguredShield(data),
     bodySignature,
   ].join(";");
 }
@@ -1000,21 +992,6 @@ function buildOverlaySvgMarkup(token, data, metrics) {
         buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
       ),
       fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      fillRule: "evenodd",
-    });
-  }
-
-  if (hasConfiguredShield(data)) {
-    layers.push({
-      d: commandsToSvgPath(
-        buildAnnulusCommands(
-          metrics.shieldOuterRadius,
-          metrics.shieldInnerRadius,
-          0,
-          metrics.shieldOffsetY,
-        ),
-      ),
-      fill: getPartColor(data.body[SHIELD_PART_NAME]),
       fillRule: "evenodd",
     });
   }
@@ -1145,91 +1122,40 @@ export async function updateTrackerData(tokenId, updater) {
 }
 
 export function buildOverlayItems(token, data, metrics, signature = "") {
-  const items = [];
-  const specialVisible = hasConfiguredSpecial(data);
-  const shieldVisible = hasConfiguredShield(data);
-
-  for (const segment of getOverlayPartLayout(data, metrics)) {
-    const part = data.body[segment.partName];
-    items.push(
-      buildRingItem(
-        token,
-        metrics,
-        `part-${segment.partName}`,
-        buildSectorCommands(
-          segment.outerRadius,
-          segment.innerRadius,
-          segment.angle,
-          segment.span,
-        ),
-        getPartColor(part),
-        1,
-        "nonzero",
+  const overlay = buildOverlaySvgMarkup(token, data, metrics);
+  return [
+    buildImage(
+      {
+        url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(overlay.svg)}`,
+        width: overlay.width,
+        height: overlay.height,
+        mime: "image/svg+xml",
+      },
+      token.grid,
+    )
+      .name(`Odyssey Overlay: ${getCharacterName(token)}`)
+      .position(token.position)
+      .scale(token.scale ?? { x: 1, y: 1 })
+      .rotation(0)
+      .zIndex((token.zIndex ?? 0) + 100)
+      .visible(token.visible !== false)
+      .attachedTo(token.id)
+      .disableAttachmentBehavior(["ROTATION", "SCALE"])
+      .layer("ATTACHMENT")
+      .locked(true)
+      .disableHit(true)
+      .metadata({
+        [OVERLAY_KEY]: token.id,
+        kind: "overlay-image",
+        visualVersion: VISUAL_VERSION,
         signature,
-        true,
-      ),
-    );
-  }
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "torso-ring",
-      buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius),
-      getPartColor(data.body.Torso),
-      2,
-      "evenodd",
-      signature,
-      true,
-    ),
-  );
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "special-ring",
-      buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius),
-      getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      3,
-      "evenodd",
-      signature,
-      specialVisible,
-    ),
-  );
-
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "shield-ring",
-      buildAnnulusCommands(
-        metrics.shieldOuterRadius,
-        metrics.shieldInnerRadius,
-        0,
-        metrics.shieldOffsetY,
-      ),
-      getPartColor(data.body[SHIELD_PART_NAME]),
-      4,
-      "evenodd",
-      signature,
-      shieldVisible,
-    ),
-  );
-
-  return items;
+      })
+      .build(),
+  ];
 }
 
 function getExpectedOverlayKinds(data) {
-  return [
-    ...getBodyPartNames(data)
-      .filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true)
-      .map((partName) => `part-${partName}`),
-    "torso-ring",
-    "special-ring",
-    "shield-ring",
-  ];
+  return ["overlay-image"];
 }
 
 export async function removeOverlaysForToken(tokenId, items) {

@@ -621,10 +621,11 @@ select {
 
 .skill-row {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) 64px minmax(96px, 130px) auto;
-  gap: 8px;
+  grid-template-columns: minmax(110px, 1fr) 64px minmax(104px, 132px) 30px;
+  column-gap: 10px;
+  row-gap: 8px;
   align-items: center;
-  padding: 8px 4px;
+  padding: 11px 4px 12px;
   border: 0;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 0;
@@ -655,7 +656,7 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  min-height: 0;
+  padding-top: 1px;
 }
 
 .skill-perk {
@@ -695,8 +696,14 @@ select {
   flex: 1;
 }
 
-.skill-perk-add {
+.skill-perk-actions {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}
+
+.skill-perk-add {
   width: 22px;
   min-width: 22px;
   height: 22px;
@@ -790,6 +797,7 @@ select {
   gap: 8px;
   font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .skill-toggle input[type="checkbox"] {

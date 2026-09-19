@@ -2603,9 +2603,9 @@ function renderOdysseySkillRows(odyssey, skillEntries, disabledAttr) {
             <span>STR Bonus</span>
           </label>
           ${canRemove ? `<button type="button" class="square-icon-button danger" data-action="remove-skill" data-skill="${escapeHtml(key)}" title="Remove skill" aria-label="Remove ${escapeHtml(getSkillLabel(odyssey, key))}" ${disabledAttr}>×</button>` : ""}
-          <div class="skill-perks">${perks.map((perk, perkIndex) => `<span class="skill-perk">${escapeHtml(perk)}<button type="button" data-action="remove-skill-perk" data-skill="${escapeHtml(key)}" data-perk-index="${perkIndex}" title="Remove perk" aria-label="Remove perk">-</button></span>`).join("")}</div>
+          ${perks.length ? `<div class="skill-perks">${perks.map((perk, perkIndex) => `<span class="skill-perk">${escapeHtml(perk)}<button type="button" data-action="remove-skill-perk" data-skill="${escapeHtml(key)}" data-perk-index="${perkIndex}" title="Remove perk" aria-label="Remove perk">-</button></span>`).join("")}</div>` : ""}
           ${skillPerkAddSkill === key ? `<div class="skill-perk-editor"><input type="text" maxlength="40" placeholder="Perk name" data-skill-perk-field="name"><button type="button" class="square-icon-button" data-action="save-skill-perk" data-skill="${escapeHtml(key)}" title="Save perk" aria-label="Save perk">▣</button><button type="button" class="square-icon-button danger" data-action="cancel-skill-perk" title="Cancel" aria-label="Cancel">×</button></div>` : ""}
-          <button type="button" class="skill-perk-add" data-action="open-skill-perk" data-skill="${escapeHtml(key)}" title="Add perk" aria-label="Add perk" ${disabledAttr}>+</button>
+          <div class="skill-perk-actions"><button type="button" class="skill-perk-add" data-action="open-skill-perk" data-skill="${escapeHtml(key)}" title="Add perk" aria-label="Add perk" ${disabledAttr}>+</button></div>
         </div>`;
       },
     )

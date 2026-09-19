@@ -3920,7 +3920,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 15;
+var VISUAL_VERSION = 16;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -4329,9 +4329,11 @@ function getBodyPartAttackPenalty(dataOrBody, partName) {
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
+  const imageWidth = Number(token.image?.width) || Number(token.width) || 140;
+  const imageHeight = Number(token.image?.height) || Number(token.height) || 140;
   return {
-    width: (token.width || 140) * scaleX,
-    height: (token.height || 140) * scaleY
+    width: imageWidth * scaleX,
+    height: imageHeight * scaleY
   };
 }
 async function getTokenMetrics(token, data) {

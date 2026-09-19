@@ -42,7 +42,7 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 15;
+const VISUAL_VERSION = 16;
 const SPECIAL_RING_COLOR = "#57D8FF";
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -565,9 +565,11 @@ export function getBodyPartAttackPenalty(dataOrBody, partName) {
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
   const scaleY = Math.abs(token.scale?.y ?? 1);
+  const imageWidth = Number(token.image?.width) || Number(token.width) || 140;
+  const imageHeight = Number(token.image?.height) || Number(token.height) || 140;
   return {
-    width: (token.width || 140) * scaleX,
-    height: (token.height || 140) * scaleY,
+    width: imageWidth * scaleX,
+    height: imageHeight * scaleY,
   };
 }
 

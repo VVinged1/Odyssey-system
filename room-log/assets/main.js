@@ -3802,8 +3802,9 @@ async function refreshFromRoom(label = "Room refresh", options = {}) {
   const { quiet = false } = options;
   const metadata = await lib_default.room.getMetadata();
   const nextEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
-  const changed = haveEntriesChanged(nextEntries);
-  sharedEntries = nextEntries;
+  const mergedEntries = mergeDebugEntries(nextEntries, sharedEntries);
+  const changed = haveEntriesChanged(mergedEntries);
+  sharedEntries = mergedEntries;
   if (!sharedEntries.length && localViewCutoffId) {
     localViewCutoffId = 0;
     saveViewCutoff();
@@ -3972,7 +3973,10 @@ lib_default.onReady(async () => {
       renderEntries();
     });
     lib_default.room.onMetadataChange((metadata) => {
-      sharedEntries = sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]);
+      sharedEntries = mergeDebugEntries(
+        sanitizeDebugEntries(metadata?.[DEBUG_LOG_KEY]),
+        sharedEntries
+      );
       if (!sharedEntries.length && localViewCutoffId) {
         localViewCutoffId = 0;
         saveViewCutoff();

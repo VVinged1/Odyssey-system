@@ -3852,12 +3852,15 @@ function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight })
   const savedSize = readSavedSize();
   const initialWidth = clamp(Number(savedSize?.width) || defaultWidth, 360, 1200);
   const initialHeight = clamp(Number(savedSize?.height) || defaultHeight, 500, 1200);
+  let currentWidth = initialWidth;
+  let currentHeight = initialHeight;
   void lib_default.action.setWidth(initialWidth);
   void lib_default.action.setHeight(initialHeight);
-  handle.addEventListener("pointerdown", async (event) => {
+  handle.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    const startWidth = await lib_default.action.getWidth() || initialWidth;
-    const startHeight = await lib_default.action.getHeight() || initialHeight;
+    handle.setPointerCapture?.(event.pointerId);
+    const startWidth = currentWidth;
+    const startHeight = currentHeight;
     const startX = event.clientX;
     const startY = event.clientY;
     let nextWidth = startWidth;
@@ -3865,6 +3868,8 @@ function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight })
     let frame = null;
     const applySize = () => {
       frame = null;
+      currentWidth = nextWidth;
+      currentHeight = nextHeight;
       void lib_default.action.setWidth(nextWidth);
       void lib_default.action.setHeight(nextHeight);
     };
@@ -3882,6 +3887,7 @@ function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight })
         localStorage.setItem(storageKey, JSON.stringify({ width: nextWidth, height: nextHeight }));
       } catch {
       }
+      if (handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", stop);
     };

@@ -145,13 +145,16 @@ export function enableActionResize(handle, { storageKey, defaultWidth, defaultHe
   const savedSize = readSavedSize();
   const initialWidth = clamp(Number(savedSize?.width) || defaultWidth, 360, 1200);
   const initialHeight = clamp(Number(savedSize?.height) || defaultHeight, 500, 1200);
+  let currentWidth = initialWidth;
+  let currentHeight = initialHeight;
   void OBR.action.setWidth(initialWidth);
   void OBR.action.setHeight(initialHeight);
 
-  handle.addEventListener("pointerdown", async (event) => {
+  handle.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    const startWidth = (await OBR.action.getWidth()) || initialWidth;
-    const startHeight = (await OBR.action.getHeight()) || initialHeight;
+    handle.setPointerCapture?.(event.pointerId);
+    const startWidth = currentWidth;
+    const startHeight = currentHeight;
     const startX = event.clientX;
     const startY = event.clientY;
     let nextWidth = startWidth;
@@ -160,6 +163,8 @@ export function enableActionResize(handle, { storageKey, defaultWidth, defaultHe
 
     const applySize = () => {
       frame = null;
+      currentWidth = nextWidth;
+      currentHeight = nextHeight;
       void OBR.action.setWidth(nextWidth);
       void OBR.action.setHeight(nextHeight);
     };
@@ -178,6 +183,7 @@ export function enableActionResize(handle, { storageKey, defaultWidth, defaultHe
       } catch {
         // Local size persistence is optional.
       }
+      if (handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", stop);
     };

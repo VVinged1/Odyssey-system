@@ -393,6 +393,39 @@ select:disabled {
   font-weight: 600;
 }
 
+.body-table-compact {
+  min-width: 720px;
+}
+
+.body-table-compact th,
+.body-table-compact td {
+  padding: 7px 5px;
+}
+
+.body-table-compact .compact-input {
+  width: 52px;
+}
+
+.body-table-compact .inline-stepper {
+  gap: 4px;
+}
+
+.body-table-compact .inline-stepper input {
+  width: 36px;
+  padding-left: 3px;
+  padding-right: 3px;
+  text-align: center;
+}
+
+.body-table-compact .inline-stepper button {
+  min-width: 26px;
+  padding: 6px;
+}
+
+.body-table-compact select {
+  min-width: 104px;
+}
+
 .part-name {
   font-weight: 700;
   white-space: nowrap;
@@ -722,8 +755,29 @@ select {
   gap: 8px;
 }
 
-.ammo-actions button {
-  flex: 1;
+.item-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.square-icon-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.square-icon-button.danger {
+  border-color: rgba(248, 113, 113, 0.46);
+  background: transparent;
+  color: #fca5a5;
 }
 
 .weapon-form-grid {
@@ -762,6 +816,11 @@ select {
 
 .weapon-actions button {
   min-width: 94px;
+}
+
+.weapon-actions .square-icon-button,
+.ammo-actions .square-icon-button {
+  min-width: 30px;
 }
 
 .weapon-actions-footer button:first-child:only-child {

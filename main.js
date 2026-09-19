@@ -123,6 +123,8 @@ let characterListCache = [];
 let trackedCharacterListCache = [];
 let charactersByIdCache = new Map();
 let gmPrivateEntries = [];
+let ammunitionAddOpen = false;
+let weaponAddOpen = false;
 const pendingLocalDebugEntryIds = new Set();
 let pendingLocalDebugClear = false;
 const collapsibleSectionState = new Map();
@@ -2826,6 +2828,7 @@ function renderAmmunitionBlock(odyssey) {
       <input type="number" min="${min}" max="${max}" step="1" value="${ammo[field]}"
         data-ammo-draft="${field}"></label>`;
   return renderCollapsibleSection("Ammunition", `
+    <div class="item-toolbar"><button type="button" class="square-icon-button" data-action="open-ammo-add" title="Add ammunition" aria-label="Add ammunition">+</button></div>
     ${(odyssey.ammunition ?? []).map((ammo) => `
       <div class="ammo-entry" data-ammo-id="${escapeHtml(ammo.id)}">
         <label class="field-stack"><span class="field-label">Name</span>
@@ -2836,11 +2839,11 @@ function renderAmmunitionBlock(odyssey) {
           ${numberField(ammo, "quantity", "Reserve", 0, 999999)}
         </div>
         <div class="ammo-actions">
-          <button type="button" class="secondary" data-action="ammo-save" data-ammo-id="${escapeHtml(ammo.id)}">Save Ammo</button>
-          <button type="button" class="danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}">Remove Ammo</button>
+          <button type="button" class="square-icon-button" data-action="ammo-save" data-ammo-id="${escapeHtml(ammo.id)}" title="Save ammunition" aria-label="Save ammunition">▣</button>
+          <button type="button" class="square-icon-button danger" data-action="ammo-remove" data-ammo-id="${escapeHtml(ammo.id)}" title="Remove ammunition" aria-label="Remove ammunition">×</button>
         </div>
       </div>`).join("") || '<div class="empty">No ammunition.</div>'}
-	<div class="ammo-entry ammo-new-form">
+    ${ammunitionAddOpen ? `<div class="ammo-entry ammo-new-form">
 	  <label class="field-stack">
 		<span class="field-label">Ammunition Name</span>
 		<input type="text" data-ammo-draft="name" placeholder="New ammunition">
@@ -2854,8 +2857,8 @@ function renderAmmunitionBlock(odyssey) {
 		<label class="field-stack"><span class="field-label">Reserve</span>
 		  <input type="number" min="0" max="999999" value="0" data-ammo-draft="quantity"></label>
 	  </div>
-	  <div class="ammo-actions"><button type="button" class="secondary" data-action="ammo-save">Save Ammo</button></div>
-	</div>
+	  <div class="ammo-actions"><button type="button" class="square-icon-button" data-action="ammo-save" title="Save ammunition" aria-label="Save ammunition">▣</button><button type="button" class="square-icon-button danger" data-action="close-ammo-add" title="Cancel" aria-label="Cancel">×</button></div>
+	</div>` : ""}
   `, false);
 }
 
@@ -2899,8 +2902,8 @@ function renderWeaponRow(weapon, type, index, ammunition, disabledAttr) {
         </div>
       ` : ""}
       <div class="weapon-actions weapon-actions-footer">
-        <button type="button" class="secondary" data-action="weapon-save" ${identity} ${disabledAttr}>Save Weapon</button>
-        ${weapon ? `<button type="button" class="danger" data-action="weapon-remove" ${identity} ${disabledAttr}>Remove Weapon</button>` : ""}
+        <button type="button" class="square-icon-button" data-action="weapon-save" ${identity} ${disabledAttr} title="Save weapon" aria-label="Save weapon">▣</button>
+        ${weapon ? `<button type="button" class="square-icon-button danger" data-action="weapon-remove" ${identity} ${disabledAttr} title="Remove weapon" aria-label="Remove weapon">×</button>` : `<button type="button" class="square-icon-button danger" data-action="close-weapon-add" ${disabledAttr} title="Cancel" aria-label="Cancel">×</button>`}
       </div>
     </div>`;
 }
@@ -2998,8 +3001,9 @@ function renderEnglishWeaponsBlock(data, disabledAttr) {
     ...(data.odyssey.weapons?.ranged ?? []).map((weapon, index) => renderWeaponRow(weapon, "ranged", index, ammunition, disabledAttr)),
   ].join("");
   return renderCollapsibleSection("Weapons", `
+    <div class="item-toolbar"><button type="button" class="square-icon-button" data-action="open-weapon-add" title="Add weapon" aria-label="Add weapon">+</button></div>
     ${weapons || '<div class="empty">No weapons yet.</div>'}
-    ${renderWeaponRow(null, "melee", -1, ammunition, disabledAttr)}
+    ${weaponAddOpen ? renderWeaponRow(null, "melee", -1, ammunition, disabledAttr) : ""}
   `, false);
 }
 
@@ -3179,15 +3183,6 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Weapon</span>
           <select data-manual-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Target Body Part</span>
-          <select data-manual-attack-field="targetPart" ${disabledAttr}>
-            ${getTargetableBodyParts(data, isEditable()).map(
-              (part) =>
-                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${escapeHtml(getBodyPartLabel(data, part))}</option>`
-            ).join("")}
-          </select>
         </label>
         <label class="field-stack ${getWeaponByName(token, draft.weaponName).rangedIndex != null ? "hidden" : ""}">
           <span class="field-label">Weapon Damage</span>
@@ -3426,31 +3421,23 @@ function renderSelectedToken() {
                 <div class="row row-gap">
                   <button type="button" class="secondary" data-action="heal-limbs" ${bodyFieldDisabled}>Heal</button>
                 </div>
-                <div class="body-parts-list">
-                  ${getBodyPartNames(data).map((partName) => {
-                    const part = data.body[partName];
-                    const penaltyDisabled = part.slot !== "other" ? "disabled" : bodyFieldDisabled;
-                    return `
-                      <div class="body-part-editor">
-                        <div class="body-part-editor-head">
-                          <div class="body-part-identity">
-                            <div class="body-part-name-line">
-                              <input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(getBodyPartLabel(data, partName))}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>
-                              ${partName === "Torso" ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>×</button>`}
-                            </div>
-                            ${partName === "Torso" ? "" : `<label class="check-label body-part-visible"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}> <span>Visible to players</span></label>`}
-                          </div>
-                          ${partName === "Torso" ? `<span class="body-part-slot">Main</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
-                        </div>
-                        <div class="body-part-editor-fields">
-                          <label class="field-stack"><span class="field-label">HP</span><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" maxlength="3" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></label>
-                          <label class="field-stack"><span class="field-label">Max HP</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="${part.max}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="max" ${bodyFieldDisabled}></label>
-                          <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="armor" ${bodyFieldDisabled}></label>
-                          <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></label>
-                        </div>
-                      </div>
-                    `;
-                  }).join("")}
+                <div class="body-table-wrap">
+                  <table class="body-table body-table-compact">
+                    <thead><tr><th>Part</th><th>HP</th><th>Max</th><th>Armor</th><th>Position</th><th>Other</th><th></th></tr></thead>
+                    <tbody>${getBodyPartNames(data).map((partName) => {
+                      const part = data.body[partName];
+                      const penaltyDisabled = part.slot !== "other" ? "disabled" : bodyFieldDisabled;
+                      return `<tr>
+                        <td><div class="body-part-name-line"><input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(getBodyPartLabel(data, partName))}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>${partName === "Torso" ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>×</button>`}</div></td>
+                        <td><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" maxlength="3" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></td>
+                        <td><input class="compact-input" type="text" inputmode="numeric" maxlength="3" value="${part.max}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="max" ${bodyFieldDisabled}></td>
+                        <td><input class="compact-input" type="text" inputmode="numeric" maxlength="3" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="armor" ${bodyFieldDisabled}></td>
+                        <td>${partName === "Torso" ? "Main" : `<select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select>`}</td>
+                        <td><input class="compact-input" type="text" inputmode="numeric" maxlength="3" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></td>
+                        <td>${partName === "Torso" ? "" : `<label class="check-label body-part-visible" title="Visible to players"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}><span>Visible to players</span></label>`}</td>
+                      </tr>`;
+                    }).join("")}</tbody>
+                  </table>
                 </div>
                 <div class="body-part-add">
                   <label class="field-stack"><span class="field-label">Part</span><input type="text" maxlength="40" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
@@ -4238,9 +4225,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     getActionFieldValue(`[${shotPrefix}="ammoId"]`),
     Number(getActionFieldValue(`[${shotPrefix}="rounds"]`)),
   );
-  const requestedTargetPart = manualDefense
-    ? getActionFieldValue('[data-manual-attack-field="targetPart"]') || getActionFieldValue('[data-attack-field="targetPart"]')
-    : getActionFieldValue('[data-attack-field="targetPart"]');
+  const requestedTargetPart = manualDefense ? "Torso" : getActionFieldValue('[data-attack-field="targetPart"]');
   const weaponDamage = Number(
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="weaponDamage"]') || getActionFieldValue('[data-attack-field="weaponDamage"]')
@@ -4259,8 +4244,8 @@ async function performAttackOnce({ manualDefense = false } = {}) {
       : getActionFieldValue('[data-attack-field="attackPenalties"]')
   ) || 0;
   const availableTargetParts = getTargetableBodyParts(targetData, isEditable());
-  const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
-  const automaticTargetPenalty = getBodyPartAttackPenalty(targetData, targetPart);
+  const targetPart = manualDefense ? "Torso" : (availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso");
+  const automaticTargetPenalty = manualDefense ? 0 : getBodyPartAttackPenalty(targetData, targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
@@ -4770,15 +4755,49 @@ function bindUiEvents() {
 
 	const action = actionNode.dataset.action;
 
+    if (action === "open-ammo-add") {
+      ammunitionAddOpen = true;
+      scheduleRender();
+      return;
+    }
+
+    if (action === "close-ammo-add") {
+      ammunitionAddOpen = false;
+      scheduleRender();
+      return;
+    }
+
+    if (action === "open-weapon-add") {
+      weaponAddOpen = true;
+      scheduleRender();
+      return;
+    }
+
+    if (action === "close-weapon-add") {
+      weaponAddOpen = false;
+      scheduleRender();
+      return;
+    }
+
 	if (action === "weapon-save") {
-	  void saveWeapon(actionNode).catch((error) => {
+	  void saveWeapon(actionNode).then(() => {
+        if (actionNode.dataset.weaponType == null) {
+          weaponAddOpen = false;
+          scheduleRender();
+        }
+	  }).catch((error) => {
 		setStatus(error.message, "error");
 	  });
 	  return;
 	}
 
 	if (action === "ammo-save") {
-	  void saveAmmunition(actionNode).catch((error) => {
+	  void saveAmmunition(actionNode).then(() => {
+        if (!actionNode.dataset.ammoId) {
+          ammunitionAddOpen = false;
+          scheduleRender();
+        }
+      }).catch((error) => {
 		setStatus(error.message, "error");
 	  });
 	  return;

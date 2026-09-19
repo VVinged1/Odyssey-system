@@ -442,10 +442,47 @@ select:disabled {
 }
 
 .body-part-visible {
-  min-height: 24px;
+  width: 22px;
+  min-height: 22px;
   margin-top: 5px;
-  align-items: center;
-  white-space: nowrap;
+  position: relative;
+}
+
+.body-part-visible input {
+  position: absolute;
+  opacity: 0;
+}
+
+.body-part-visible span {
+  display: block;
+  width: 18px;
+  height: 11px;
+  border: 1.5px solid #93c5fd;
+  border-radius: 50%;
+  opacity: 0.35;
+  position: relative;
+  overflow: hidden;
+  font-size: 0;
+}
+
+.body-part-visible span::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  top: 1.5px;
+  left: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.body-part-visible input:checked + span {
+  opacity: 1;
+}
+
+.body-part-visible input:focus-visible + span {
+  outline: 2px solid #bfdbfe;
+  outline-offset: 3px;
 }
 
 .body-part-remove {
@@ -458,6 +495,27 @@ select:disabled {
   color: #fca5a5;
   font-size: 20px;
   line-height: 1;
+}
+
+.action-resize-handle {
+  position: fixed;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-right: 2px solid rgba(147, 197, 253, 0.7);
+  border-bottom: 2px solid rgba(147, 197, 253, 0.7);
+  border-radius: 0;
+  background: transparent;
+  cursor: nwse-resize;
+  opacity: 0.7;
+  z-index: 20;
+}
+
+.action-resize-handle:hover {
+  opacity: 1;
 }
 
 .body-part-editor-fields {

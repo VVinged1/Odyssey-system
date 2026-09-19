@@ -73,7 +73,7 @@ export const DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
 };
 
 export const BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false, label: "Torso" },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
 };
@@ -132,6 +132,61 @@ export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+export function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight }) {
+  if (!(handle instanceof HTMLElement)) return;
+
+  const readSavedSize = () => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) ?? "null");
+    } catch {
+      return null;
+    }
+  };
+  const savedSize = readSavedSize();
+  const initialWidth = clamp(Number(savedSize?.width) || defaultWidth, 360, 1200);
+  const initialHeight = clamp(Number(savedSize?.height) || defaultHeight, 500, 1200);
+  void OBR.action.setWidth(initialWidth);
+  void OBR.action.setHeight(initialHeight);
+
+  handle.addEventListener("pointerdown", async (event) => {
+    event.preventDefault();
+    const startWidth = (await OBR.action.getWidth()) || initialWidth;
+    const startHeight = (await OBR.action.getHeight()) || initialHeight;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let nextWidth = startWidth;
+    let nextHeight = startHeight;
+    let frame = null;
+
+    const applySize = () => {
+      frame = null;
+      void OBR.action.setWidth(nextWidth);
+      void OBR.action.setHeight(nextHeight);
+    };
+    const move = (moveEvent) => {
+      nextWidth = clamp(startWidth + moveEvent.clientX - startX, 360, 1200);
+      nextHeight = clamp(startHeight + moveEvent.clientY - startY, 500, 1200);
+      if (frame == null) frame = requestAnimationFrame(applySize);
+    };
+    const stop = () => {
+      if (frame != null) {
+        cancelAnimationFrame(frame);
+        applySize();
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ width: nextWidth, height: nextHeight }));
+      } catch {
+        // Local size persistence is optional.
+      }
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+    };
+
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop, { once: true });
+  });
+}
+
 function numberOrFallback(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -183,6 +238,7 @@ export function sanitizeTrackerData(raw) {
     part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getSlotAttackPenalty(part.slot)), 0, 999);
     if (part.slot !== "other") part.attackPenalty = getSlotAttackPenalty(part.slot);
     part.hidden = partName === "Torso" ? false : source.hidden === true;
+    part.label = String(source.label ?? partName).trim().slice(0, 40) || partName;
   }
 
   for (const [partName, source] of Object.entries(raw.body ?? {})) {
@@ -199,6 +255,7 @@ export function sanitizeTrackerData(raw) {
       slot: getPartSlot(name, source),
       attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getSlotAttackPenalty(getPartSlot(name, source))), 0, 999),
       hidden: source?.hidden === true,
+      label: String(source?.label ?? name).trim().slice(0, 40) || name,
     };
     if (next.body[name].slot !== "other") {
       next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
@@ -374,7 +431,7 @@ export function formatOverlayText(data) {
 
   const parts = getBodyPartNames(data).map((partName) => {
     const part = body[partName];
-    return `${partName} ${part.current}/${part.max}(${part.armor})`;
+    return `${getBodyPartLabel(data, partName)} ${part.current}/${part.max}(${part.armor})`;
   });
   for (let index = 0; index < parts.length; index += 3) {
     lines.push(parts.slice(index, index + 3).join(" | "));
@@ -437,6 +494,11 @@ export function getBodyPartNames(dataOrBody) {
     if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
     return left.localeCompare(right);
   });
+}
+
+export function getBodyPartLabel(dataOrBody, partName) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  return String(body?.[partName]?.label ?? partName).trim() || partName;
 }
 
 export function hasConfiguredShield(dataOrBody) {

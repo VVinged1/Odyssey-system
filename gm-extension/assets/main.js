@@ -3785,7 +3785,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false, label: "Torso" },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -3840,6 +3840,55 @@ function deepClone(value) {
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
+function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight }) {
+  if (!(handle instanceof HTMLElement)) return;
+  const readSavedSize = () => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) ?? "null");
+    } catch {
+      return null;
+    }
+  };
+  const savedSize = readSavedSize();
+  const initialWidth = clamp(Number(savedSize?.width) || defaultWidth, 360, 1200);
+  const initialHeight = clamp(Number(savedSize?.height) || defaultHeight, 500, 1200);
+  void lib_default.action.setWidth(initialWidth);
+  void lib_default.action.setHeight(initialHeight);
+  handle.addEventListener("pointerdown", async (event) => {
+    event.preventDefault();
+    const startWidth = await lib_default.action.getWidth() || initialWidth;
+    const startHeight = await lib_default.action.getHeight() || initialHeight;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let nextWidth = startWidth;
+    let nextHeight = startHeight;
+    let frame = null;
+    const applySize = () => {
+      frame = null;
+      void lib_default.action.setWidth(nextWidth);
+      void lib_default.action.setHeight(nextHeight);
+    };
+    const move = (moveEvent) => {
+      nextWidth = clamp(startWidth + moveEvent.clientX - startX, 360, 1200);
+      nextHeight = clamp(startHeight + moveEvent.clientY - startY, 500, 1200);
+      if (frame == null) frame = requestAnimationFrame(applySize);
+    };
+    const stop = () => {
+      if (frame != null) {
+        cancelAnimationFrame(frame);
+        applySize();
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ width: nextWidth, height: nextHeight }));
+      } catch {
+      }
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop, { once: true });
+  });
+}
 function numberOrFallback(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -3882,6 +3931,7 @@ function sanitizeTrackerData(raw) {
     part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getSlotAttackPenalty(part.slot)), 0, 999);
     if (part.slot !== "other") part.attackPenalty = getSlotAttackPenalty(part.slot);
     part.hidden = partName === "Torso" ? false : source.hidden === true;
+    part.label = String(source.label ?? partName).trim().slice(0, 40) || partName;
   }
   for (const [partName, source] of Object.entries(raw.body ?? {})) {
     if (Object.hasOwn(next.body, partName)) continue;
@@ -3896,7 +3946,8 @@ function sanitizeTrackerData(raw) {
       serious: clamp(Number(source?.serious) || 0, 0, 1),
       slot: getPartSlot(name, source),
       attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getSlotAttackPenalty(getPartSlot(name, source))), 0, 999),
-      hidden: source?.hidden === true
+      hidden: source?.hidden === true,
+      label: String(source?.label ?? name).trim().slice(0, 40) || name
     };
     if (next.body[name].slot !== "other") {
       next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
@@ -4021,6 +4072,10 @@ function getBodyPartNames(dataOrBody) {
     if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
     return left.localeCompare(right);
   });
+}
+function getBodyPartLabel(dataOrBody, partName) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  return String(body?.[partName]?.label ?? partName).trim() || partName;
 }
 function hasConfiguredShield(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
@@ -4907,7 +4962,7 @@ function renderTargetPartOptions() {
   const currentValue = ui.targetPart.value;
   const nextValue = targetParts.includes(currentValue) ? currentValue : DEFAULT_TARGET_PART;
   ui.targetPart.innerHTML = targetParts.map(
-    (partName) => `<option value="${escapeHtml(partName)}" ${partName === nextValue ? "selected" : ""}>${escapeHtml(partName)}</option>`
+    (partName) => `<option value="${escapeHtml(partName)}" ${partName === nextValue ? "selected" : ""}>${escapeHtml(getBodyPartLabel(target ? getTrackerData(target) : null, partName))}</option>`
   ).join("");
   if (targetParts.length && !targetParts.includes(ui.targetPart.value)) {
     ui.targetPart.value = nextValue;
@@ -5458,6 +5513,11 @@ function bindEvents() {
 }
 lib_default.onReady(async () => {
   try {
+    enableActionResize(document.querySelector("[data-action-resize]"), {
+      storageKey: "com.codex.body-hp/gm-action-size",
+      defaultWidth: 560,
+      defaultHeight: 900
+    });
     bindEvents();
     await refreshState(false);
     lib_default.scene.items.onChange((items) => {

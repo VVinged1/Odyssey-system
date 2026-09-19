@@ -3950,7 +3950,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false, label: "Torso" },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -4005,6 +4005,55 @@ function deepClone(value) {
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
+function enableActionResize(handle, { storageKey, defaultWidth, defaultHeight }) {
+  if (!(handle instanceof HTMLElement)) return;
+  const readSavedSize = () => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) ?? "null");
+    } catch {
+      return null;
+    }
+  };
+  const savedSize = readSavedSize();
+  const initialWidth = clamp(Number(savedSize?.width) || defaultWidth, 360, 1200);
+  const initialHeight = clamp(Number(savedSize?.height) || defaultHeight, 500, 1200);
+  void lib_default.action.setWidth(initialWidth);
+  void lib_default.action.setHeight(initialHeight);
+  handle.addEventListener("pointerdown", async (event) => {
+    event.preventDefault();
+    const startWidth = await lib_default.action.getWidth() || initialWidth;
+    const startHeight = await lib_default.action.getHeight() || initialHeight;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let nextWidth = startWidth;
+    let nextHeight = startHeight;
+    let frame = null;
+    const applySize = () => {
+      frame = null;
+      void lib_default.action.setWidth(nextWidth);
+      void lib_default.action.setHeight(nextHeight);
+    };
+    const move = (moveEvent) => {
+      nextWidth = clamp(startWidth + moveEvent.clientX - startX, 360, 1200);
+      nextHeight = clamp(startHeight + moveEvent.clientY - startY, 500, 1200);
+      if (frame == null) frame = requestAnimationFrame(applySize);
+    };
+    const stop = () => {
+      if (frame != null) {
+        cancelAnimationFrame(frame);
+        applySize();
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ width: nextWidth, height: nextHeight }));
+      } catch {
+      }
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop, { once: true });
+  });
+}
 function numberOrFallback(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -4047,6 +4096,7 @@ function sanitizeTrackerData(raw) {
     part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getSlotAttackPenalty(part.slot)), 0, 999);
     if (part.slot !== "other") part.attackPenalty = getSlotAttackPenalty(part.slot);
     part.hidden = partName === "Torso" ? false : source.hidden === true;
+    part.label = String(source.label ?? partName).trim().slice(0, 40) || partName;
   }
   for (const [partName, source] of Object.entries(raw.body ?? {})) {
     if (Object.hasOwn(next.body, partName)) continue;
@@ -4061,7 +4111,8 @@ function sanitizeTrackerData(raw) {
       serious: clamp(Number(source?.serious) || 0, 0, 1),
       slot: getPartSlot(name, source),
       attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getSlotAttackPenalty(getPartSlot(name, source))), 0, 999),
-      hidden: source?.hidden === true
+      hidden: source?.hidden === true,
+      label: String(source?.label ?? name).trim().slice(0, 40) || name
     };
     if (next.body[name].slot !== "other") {
       next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
@@ -4190,7 +4241,7 @@ function formatOverlayText(data) {
   }
   const parts = getBodyPartNames(data).map((partName) => {
     const part = body[partName];
-    return `${partName} ${part.current}/${part.max}(${part.armor})`;
+    return `${getBodyPartLabel(data, partName)} ${part.current}/${part.max}(${part.armor})`;
   });
   for (let index = 0; index < parts.length; index += 3) {
     lines.push(parts.slice(index, index + 3).join(" | "));
@@ -4231,6 +4282,10 @@ function getBodyPartNames(dataOrBody) {
     if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
     return left.localeCompare(right);
   });
+}
+function getBodyPartLabel(dataOrBody, partName) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  return String(body?.[partName]?.label ?? partName).trim() || partName;
 }
 function hasConfiguredShield(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
@@ -6779,7 +6834,8 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft2.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft2.targetTokenId) ?? null;
-  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null, isEditable());
+  const selectedTargetData = selectedTarget ? getTrackerData(selectedTarget) : null;
+  const targetableBodyParts = getTargetableBodyParts(selectedTargetData, isEditable());
   const targetName = selectedTarget ? getCharacterName(selectedTarget) : draft2.targetTokenName || "No target selected";
   const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
   const attackDisabledAttr = tokenLocked || !draft2.targetTokenId ? "disabled" : "";
@@ -6811,7 +6867,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           <span class="field-label">Target Body Part</span>
           <select data-attack-field="targetPart" ${disabledAttr}>
             ${targetableBodyParts.map(
-      (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
+      (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${escapeHtml(getBodyPartLabel(selectedTargetData, part))}</option>`
     ).join("")}
           </select>
         </label>
@@ -6889,7 +6945,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
           <span class="field-label">Target Body Part</span>
           <select data-manual-attack-field="targetPart" ${disabledAttr}>
             ${getTargetableBodyParts(data, isEditable()).map(
-      (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
+      (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${escapeHtml(getBodyPartLabel(data, part))}</option>`
     ).join("")}
           </select>
         </label>
@@ -7064,12 +7120,12 @@ function renderSelectedToken() {
                         <div class="body-part-editor-head">
                           <div class="body-part-identity">
                             <div class="body-part-name-line">
-                              <input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(partName)}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${partName === "Torso" ? "disabled" : bodyFieldDisabled}>
+                              <input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(getBodyPartLabel(data, partName))}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>
                               ${partName === "Torso" ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>\xD7</button>`}
                             </div>
                             ${partName === "Torso" ? "" : `<label class="check-label body-part-visible"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}> <span>Visible to players</span></label>`}
                           </div>
-                          ${partName === "Torso" ? `<span class="body-part-slot">Torso</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
+                          ${partName === "Torso" ? `<span class="body-part-slot">Main</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
                         </div>
                         <div class="body-part-editor-fields">
                           <label class="field-stack"><span class="field-label">HP</span><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" maxlength="3" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></label>
@@ -7087,7 +7143,7 @@ function renderSelectedToken() {
                   <label class="field-stack"><span class="field-label">HP</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
-                  <label class="check-label"><input type="checkbox" data-body-field="new-visible" ${bodyFieldDisabled}> <span>Visible to players</span></label>
+                  <label class="check-label body-part-visible" title="Visible to players"><input type="checkbox" data-body-field="new-visible" ${bodyFieldDisabled}> <span>Visible to players</span></label>
                   <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
@@ -7315,21 +7371,25 @@ async function addBodyPart() {
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
   const name = getActionFieldValue('[data-body-field="new-name"]').trim();
   const slot = getActionFieldValue('[data-body-field="new-slot"]');
+  const max = clamp(Number(getActionFieldValue('[data-body-field="new-max"]')) || 0, 0, 999);
+  const armor = clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999);
+  const attackPenalty = clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999);
+  const hidden = document.querySelector('[data-body-field="new-visible"]')?.checked !== true;
   if (!name) throw new Error("Enter a body part name first.");
   if (!BODY_PART_SLOTS.includes(slot)) throw new Error("Choose a body part position first.");
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     if (next.body[name]) throw new Error("A body part with this name already exists.");
-    const max = clamp(Number(getActionFieldValue('[data-body-field="new-max"]')) || 0, 0, 999);
     next.body[name] = {
       current: max,
       max,
-      armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
+      armor,
       minor: 0,
       serious: 0,
       slot,
-      attackPenalty: clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999),
-      hidden: document.querySelector('[data-body-field="new-visible"]')?.checked !== true
+      attackPenalty,
+      hidden,
+      label: name
     };
     return next;
   });
@@ -7351,15 +7411,12 @@ async function renameBodyPart(partName, value) {
   const token = getCharacterById(activeTokenId);
   if (!token) throw new Error("Select a character first.");
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
-  if (partName === "Torso") throw new Error("Torso cannot be renamed.");
   const nextName = String(value ?? "").trim().slice(0, 40);
   if (!nextName) throw new Error("Enter a body part name first.");
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     if (!next.body[partName] || nextName === partName) return next;
-    if (next.body[nextName]) throw new Error("A body part with this name already exists.");
-    next.body[nextName] = next.body[partName];
-    delete next.body[partName];
+    next.body[partName].label = nextName;
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -8574,6 +8631,11 @@ function bindUiEvents() {
 }
 lib_default.onReady(async () => {
   try {
+    enableActionResize(document.querySelector("[data-action-resize]"), {
+      storageKey: "com.codex.body-hp/action-size",
+      defaultWidth: 560,
+      defaultHeight: 860
+    });
     bindUiEvents();
     await removeAttackTargetContextMenu();
     await Promise.all([

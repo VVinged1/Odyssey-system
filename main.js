@@ -14,6 +14,7 @@ import {
   PARRY_SKILL_NAME,
   canPlayerControlToken,
   clamp,
+  enableActionResize,
   ensureOverlayForToken,
   formatOverlayText,
   getArmorTotal,
@@ -21,6 +22,7 @@ import {
   getBodyTotals,
   getBodyPartNames,
   getBodyPartAttackPenalty,
+  getBodyPartLabel,
   getCharacterName,
   getOdysseyData,
   getTargetableBodyParts,
@@ -3061,7 +3063,8 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
-  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null, isEditable());
+  const selectedTargetData = selectedTarget ? getTrackerData(selectedTarget) : null;
+  const targetableBodyParts = getTargetableBodyParts(selectedTargetData, isEditable());
   const targetName = selectedTarget
     ? getCharacterName(selectedTarget)
     : draft.targetTokenName || "No target selected";
@@ -3097,7 +3100,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
           <select data-attack-field="targetPart" ${disabledAttr}>
             ${targetableBodyParts.map(
               (part) =>
-                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
+                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${escapeHtml(getBodyPartLabel(selectedTargetData, part))}</option>`
             ).join("")}
           </select>
         </label>
@@ -3182,7 +3185,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
           <select data-manual-attack-field="targetPart" ${disabledAttr}>
             ${getTargetableBodyParts(data, isEditable()).map(
               (part) =>
-                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
+                `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${escapeHtml(getBodyPartLabel(data, part))}</option>`
             ).join("")}
           </select>
         </label>
@@ -3432,12 +3435,12 @@ function renderSelectedToken() {
                         <div class="body-part-editor-head">
                           <div class="body-part-identity">
                             <div class="body-part-name-line">
-                              <input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(partName)}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${partName === "Torso" ? "disabled" : bodyFieldDisabled}>
+                              <input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(getBodyPartLabel(data, partName))}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>
                               ${partName === "Torso" ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>×</button>`}
                             </div>
                             ${partName === "Torso" ? "" : `<label class="check-label body-part-visible"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}> <span>Visible to players</span></label>`}
                           </div>
-                          ${partName === "Torso" ? `<span class="body-part-slot">Torso</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
+                          ${partName === "Torso" ? `<span class="body-part-slot">Main</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
                         </div>
                         <div class="body-part-editor-fields">
                           <label class="field-stack"><span class="field-label">HP</span><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" maxlength="3" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></label>
@@ -3455,7 +3458,7 @@ function renderSelectedToken() {
                   <label class="field-stack"><span class="field-label">HP</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
-                  <label class="check-label"><input type="checkbox" data-body-field="new-visible" ${bodyFieldDisabled}> <span>Visible to players</span></label>
+                  <label class="check-label body-part-visible" title="Visible to players"><input type="checkbox" data-body-field="new-visible" ${bodyFieldDisabled}> <span>Visible to players</span></label>
                   <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
@@ -3729,22 +3732,26 @@ async function addBodyPart() {
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
   const name = getActionFieldValue('[data-body-field="new-name"]').trim();
   const slot = getActionFieldValue('[data-body-field="new-slot"]');
+  const max = clamp(Number(getActionFieldValue('[data-body-field="new-max"]')) || 0, 0, 999);
+  const armor = clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999);
+  const attackPenalty = clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999);
+  const hidden = document.querySelector('[data-body-field="new-visible"]')?.checked !== true;
   if (!name) throw new Error("Enter a body part name first.");
   if (!BODY_PART_SLOTS.includes(slot)) throw new Error("Choose a body part position first.");
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     if (next.body[name]) throw new Error("A body part with this name already exists.");
-    const max = clamp(Number(getActionFieldValue('[data-body-field="new-max"]')) || 0, 0, 999);
     next.body[name] = {
       current: max,
       max,
-      armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
+      armor,
       minor: 0,
       serious: 0,
       slot,
-      attackPenalty: clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999),
-      hidden: document.querySelector('[data-body-field="new-visible"]')?.checked !== true,
+      attackPenalty,
+      hidden,
+      label: name,
     };
     return next;
   });
@@ -3768,7 +3775,6 @@ async function renameBodyPart(partName, value) {
   const token = getCharacterById(activeTokenId);
   if (!token) throw new Error("Select a character first.");
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
-  if (partName === "Torso") throw new Error("Torso cannot be renamed.");
 
   const nextName = String(value ?? "").trim().slice(0, 40);
   if (!nextName) throw new Error("Enter a body part name first.");
@@ -3776,9 +3782,7 @@ async function renameBodyPart(partName, value) {
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     if (!next.body[partName] || nextName === partName) return next;
-    if (next.body[nextName]) throw new Error("A body part with this name already exists.");
-    next.body[nextName] = next.body[partName];
-    delete next.body[partName];
+    next.body[partName].label = nextName;
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -5198,6 +5202,11 @@ function bindUiEvents() {
 
 OBR.onReady(async () => {
   try {
+    enableActionResize(document.querySelector("[data-action-resize]"), {
+      storageKey: "com.codex.body-hp/action-size",
+      defaultWidth: 560,
+      defaultHeight: 860,
+    });
     bindUiEvents();
     await removeAttackTargetContextMenu();
     await Promise.all([

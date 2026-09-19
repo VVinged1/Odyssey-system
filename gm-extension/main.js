@@ -4,8 +4,10 @@ import {
   PARRY_SKILL_NAME,
   SPECIAL_PART_NAME,
   clamp,
+  enableActionResize,
   ensureOverlayForToken,
   getBodyPartAttackPenalty,
+  getBodyPartLabel,
   getCharacterName,
   getOdysseyData,
   getTargetableBodyParts,
@@ -302,7 +304,7 @@ function renderTargetPartOptions() {
   ui.targetPart.innerHTML = targetParts
     .map(
       (partName) =>
-        `<option value="${escapeHtml(partName)}" ${partName === nextValue ? "selected" : ""}>${escapeHtml(partName)}</option>`,
+        `<option value="${escapeHtml(partName)}" ${partName === nextValue ? "selected" : ""}>${escapeHtml(getBodyPartLabel(target ? getTrackerData(target) : null, partName))}</option>`,
     )
     .join("");
   if (targetParts.length && !targetParts.includes(ui.targetPart.value)) {
@@ -969,6 +971,11 @@ function bindEvents() {
 
 OBR.onReady(async () => {
   try {
+    enableActionResize(document.querySelector("[data-action-resize]"), {
+      storageKey: "com.codex.body-hp/gm-action-size",
+      defaultWidth: 560,
+      defaultHeight: 900,
+    });
     bindEvents();
     await refreshState(false);
 

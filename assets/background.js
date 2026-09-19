@@ -3785,7 +3785,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false, label: "Torso" },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -3882,6 +3882,7 @@ function sanitizeTrackerData(raw) {
     part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getSlotAttackPenalty(part.slot)), 0, 999);
     if (part.slot !== "other") part.attackPenalty = getSlotAttackPenalty(part.slot);
     part.hidden = partName === "Torso" ? false : source.hidden === true;
+    part.label = String(source.label ?? partName).trim().slice(0, 40) || partName;
   }
   for (const [partName, source] of Object.entries(raw.body ?? {})) {
     if (Object.hasOwn(next.body, partName)) continue;
@@ -3896,7 +3897,8 @@ function sanitizeTrackerData(raw) {
       serious: clamp(Number(source?.serious) || 0, 0, 1),
       slot: getPartSlot(name, source),
       attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getSlotAttackPenalty(getPartSlot(name, source))), 0, 999),
-      hidden: source?.hidden === true
+      hidden: source?.hidden === true,
+      label: String(source?.label ?? name).trim().slice(0, 40) || name
     };
     if (next.body[name].slot !== "other") {
       next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);

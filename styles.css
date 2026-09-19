@@ -402,6 +402,63 @@ select:disabled {
   width: 80px;
 }
 
+.body-parts-list {
+  margin-top: 10px;
+}
+
+.body-part-editor {
+  display: grid;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.body-part-editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px auto auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.body-part-slot {
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.body-part-hidden {
+  min-height: 34px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.body-part-remove {
+  min-width: 74px;
+}
+
+.body-part-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.body-part-editor .inline-stepper {
+  gap: 4px;
+}
+
+.body-part-editor .inline-stepper input {
+  width: 42px;
+  min-width: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+  text-align: center;
+}
+
+.body-part-editor .inline-stepper button {
+  min-width: 28px;
+  padding: 6px 7px;
+}
+
 input[type="number"],
 input[type="text"],
 select {
@@ -719,7 +776,7 @@ select {
 
 .body-part-add {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px repeat(3, 70px) auto auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: 8px;
   padding-top: 10px;
@@ -727,6 +784,8 @@ select {
 }
 
 .body-part-add button {
+  grid-column: 1 / -1;
+  width: 100%;
   min-width: 96px;
 }
 
@@ -755,6 +814,19 @@ select {
   .body-part-add button {
     grid-column: 1 / -1;
     width: 100%;
+  }
+
+  .body-part-editor-head {
+    grid-template-columns: minmax(0, 1fr) 128px auto;
+  }
+
+  .body-part-remove {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .body-part-editor-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .combat-modifiers {

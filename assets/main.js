@@ -4405,8 +4405,9 @@ function buildAnnulusCommands(radiusOuter, radiusInner, offsetX = 0, offsetY = 0
 function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
   const startAngle = centerAngle - spanAngle / 2;
   const endAngle = centerAngle + spanAngle / 2;
-  const outer = arcPoints(radiusOuter, startAngle, endAngle, 10);
-  const inner = arcPoints(radiusInner, endAngle, startAngle, 10);
+  const segments = Math.max(10, Math.ceil(Math.abs(spanAngle) / 5));
+  const outer = arcPoints(radiusOuter, startAngle, endAngle, segments);
+  const inner = arcPoints(radiusInner, endAngle, startAngle, segments);
   const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
   for (const point of outer.slice(1)) {
     commands.push([Command.LINE, point.x, point.y]);
@@ -7054,59 +7055,27 @@ function renderSelectedToken() {
                 <div class="row row-gap">
                   <button type="button" class="secondary" data-action="heal-limbs" ${bodyFieldDisabled}>Heal</button>
                 </div>
-                <div class="body-table-wrap">
-                  <table class="body-table">
-                    <thead>
-                      <tr>
-                        <th>Body Part</th>
-                        <th>Current HP</th>
-                        <th>Max HP</th>
-                        <th>Armor</th>
-                        <th>Position</th>
-                        <th>Other Penalty</th>
-                        <th>Hidden</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${getBodyPartNames(data).map((partName) => {
+                <div class="body-parts-list">
+                  ${getBodyPartNames(data).map((partName) => {
       const part = data.body[partName];
       const penaltyDisabled = part.slot !== "other" ? "disabled" : bodyFieldDisabled;
       return `
-                          <tr>
-                            <td class="part-name">${escapeHtml(partName)}</td>
-                            <td>
-                              <div class="inline-stepper">
-                                <button type="button" data-action="change-part" data-part="${escapeHtml(
-        partName
-      )}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button>
-                                <input type="text" inputmode="numeric" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(
-        partName
-      )}" data-field="current" ${bodyFieldDisabled}>
-                                <button type="button" data-action="change-part" data-part="${escapeHtml(
-        partName
-      )}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button>
-                              </div>
-                            </td>
-                            <td>
-                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.max}" data-action="set-field" data-part="${escapeHtml(
-        partName
-      )}" data-field="max" ${bodyFieldDisabled}>
-                            </td>
-                            <td>
-                              <input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(
-        partName
-      )}" data-field="armor" ${bodyFieldDisabled}>
-                            </td>
-                            <td>${partName === "Torso" ? "Torso" : `<select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select>`}</td>
-                            <td><input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></td>
-                            <td>${partName === "Torso" ? "" : `<input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "checked" : ""} ${bodyFieldDisabled}>`}</td>
-                            <td>${partName === "Torso" ? "" : `<button type="button" class="danger" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}</td>
-                          </tr>
-                        `;
+                      <div class="body-part-editor">
+                        <div class="body-part-editor-head">
+                          <strong class="part-name">${escapeHtml(partName)}</strong>
+                          ${partName === "Torso" ? `<span class="body-part-slot">Torso</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
+                          ${partName === "Torso" ? "" : `<label class="check-label body-part-hidden"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "checked" : ""} ${bodyFieldDisabled}> <span>Hidden</span></label>`}
+                          ${partName === "Torso" ? "" : `<button type="button" class="danger body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}
+                        </div>
+                        <div class="body-part-editor-fields">
+                          <label class="field-stack"><span class="field-label">HP</span><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></label>
+                          <label class="field-stack"><span class="field-label">Max HP</span><input type="text" inputmode="numeric" min="0" max="999" value="${part.max}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="max" ${bodyFieldDisabled}></label>
+                          <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" min="0" max="999" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="armor" ${bodyFieldDisabled}></label>
+                          <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></label>
+                        </div>
+                      </div>
+                    `;
     }).join("")}
-                    </tbody>
-                  </table>
                 </div>
                 <div class="body-part-add">
                   <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>

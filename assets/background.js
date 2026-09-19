@@ -4177,8 +4177,9 @@ function buildAnnulusCommands(radiusOuter, radiusInner, offsetX = 0, offsetY = 0
 function buildSectorCommands(radiusOuter, radiusInner, centerAngle, spanAngle) {
   const startAngle = centerAngle - spanAngle / 2;
   const endAngle = centerAngle + spanAngle / 2;
-  const outer = arcPoints(radiusOuter, startAngle, endAngle, 10);
-  const inner = arcPoints(radiusInner, endAngle, startAngle, 10);
+  const segments = Math.max(10, Math.ceil(Math.abs(spanAngle) / 5));
+  const outer = arcPoints(radiusOuter, startAngle, endAngle, segments);
+  const inner = arcPoints(radiusInner, endAngle, startAngle, segments);
   const commands = [[Command.MOVE, outer[0].x, outer[0].y]];
   for (const point of outer.slice(1)) {
     commands.push([Command.LINE, point.x, point.y]);

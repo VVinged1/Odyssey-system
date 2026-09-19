@@ -1,14 +1,14 @@
 {
   "name": "Odyssey Combat Log",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "manifest_version": 1,
   "description": "Dedicated live combat log viewer for Odyssey System.",
   "author": "Codex",
-  "icon": "https://limonety995-maker.github.io/odissey-dicelog/icon.svg",
+  "icon": "https://VVinged1.github.io/Odyssey-system/room-log/icon.svg?v=0.1.7",
   "action": {
     "title": "Odyssey Combat Log",
-    "icon": "https://limonety995-maker.github.io/odissey-dicelog/icon.svg",
-    "popover": "https://limonety995-maker.github.io/odissey-dicelog/index.html?v=0.1.6",
+    "icon": "https://VVinged1.github.io/Odyssey-system/room-log/icon.svg?v=0.1.7",
+    "popover": "https://VVinged1.github.io/Odyssey-system/room-log/index.html?v=0.1.7",
     "height": 780,
     "width": 520
   }

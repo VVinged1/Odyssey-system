@@ -428,7 +428,8 @@ select:disabled {
 
 .body-table-compact th:first-child,
 .body-table-compact td:first-child {
-  width: 118px;
+  width: 26%;
+  min-width: 118px;
 }
 
 .part-name {
@@ -470,8 +471,9 @@ select:disabled {
 }
 
 .body-part-name-input {
-  min-width: 0;
+  min-width: 72px;
   width: 72px !important;
+  flex: 1 1 72px;
   padding: 6px 5px !important;
   font-weight: 700;
 }
@@ -622,10 +624,54 @@ select {
   grid-template-columns: minmax(0, 1fr) 84px minmax(110px, 150px) auto;
   gap: 8px;
   align-items: center;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(7, 16, 31, 0.5);
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 0;
+  background: transparent;
+}
+
+.skill-row:last-child {
+  border-bottom: 0;
+}
+
+.skill-group {
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.skill-group + .skill-group {
+  padding-top: 12px;
+}
+
+.skill-group-title {
+  margin-bottom: 4px;
+  color: #bfdbfe;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.skill-add-form {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.characteristics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.characteristic-field {
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 16, 31, 0.35);
+}
+
+.characteristic-field input {
+  min-width: 0;
 }
 
 .weapon-row {
@@ -739,7 +785,7 @@ select {
 }
 
 .ammo-entry {
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(134, 239, 172, 0.32);
   padding: 14px 0;
   display: grid;
   gap: 12px;
@@ -747,7 +793,7 @@ select {
 }
 
 .weapon-entry {
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(253, 164, 175, 0.32);
   padding: 14px 0;
   display: grid;
   gap: 12px;

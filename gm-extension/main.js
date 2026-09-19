@@ -538,9 +538,9 @@ async function performPublicGmRoll() {
   const result = rollDice(dice, modifier, count);
   const diceLabel = `${result.count}d${result.sides}`;
   const summary = buildDiceRollSummary(diceLabel, result);
-  const isPrivate = Boolean(ui.publicDicePrivate?.checked);
+  const isPublic = Boolean(ui.publicDicePrivate?.checked);
 
-  if (isPrivate) {
+  if (!isPublic) {
     pushPrivateEntry(`GM Private ${diceLabel}`, formatDiceDebug(playerName || "GM Private Dice", result));
     setStatus(`Private roll. ${summary}`, "success");
     return;
@@ -563,13 +563,13 @@ async function performPublicSkillRoll() {
   const label = ui.skillLabel.value.trim() || "Skill Check";
   const skillLevel = clamp(Number(ui.skillLevel.value) || 0, 0, 10);
   const modifier = Number(ui.skillModifier.value) || 0;
-  const isPrivate = Boolean(ui.skillPrivate?.checked);
+  const isPublic = Boolean(ui.skillPrivate?.checked);
   const result = rollSkillCheck(skillLevel, modifier);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${label}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   const debugBody = formatSkillDebug(label, result);
   const statusKind = isResolvedCheckResultSuccess(result.result) ? "success" : "error";
 
-  if (isPrivate) {
+  if (!isPublic) {
     pushPrivateEntry(
       `${getResolvedCheckResultIcon(result.result)} GM Private skill ${label}`,
       debugBody,

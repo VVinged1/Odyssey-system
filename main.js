@@ -2374,7 +2374,7 @@ function legacyRenderSelectedToken() {
 function renderCharacteristicsBlock(data, disabledAttr) {
   const attributeInputs = ATTRIBUTE_UI_FIELDS.map(
     ([key, label]) => `
-      <label class="field-stack">
+      <label class="field-stack characteristic-field">
         <span class="field-label">${escapeHtml(label)}</span>
         <input type="text" inputmode="numeric" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
       </label>`
@@ -2382,7 +2382,7 @@ function renderCharacteristicsBlock(data, disabledAttr) {
 
   return renderCollapsibleSection(
     "Characteristics",
-    `<div class="form-grid">${attributeInputs}</div>`,
+    `<div class="characteristics-grid">${attributeInputs}</div>`,
     false,
   );
 }
@@ -2784,13 +2784,10 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
   return renderCollapsibleSection(
     "Skills",
     `
-      <div class="field-label">Combat</div>
-      <div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div>
-      <div class="field-label">Abilities</div>
-      <div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div>
-      <div class="field-label">Applied</div>
-      <div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div>
-      <div class="form-grid">
+      <div class="skill-group"><div class="skill-group-title">Combat</div><div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div></div>
+      <div class="skill-group"><div class="skill-group-title">Abilities</div><div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div></div>
+      <div class="skill-group"><div class="skill-group-title">Applied</div><div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div></div>
+      <div class="skill-add-form form-grid">
         <label class="field-stack">
           <span class="field-label">Skill Name</span>
           <input type="text" data-skill-field="new-name" placeholder="New skill" ${disabledAttr}>

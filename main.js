@@ -4,6 +4,7 @@ import {
   ABILITIES_SKILL_CATEGORY,
   APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
+  BODY_PART_SLOTS,
   COMBAT_SKILL_CATEGORY,
   DEFAULT_ODYSSEY_SKILLS,
   MELEE_SKILL_NAME,
@@ -17,6 +18,7 @@ import {
   getArmorTotal,
   getAvailableWeapons,
   getBodyTotals,
+  getBodyPartNames,
   getCharacterName,
   getOdysseyData,
   getTargetableBodyParts,
@@ -1133,8 +1135,8 @@ function getAttackDraft(token, data, targetCharacters) {
     targetTokenId,
     targetTokenName: resolvedTarget ? getCharacterName(resolvedTarget) : draftTargetTokenName,
     targetPart:
-      BODY_ORDER.includes(stored.targetPart) && stored.targetPart !== SPECIAL_PART_NAME
-        ? stored.targetPart
+      String(stored.targetPart ?? "").trim() && stored.targetPart !== SPECIAL_PART_NAME
+        ? String(stored.targetPart).trim()
         : "Torso",
     weaponName: selectedWeapon?.selectionKey ?? selectedWeapon?.name ?? defaultWeapon.name,
     weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
@@ -3189,7 +3191,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
           <select data-manual-attack-field="targetPart" ${disabledAttr}>
-            ${getTargetableBodyParts(null).map(
+            ${getTargetableBodyParts(data).map(
               (part) =>
                 `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
             ).join("")}
@@ -3440,10 +3442,11 @@ function renderSelectedToken() {
                         <th>Current HP</th>
                         <th>Max HP</th>
                         <th>Armor</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${BODY_ORDER.map((partName) => {
+                      ${getBodyPartNames(data).map((partName) => {
                         const part = data.body[partName];
                         return `
                           <tr>
@@ -3471,11 +3474,19 @@ function renderSelectedToken() {
                                 partName
                               )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>
+                            <td>${partName === "Torso" ? "" : `<button type="button" class="danger" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}</td>
                           </tr>
                         `;
                       }).join("")}
                     </tbody>
                   </table>
+                </div>
+                <div class="body-part-add">
+                  <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Position</span><select data-body-field="new-slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}">${escapeHtml(slot)}</option>`).join("")}</select></label>
+                  <label class="field-stack"><span class="field-label">HP</span><input type="number" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Armor</span><input type="number" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
+                  <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
               true,
@@ -3661,10 +3672,9 @@ async function healLimbs() {
     return;
   }
 
-  const healedParts = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
-    for (const partName of healedParts) {
+    for (const partName of getBodyPartNames(next)) {
       const part = next.body?.[partName];
       if (!part) continue;
       part.current = part.max;
@@ -3733,6 +3743,45 @@ async function setBodyField(partName, field, value) {
       part.armor = numericValue;
     }
 
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+
+async function addBodyPart() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+  const name = getActionFieldValue('[data-body-field="new-name"]').trim();
+  const slot = getActionFieldValue('[data-body-field="new-slot"]');
+  if (!name) throw new Error("Enter a body part name first.");
+  if (!BODY_PART_SLOTS.includes(slot) || slot === "torso") throw new Error("Choose a position around the token.");
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    if (next.body[name]) throw new Error("A body part with this name already exists.");
+    const max = clamp(Number(getActionFieldValue('[data-body-field="new-max"]')) || 0, 0, 999);
+    next.body[name] = {
+      current: max,
+      max,
+      armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
+      minor: 0,
+      serious: 0,
+      slot,
+    };
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+
+async function removeBodyPart(partName) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+  if (partName === "Torso") throw new Error("Torso cannot be removed.");
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    delete next.body[partName];
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -4769,6 +4818,20 @@ function bindUiEvents() {
     if (action === "heal-limbs") {
       void healLimbs().catch((error) => {
         setStatus(error?.message ?? "Unable to heal limbs.", "error");
+      });
+      return;
+    }
+
+    if (action === "add-body-part") {
+      void addBodyPart().catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
+
+    if (action === "remove-body-part") {
+      void removeBodyPart(actionNode.dataset.part ?? "").catch((error) => {
+        setStatus(error.message, "error");
       });
       return;
     }

@@ -120,8 +120,8 @@ export function resolveAttack({
   targetPart = "Torso",
   targetArmor = 0,
 }) {
-  const part =
-    BODY_ORDER.includes(targetPart) && targetPart !== SPECIAL_PART_NAME ? targetPart : "Torso";
+  const requestedPart = String(targetPart ?? "").trim();
+  const part = requestedPart && requestedPart !== SPECIAL_PART_NAME ? requestedPart : "Torso";
   const accuracy = calculateAccuracy(
     attackSkill,
     attackBonuses,

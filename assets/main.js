@@ -3888,6 +3888,15 @@ var SHIELD_PART_NAME = "Shield";
 var SPECIAL_PART_NAME = "Special";
 var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
 var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
+var BODY_SLOT_BY_PART = {
+  Head: "head",
+  "L.Arm": "upper-left",
+  "R.Arm": "upper-right",
+  "L.Leg": "lower-left",
+  "R.Leg": "lower-right",
+  Torso: "torso"
+};
+var BODY_PART_SLOTS = ["head", "upper-left", "upper-right", "lower-left", "lower-right", "outer"];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
@@ -3896,7 +3905,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 12;
+var VISUAL_VERSION = 13;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3940,12 +3949,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Head: { current: 1, max: 1, armor: 0, minor: 0, serious: 0 },
-  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
-  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso" },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -4017,7 +4021,7 @@ function sanitizeTrackerData(raw) {
   next.sync.lastEventId = Math.max(0, Number(raw.sync?.lastEventId ?? 0) || 0);
   next.sync.lastSyncedAt = raw.sync?.lastSyncedAt ? String(raw.sync.lastSyncedAt) : null;
   next.odyssey = sanitizeOdysseyData(raw.odyssey);
-  for (const partName of BODY_ORDER) {
+  for (const partName of Object.keys(BODY_DEFAULTS)) {
     const source = raw.body?.[partName] ?? {};
     const part = next.body[partName];
     part.max = clamp(numberOrFallback(source.max, part.max), 0, 999);
@@ -4029,6 +4033,20 @@ function sanitizeTrackerData(raw) {
     part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
+  }
+  for (const [partName, source] of Object.entries(raw.body ?? {})) {
+    if (Object.hasOwn(next.body, partName)) continue;
+    const name = String(partName).trim().slice(0, 40);
+    if (!name) continue;
+    const max = clamp(Number(source?.max) || 0, 0, 999);
+    next.body[name] = {
+      current: clamp(Number(source?.current) || 0, 0, max),
+      max,
+      armor: clamp(Number(source?.armor) || 0, 0, 999),
+      minor: clamp(Number(source?.minor) || 0, 0, 3),
+      serious: clamp(Number(source?.serious) || 0, 0, 1),
+      slot: BODY_PART_SLOTS.includes(source?.slot) ? source.slot : BODY_SLOT_BY_PART[name] ?? "outer"
+    };
   }
   return next;
 }
@@ -4151,12 +4169,13 @@ function formatOverlayText(data) {
       `${SPECIAL_PART_NAME} ${body[SPECIAL_PART_NAME].current}/${body[SPECIAL_PART_NAME].max}(${body[SPECIAL_PART_NAME].armor})`
     );
   }
-  lines.push(
-    `Head ${body["Head"].current}/${body["Head"].max}(${body["Head"].armor}) | L.Arm ${body["L.Arm"].current}/${body["L.Arm"].max}(${body["L.Arm"].armor}) | R.Arm ${body["R.Arm"].current}/${body["R.Arm"].max}(${body["R.Arm"].armor})`
-  );
-  lines.push(
-    `Torso ${body["Torso"].current}/${body["Torso"].max}(${body["Torso"].armor}) | L.Leg ${body["L.Leg"].current}/${body["L.Leg"].max}(${body["L.Leg"].armor}) | R.Leg ${body["R.Leg"].current}/${body["R.Leg"].max}(${body["R.Leg"].armor})`
-  );
+  const parts = getBodyPartNames(data).map((partName) => {
+    const part = body[partName];
+    return `${partName} ${part.current}/${part.max}(${part.armor})`;
+  });
+  for (let index = 0; index < parts.length; index += 3) {
+    lines.push(parts.slice(index, index + 3).join(" | "));
+  }
   return lines.join("\n");
 }
 function getOdysseyData(item) {
@@ -4169,7 +4188,7 @@ function canPlayerControlToken(playerRole2, playerId2, token) {
   return Boolean(playerId2) && odyssey.owner.playerId === playerId2;
 }
 function getBodyTotals(data) {
-  return BODY_TOTAL_ORDER.reduce(
+  return getBodyPartNames(data).reduce(
     (accumulator, partName) => {
       accumulator.current += data.body[partName].current;
       accumulator.max += data.body[partName].max;
@@ -4180,10 +4199,19 @@ function getBodyTotals(data) {
 }
 function getArmorTotal(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody ?? {};
-  return BODY_ORDER.reduce(
-    (total, partName) => total + (Number(body?.[partName]?.armor) || 0),
-    0
-  );
+  return Object.values(body).reduce((total, part) => total + (Number(part?.armor) || 0), 0);
+}
+function getBodyPartNames(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  const names = Object.keys(body).filter((partName) => partName !== SHIELD_PART_NAME && partName !== SPECIAL_PART_NAME);
+  return names.sort((left, right) => {
+    if (left === "Torso") return -1;
+    if (right === "Torso") return 1;
+    const leftIndex = BODY_TOTAL_ORDER.indexOf(left);
+    const rightIndex = BODY_TOTAL_ORDER.indexOf(right);
+    if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
+    return left.localeCompare(right);
+  });
 }
 function hasConfiguredShield(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
@@ -4198,9 +4226,8 @@ function hasConfiguredSpecial(dataOrBody) {
   return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0;
 }
 function getTargetableBodyParts(dataOrBody) {
-  return BODY_ORDER.filter(
-    (partName) => partName !== SPECIAL_PART_NAME && (partName !== SHIELD_PART_NAME || hasConfiguredShield(dataOrBody))
-  );
+  const parts = getBodyPartNames(dataOrBody);
+  return parts.length ? parts : ["Torso"];
 }
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
@@ -4210,7 +4237,7 @@ function getEffectiveSize(token) {
     height: (token.height || 140) * scaleY
   };
 }
-async function getTokenMetrics(token) {
+async function getTokenMetrics(token, data) {
   const effectiveSize = getEffectiveSize(token);
   const center = token.position;
   const width = effectiveSize.width;
@@ -4238,8 +4265,11 @@ async function getTokenMetrics(token) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const extraParts = getBodyPartNames(data).filter((partName) => data.body?.[partName]?.slot === "outer");
+  const extraInnerRadius = outerRadius + Math.max(4, visibleDiameter * 0.03);
+  const extraOuterRadius = extraInnerRadius + outerThickness;
   const specialThickness = Math.max(4, visibleDiameter * 0.03);
-  const specialInnerRadius = outerRadius;
+  const specialInnerRadius = extraParts.length ? extraOuterRadius : outerRadius;
   const specialOuterRadius = specialInnerRadius + specialThickness;
   const shieldThickness = Math.max(4, visibleDiameter * 0.028);
   const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
@@ -4250,6 +4280,8 @@ async function getTokenMetrics(token) {
     visibleDiameter,
     outerRadius,
     outerInnerRadius,
+    extraInnerRadius,
+    extraOuterRadius,
     torsoOuterRadius,
     torsoInnerRadius,
     specialOuterRadius,
@@ -4258,6 +4290,31 @@ async function getTokenMetrics(token) {
     shieldInnerRadius,
     shieldOffsetY
   };
+}
+function getOverlayPartLayout(data, metrics) {
+  const slotAngles = {
+    head: -90,
+    "upper-left": 198,
+    "upper-right": -18,
+    "lower-left": 126,
+    "lower-right": 54
+  };
+  const outerParts = getBodyPartNames(data).filter((partName) => data.body?.[partName]?.slot === "outer");
+  const outerAngles = outerParts.map((partName, index) => ({
+    partName,
+    angle: -90 + 360 * index / Math.max(outerParts.length, 1),
+    outer: true
+  }));
+  const innerParts = getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.slot !== "outer").map((partName) => ({
+    partName,
+    angle: slotAngles[data.body?.[partName]?.slot] ?? -90,
+    outer: false
+  }));
+  return [...innerParts, ...outerAngles].map((part) => ({
+    ...part,
+    innerRadius: part.outer ? metrics.extraInnerRadius : metrics.outerInnerRadius,
+    outerRadius: part.outer ? metrics.extraOuterRadius : metrics.outerRadius
+  }));
 }
 async function getCachedGridDpi(forceRefresh = false) {
   if (!forceRefresh && Number.isFinite(cachedGridDpi) && cachedGridDpi > 0) {
@@ -4415,16 +4472,17 @@ function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 function buildOverlaySignature(token, data, metrics) {
-  const bodySignature = BODY_ORDER.map((partName) => {
+  const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
-    const color = partName === SPECIAL_PART_NAME ? getSpecialPartColor(part) : getPartColor(part);
-    return `${partName}:${color}`;
+    return `${partName}:${part.slot ?? "outer"}:${getPartColor(part)}`;
   }).join("|");
   return [
     VISUAL_VERSION,
     roundMetric(metrics.visibleDiameter),
     roundMetric(metrics.outerRadius),
     roundMetric(metrics.outerInnerRadius),
+    roundMetric(metrics.extraInnerRadius),
+    roundMetric(metrics.extraOuterRadius),
     roundMetric(metrics.torsoOuterRadius),
     roundMetric(metrics.torsoInnerRadius),
     roundMetric(metrics.specialOuterRadius),
@@ -4451,32 +4509,20 @@ function buildOverlayItems(token, data, metrics, signature = "") {
   const items = [];
   const specialVisible = hasConfiguredSpecial(data);
   const shieldVisible = hasConfiguredShield(data);
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd",
-      signature,
-      true
-    )
-  );
-  for (const segment of OUTER_SEGMENTS) {
+  for (const segment of getOverlayPartLayout(data, metrics)) {
+    const part = data.body[segment.partName];
     items.push(
       buildRingItem(
         token,
         metrics,
-        `segment-${segment.part}`,
+        `part-${segment.partName}`,
         buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
+          segment.outerRadius,
+          segment.innerRadius,
           segment.angle,
-          segment.span
+          30
         ),
-        getPartColor(data.body[segment.part]),
+        getPartColor(part),
         1,
         "nonzero",
         signature,
@@ -4531,7 +4577,12 @@ function buildOverlayItems(token, data, metrics, signature = "") {
   return items;
 }
 function getExpectedOverlayKinds(data) {
-  return FIXED_OVERLAY_KINDS;
+  return [
+    ...getOverlayPartLayout(data, { extraInnerRadius: 0, extraOuterRadius: 0 }).map((part) => `part-${part.partName}`),
+    "torso-ring",
+    "special-ring",
+    "shield-ring"
+  ];
 }
 async function removeOverlaysForToken(tokenId, items) {
   const sceneItems2 = items ?? await lib_default.scene.items.getItems();
@@ -4552,7 +4603,7 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
     return;
   }
   const data = getTrackerData(token);
-  const metrics = await getTokenMetrics(token);
+  const metrics = await getTokenMetrics(token, data);
   const overlaySignature = buildOverlaySignature(token, data, metrics);
   const expectedKinds = getExpectedOverlayKinds(data);
   if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
@@ -4651,7 +4702,7 @@ async function syncTrackedOverlays() {
     const patchable = hasPatchableOverlaySet(token, overlayItems, expectedKinds);
     let needsRebuild = !patchable;
     if (!needsRebuild && overlayItems.length) {
-      const metrics = await getTokenMetrics(token);
+      const metrics = await getTokenMetrics(token, data);
       const expectedSignature = buildOverlaySignature(token, data, metrics);
       needsRebuild = overlayItems.some(
         (item) => String(item.metadata?.signature ?? "") !== expectedSignature
@@ -4757,7 +4808,8 @@ function resolveAttack({
   targetPart = "Torso",
   targetArmor = 0
 }) {
-  const part = BODY_ORDER.includes(targetPart) && targetPart !== SPECIAL_PART_NAME ? targetPart : "Torso";
+  const requestedPart = String(targetPart ?? "").trim();
+  const part = requestedPart && requestedPart !== SPECIAL_PART_NAME ? requestedPart : "Torso";
   const accuracy = calculateAccuracy(
     attackSkill,
     attackBonuses,
@@ -5677,7 +5729,7 @@ function getAttackDraft(token, data, targetCharacters) {
     skill: combatSkillNames.includes(stored.skill) ? stored.skill : fallbackSkill,
     targetTokenId,
     targetTokenName: resolvedTarget ? getCharacterName(resolvedTarget) : draftTargetTokenName,
-    targetPart: BODY_ORDER.includes(stored.targetPart) && stored.targetPart !== SPECIAL_PART_NAME ? stored.targetPart : "Torso",
+    targetPart: String(stored.targetPart ?? "").trim() && stored.targetPart !== SPECIAL_PART_NAME ? String(stored.targetPart).trim() : "Torso",
     weaponName: selectedWeapon?.selectionKey ?? selectedWeapon?.name ?? defaultWeapon.name,
     weaponDamage: stored.weaponDamage ?? String(selectedWeapon?.damage ?? defaultWeapon.damage ?? 0),
     weaponAccuracy: String(selectedWeapon?.accuracy ?? defaultWeapon.accuracy ?? 0),
@@ -6806,7 +6858,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
           <select data-manual-attack-field="targetPart" ${disabledAttr}>
-            ${getTargetableBodyParts(null).map(
+            ${getTargetableBodyParts(data).map(
       (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
     ).join("")}
           </select>
@@ -6981,10 +7033,11 @@ function renderSelectedToken() {
                         <th>Current HP</th>
                         <th>Max HP</th>
                         <th>Armor</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${BODY_ORDER.map((partName) => {
+                      ${getBodyPartNames(data).map((partName) => {
       const part = data.body[partName];
       return `
                           <tr>
@@ -7012,11 +7065,19 @@ function renderSelectedToken() {
         partName
       )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>
+                            <td>${partName === "Torso" ? "" : `<button type="button" class="danger" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}</td>
                           </tr>
                         `;
     }).join("")}
                     </tbody>
                   </table>
+                </div>
+                <div class="body-part-add">
+                  <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Position</span><select data-body-field="new-slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}">${escapeHtml(slot)}</option>`).join("")}</select></label>
+                  <label class="field-stack"><span class="field-label">HP</span><input type="number" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Armor</span><input type="number" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
+                  <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
     true
@@ -7165,10 +7226,9 @@ async function healLimbs() {
     setStatus("Only the GM or assigned player can heal this token.", "error");
     return;
   }
-  const healedParts = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
-    for (const partName of healedParts) {
+    for (const partName of getBodyPartNames(next)) {
       const part = next.body?.[partName];
       if (!part) continue;
       part.current = part.max;
@@ -7229,6 +7289,42 @@ async function setBodyField(partName, field, value) {
     } else if (field === "armor") {
       part.armor = numericValue;
     }
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+async function addBodyPart() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+  const name = getActionFieldValue('[data-body-field="new-name"]').trim();
+  const slot = getActionFieldValue('[data-body-field="new-slot"]');
+  if (!name) throw new Error("Enter a body part name first.");
+  if (!BODY_PART_SLOTS.includes(slot) || slot === "torso") throw new Error("Choose a position around the token.");
+  await updateTrackerData2(token.id, (current2) => {
+    const next = structuredClone(current2);
+    if (next.body[name]) throw new Error("A body part with this name already exists.");
+    const max = clamp(Number(getActionFieldValue('[data-body-field="new-max"]')) || 0, 0, 999);
+    next.body[name] = {
+      current: max,
+      max,
+      armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
+      minor: 0,
+      serious: 0,
+      slot
+    };
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+async function removeBodyPart(partName) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+  if (partName === "Torso") throw new Error("Torso cannot be removed.");
+  await updateTrackerData2(token.id, (current2) => {
+    const next = structuredClone(current2);
+    delete next.body[partName];
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -8105,6 +8201,18 @@ function bindUiEvents() {
     if (action === "heal-limbs") {
       void healLimbs().catch((error) => {
         setStatus(error?.message ?? "Unable to heal limbs.", "error");
+      });
+      return;
+    }
+    if (action === "add-body-part") {
+      void addBodyPart().catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
+    if (action === "remove-body-part") {
+      void removeBodyPart(actionNode.dataset.part ?? "").catch((error) => {
+        setStatus(error.message, "error");
       });
       return;
     }

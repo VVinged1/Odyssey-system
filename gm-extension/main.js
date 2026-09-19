@@ -5,6 +5,7 @@ import {
   SPECIAL_PART_NAME,
   clamp,
   ensureOverlayForToken,
+  getBodyPartAttackPenalty,
   getCharacterName,
   getOdysseyData,
   getTargetableBodyParts,
@@ -295,7 +296,7 @@ function renderRoleGate() {
 
 function renderTargetPartOptions() {
   const target = getSelectedTarget();
-  const targetParts = getTargetableBodyParts(target ? getTrackerData(target) : null);
+  const targetParts = getTargetableBodyParts(target ? getTrackerData(target) : null, true);
   const currentValue = ui.targetPart.value;
   const nextValue = targetParts.includes(currentValue) ? currentValue : DEFAULT_TARGET_PART;
   ui.targetPart.innerHTML = targetParts
@@ -324,19 +325,6 @@ function render() {
   renderRoleGate();
   renderPrivateEntries();
   renderTargetState();
-}
-
-function getAutomaticTargetPenalty(targetPart) {
-  if (targetPart === "Head") return 30;
-  if (
-    targetPart === "L.Arm" ||
-    targetPart === "R.Arm" ||
-    targetPart === "L.Leg" ||
-    targetPart === "R.Leg"
-  ) {
-    return 15;
-  }
-  return 0;
 }
 
 function getParryDivisor(mode) {
@@ -639,11 +627,11 @@ async function performEnvironmentAttack() {
   const totalAttackBonuses = manualAttackBonuses + weaponAccuracy;
   const manualAttackPenalties = Number(ui.attackPenalties.value) || 0;
   const requestedTargetPart = ui.targetPart.value || DEFAULT_TARGET_PART;
-  const availableTargetParts = getTargetableBodyParts(targetData);
+  const availableTargetParts = getTargetableBodyParts(targetData, true);
   const targetPart = availableTargetParts.includes(requestedTargetPart)
     ? requestedTargetPart
     : DEFAULT_TARGET_PART;
-  const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
+  const automaticTargetPenalty = getBodyPartAttackPenalty(targetData, targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(ui.defenseBonuses.value) || 0;
   const defensePenalties = Number(ui.defensePenalties.value) || 0;

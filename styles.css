@@ -719,7 +719,7 @@ select {
 
 .body-part-add {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(110px, 140px) 70px 70px auto;
+  grid-template-columns: minmax(0, 1fr) repeat(3, 70px) auto auto;
   align-items: end;
   gap: 8px;
   padding-top: 10px;

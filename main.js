@@ -4,7 +4,6 @@ import {
   ABILITIES_SKILL_CATEGORY,
   APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
-  BODY_PART_SLOTS,
   COMBAT_SKILL_CATEGORY,
   DEFAULT_ODYSSEY_SKILLS,
   MELEE_SKILL_NAME,
@@ -19,6 +18,7 @@ import {
   getAvailableWeapons,
   getBodyTotals,
   getBodyPartNames,
+  getBodyPartAttackPenalty,
   getCharacterName,
   getOdysseyData,
   getTargetableBodyParts,
@@ -965,19 +965,6 @@ function getCurrentPlayerColor() {
       partyPlayers.find((player) => player?.id === playerId)?.color ||
       "#facc15",
   );
-}
-
-function getAutomaticTargetPenalty(targetPart) {
-  if (targetPart === "Head") return 30;
-  if (
-    targetPart === "L.Arm" ||
-    targetPart === "R.Arm" ||
-    targetPart === "L.Leg" ||
-    targetPart === "R.Leg"
-  ) {
-    return 15;
-  }
-  return 0;
 }
 
 function getParryDivisor(mode) {
@@ -3072,7 +3059,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft.skill);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft.targetTokenId) ?? null;
-  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null);
+  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null, isEditable());
   const targetName = selectedTarget
     ? getCharacterName(selectedTarget)
     : draft.targetTokenName || "No target selected";
@@ -3191,7 +3178,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
           <select data-manual-attack-field="targetPart" ${disabledAttr}>
-            ${getTargetableBodyParts(data).map(
+            ${getTargetableBodyParts(data, isEditable()).map(
               (part) =>
                 `<option value="${part}" ${part === draft.targetPart ? "selected" : ""}>${part}</option>`
             ).join("")}
@@ -3442,6 +3429,8 @@ function renderSelectedToken() {
                         <th>Current HP</th>
                         <th>Max HP</th>
                         <th>Armor</th>
+                        <th>Attack Penalty</th>
+                        <th>Hidden</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -3474,6 +3463,8 @@ function renderSelectedToken() {
                                 partName
                               )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>
+                            <td><input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${bodyFieldDisabled}></td>
+                            <td>${partName === "Torso" ? "" : `<input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "checked" : ""} ${bodyFieldDisabled}>`}</td>
                             <td>${partName === "Torso" ? "" : `<button type="button" class="danger" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}</td>
                           </tr>
                         `;
@@ -3483,9 +3474,10 @@ function renderSelectedToken() {
                 </div>
                 <div class="body-part-add">
                   <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
-                  <label class="field-stack"><span class="field-label">Position</span><select data-body-field="new-slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}">${escapeHtml(slot)}</option>`).join("")}</select></label>
                   <label class="field-stack"><span class="field-label">HP</span><input type="number" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Armor</span><input type="number" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Attack Penalty</span><input type="number" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
+                  <label class="check-label"><input type="checkbox" data-body-field="new-hidden" checked ${bodyFieldDisabled}> <span>Hidden</span></label>
                   <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
@@ -3741,6 +3733,8 @@ async function setBodyField(partName, field, value) {
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
       part.armor = numericValue;
+    } else if (field === "attackPenalty") {
+      part.attackPenalty = numericValue;
     }
 
     return next;
@@ -3753,9 +3747,7 @@ async function addBodyPart() {
   if (!token) throw new Error("Select a character first.");
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
   const name = getActionFieldValue('[data-body-field="new-name"]').trim();
-  const slot = getActionFieldValue('[data-body-field="new-slot"]');
   if (!name) throw new Error("Enter a body part name first.");
-  if (!BODY_PART_SLOTS.includes(slot) || slot === "torso") throw new Error("Choose a position around the token.");
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
@@ -3767,7 +3759,8 @@ async function addBodyPart() {
       armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
       minor: 0,
       serious: 0,
-      slot,
+      attackPenalty: clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999),
+      hidden: document.querySelector('[data-body-field="new-hidden"]')?.checked === true,
     };
     return next;
   });
@@ -3782,6 +3775,19 @@ async function removeBodyPart(partName) {
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
     delete next.body[partName];
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+
+async function toggleBodyPartHidden(partName, hidden) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+
+  await updateTrackerData(token.id, (current) => {
+    const next = structuredClone(current);
+    if (next.body[partName] && partName !== "Torso") next.body[partName].hidden = hidden;
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -4244,9 +4250,9 @@ async function performAttackOnce({ manualDefense = false } = {}) {
       ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]')
       : getActionFieldValue('[data-attack-field="attackPenalties"]')
   ) || 0;
-  const availableTargetParts = getTargetableBodyParts(targetData);
+  const availableTargetParts = getTargetableBodyParts(targetData, isEditable());
   const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
-  const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
+  const automaticTargetPenalty = getBodyPartAttackPenalty(targetData, targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
@@ -4831,6 +4837,13 @@ function bindUiEvents() {
 
     if (action === "remove-body-part") {
       void removeBodyPart(actionNode.dataset.part ?? "").catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
+
+    if (action === "toggle-part-hidden" && actionNode instanceof HTMLInputElement) {
+      void toggleBodyPartHidden(actionNode.dataset.part ?? "", actionNode.checked).catch((error) => {
         setStatus(error.message, "error");
       });
       return;

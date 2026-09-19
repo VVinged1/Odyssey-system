@@ -3739,7 +3739,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 12;
+var VISUAL_VERSION = 14;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3752,21 +3752,9 @@ var RING_COLORS = {
   base: "#000000",
   border: "#050505"
 };
-var OUTER_SEGMENTS = [
-  { part: "Head", angle: -90, span: 30 },
-  { part: "R.Arm", angle: -18, span: 30 },
-  { part: "R.Leg", angle: 54, span: 30 },
-  { part: "L.Leg", angle: 126, span: 30 },
-  { part: "L.Arm", angle: 198, span: 30 }
-];
-var FIXED_OVERLAY_KINDS = [
-  "outer-base",
-  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
-  "torso-ring",
-  "special-ring",
-  "shield-ring"
-];
+var OVERLAY_STROKE_WIDTH = 0.75;
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
+var OVERLAY_UPDATE_DELAY_MS = 75;
 var cachedGridDpi = null;
 var DEFAULT_ODYSSEY_SKILLS = {
   [MELEE_SKILL_NAME]: 0,
@@ -3781,12 +3769,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Head: { current: 1, max: 1, armor: 0, minor: 0, serious: 0 },
-  "L.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "R.Arm": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0 },
-  "L.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
-  "R.Leg": { current: 2, max: 2, armor: 2, minor: 0, serious: 0 },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, attackPenalty: 0, hidden: false },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -3845,6 +3828,11 @@ function numberOrFallback(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
 }
+function getLegacyAttackPenalty(partName) {
+  if (partName === "Head") return 30;
+  if (["L.Arm", "R.Arm", "L.Leg", "R.Leg"].includes(partName)) return 15;
+  return 0;
+}
 function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
   if (!raw || typeof raw !== "object") return next;
@@ -3858,7 +3846,7 @@ function sanitizeTrackerData(raw) {
   next.sync.lastEventId = Math.max(0, Number(raw.sync?.lastEventId ?? 0) || 0);
   next.sync.lastSyncedAt = raw.sync?.lastSyncedAt ? String(raw.sync.lastSyncedAt) : null;
   next.odyssey = sanitizeOdysseyData(raw.odyssey);
-  for (const partName of BODY_ORDER) {
+  for (const partName of Object.keys(BODY_DEFAULTS)) {
     const source = raw.body?.[partName] ?? {};
     const part = next.body[partName];
     part.max = clamp(numberOrFallback(source.max, part.max), 0, 999);
@@ -3870,6 +3858,23 @@ function sanitizeTrackerData(raw) {
     part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
+    part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
+    part.hidden = partName === "Torso" ? false : source.hidden === true;
+  }
+  for (const [partName, source] of Object.entries(raw.body ?? {})) {
+    if (Object.hasOwn(next.body, partName)) continue;
+    const name = String(partName).trim().slice(0, 40);
+    if (!name) continue;
+    const max = clamp(Number(source?.max) || 0, 0, 999);
+    next.body[name] = {
+      current: clamp(Number(source?.current) || 0, 0, max),
+      max,
+      armor: clamp(Number(source?.armor) || 0, 0, 999),
+      minor: clamp(Number(source?.minor) || 0, 0, 3),
+      serious: clamp(Number(source?.serious) || 0, 0, 1),
+      attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getLegacyAttackPenalty(name)), 0, 999),
+      hidden: source?.hidden === true
+    };
   }
   return next;
 }
@@ -3979,6 +3984,18 @@ function sortCharacters(items) {
 function getOdysseyData(item) {
   return sanitizeOdysseyData(getTrackerData(item).odyssey);
 }
+function getBodyPartNames(dataOrBody) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  const names = Object.keys(body).filter((partName) => partName !== SHIELD_PART_NAME && partName !== SPECIAL_PART_NAME);
+  return names.sort((left, right) => {
+    if (left === "Torso") return -1;
+    if (right === "Torso") return 1;
+    const leftIndex = BODY_TOTAL_ORDER.indexOf(left);
+    const rightIndex = BODY_TOTAL_ORDER.indexOf(right);
+    if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
+    return left.localeCompare(right);
+  });
+}
 function hasConfiguredShield(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody;
   const shield = body?.[SHIELD_PART_NAME];
@@ -3991,10 +4008,16 @@ function hasConfiguredSpecial(dataOrBody) {
   if (!special || typeof special !== "object") return false;
   return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0;
 }
-function getTargetableBodyParts(dataOrBody) {
-  return BODY_ORDER.filter(
-    (partName) => partName !== SPECIAL_PART_NAME && (partName !== SHIELD_PART_NAME || hasConfiguredShield(dataOrBody))
+function getTargetableBodyParts(dataOrBody, includeHidden = false) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  const parts = getBodyPartNames(body).filter(
+    (partName) => includeHidden || body[partName]?.hidden !== true
   );
+  return parts.length ? parts : ["Torso"];
+}
+function getBodyPartAttackPenalty(dataOrBody, partName) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  return clamp(numberOrFallback(body?.[partName]?.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
 }
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
@@ -4004,7 +4027,7 @@ function getEffectiveSize(token) {
     height: (token.height || 140) * scaleY
   };
 }
-async function getTokenMetrics(token) {
+async function getTokenMetrics(token, data) {
   const effectiveSize = getEffectiveSize(token);
   const center = token.position;
   const width = effectiveSize.width;
@@ -4052,6 +4075,17 @@ async function getTokenMetrics(token) {
     shieldInnerRadius,
     shieldOffsetY
   };
+}
+function getOverlayPartLayout(data, metrics) {
+  const parts = getBodyPartNames(data).filter(
+    (partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true
+  );
+  return parts.map((partName, index) => ({
+    partName,
+    angle: -90 + 360 * index / Math.max(parts.length, 1),
+    innerRadius: metrics.outerInnerRadius,
+    outerRadius: metrics.outerRadius
+  }));
 }
 async function getCachedGridDpi(forceRefresh = false) {
   if (!forceRefresh && Number.isFinite(cachedGridDpi) && cachedGridDpi > 0) {
@@ -4168,7 +4202,7 @@ function getSpecialPartColor(part) {
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
 function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "", itemVisible = true) {
-  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(0.75).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(OVERLAY_STROKE_WIDTH).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
     [OVERLAY_KEY]: token.id,
     kind,
     visualVersion: VISUAL_VERSION,
@@ -4209,16 +4243,9 @@ function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 function buildOverlaySignature(token, data, metrics) {
-  const bodySignature = BODY_ORDER.map((partName) => {
+  const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
-    return [
-      partName,
-      Number(part.current) || 0,
-      Number(part.max) || 0,
-      Number(part.armor) || 0,
-      Number(part.minor) || 0,
-      Number(part.serious) || 0
-    ].join(":");
+    return `${partName}:${part.hidden === true}:${getPartColor(part)}`;
   }).join("|");
   return [
     VISUAL_VERSION,
@@ -4232,6 +4259,8 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.shieldOuterRadius),
     roundMetric(metrics.shieldInnerRadius),
     roundMetric(metrics.shieldOffsetY),
+    hasConfiguredSpecial(data),
+    hasConfiguredShield(data),
     bodySignature
   ].join(";");
 }
@@ -4249,32 +4278,20 @@ function buildOverlayItems(token, data, metrics, signature = "") {
   const items = [];
   const specialVisible = hasConfiguredSpecial(data);
   const shieldVisible = hasConfiguredShield(data);
-  items.push(
-    buildRingItem(
-      token,
-      metrics,
-      "outer-base",
-      buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius),
-      RING_COLORS.base,
-      0,
-      "evenodd",
-      signature,
-      true
-    )
-  );
-  for (const segment of OUTER_SEGMENTS) {
+  for (const segment of getOverlayPartLayout(data, metrics)) {
+    const part = data.body[segment.partName];
     items.push(
       buildRingItem(
         token,
         metrics,
-        `segment-${segment.part}`,
+        `part-${segment.partName}`,
         buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
+          segment.outerRadius,
+          segment.innerRadius,
           segment.angle,
-          segment.span
+          30
         ),
-        getPartColor(data.body[segment.part]),
+        getPartColor(part),
         1,
         "nonzero",
         signature,
@@ -4329,7 +4346,12 @@ function buildOverlayItems(token, data, metrics, signature = "") {
   return items;
 }
 function getExpectedOverlayKinds(data) {
-  return FIXED_OVERLAY_KINDS;
+  return [
+    ...getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true).map((partName) => `part-${partName}`),
+    "torso-ring",
+    "special-ring",
+    "shield-ring"
+  ];
 }
 async function removeOverlaysForToken(tokenId, items) {
   const sceneItems2 = items ?? await lib_default.scene.items.getItems();
@@ -4350,7 +4372,7 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
     return;
   }
   const data = getTrackerData(token);
-  const metrics = await getTokenMetrics(token);
+  const metrics = await getTokenMetrics(token, data);
   const overlaySignature = buildOverlaySignature(token, data, metrics);
   const expectedKinds = getExpectedOverlayKinds(data);
   if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
@@ -4386,15 +4408,39 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
     buildOverlayItems(token, data, metrics, overlaySignature)
   );
 }
-async function ensureOverlayForToken(tokenId, items) {
-  const previous = overlayEnsureQueue.get(tokenId) ?? Promise.resolve();
-  const next = previous.catch(() => {
-  }).then(() => ensureOverlayForTokenInternal(tokenId, items));
-  overlayEnsureQueue.set(tokenId, next);
+function ensureOverlayForToken(tokenId) {
+  let pending = overlayEnsureQueue.get(tokenId);
+  if (!pending) {
+    pending = { timer: null, running: false, waiters: [] };
+    overlayEnsureQueue.set(tokenId, pending);
+  }
+  return new Promise((resolve, reject) => {
+    pending.waiters.push({ resolve, reject });
+    if (pending.running) return;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      pending.timer = null;
+      void flushOverlayEnsure(tokenId, pending);
+    }, OVERLAY_UPDATE_DELAY_MS);
+  });
+}
+async function flushOverlayEnsure(tokenId, pending) {
+  if (pending.running) return;
+  pending.running = true;
+  const waiters = pending.waiters.splice(0);
   try {
-    await next;
+    await ensureOverlayForTokenInternal(tokenId);
+    waiters.forEach(({ resolve }) => resolve());
+  } catch (error) {
+    waiters.forEach(({ reject }) => reject(error));
   } finally {
-    if (overlayEnsureQueue.get(tokenId) === next) {
+    pending.running = false;
+    if (pending.waiters.length) {
+      pending.timer = setTimeout(() => {
+        pending.timer = null;
+        void flushOverlayEnsure(tokenId, pending);
+      }, OVERLAY_UPDATE_DELAY_MS);
+    } else {
       overlayEnsureQueue.delete(tokenId);
     }
   }
@@ -4494,7 +4540,8 @@ function resolveAttack({
   targetPart = "Torso",
   targetArmor = 0
 }) {
-  const part = BODY_ORDER.includes(targetPart) && targetPart !== SPECIAL_PART_NAME ? targetPart : "Torso";
+  const requestedPart = String(targetPart ?? "").trim();
+  const part = requestedPart && requestedPart !== SPECIAL_PART_NAME ? requestedPart : "Torso";
   const accuracy = calculateAccuracy(
     attackSkill,
     attackBonuses,
@@ -4798,7 +4845,7 @@ function renderRoleGate() {
 }
 function renderTargetPartOptions() {
   const target = getSelectedTarget();
-  const targetParts = getTargetableBodyParts(target ? getTrackerData(target) : null);
+  const targetParts = getTargetableBodyParts(target ? getTrackerData(target) : null, true);
   const currentValue = ui.targetPart.value;
   const nextValue = targetParts.includes(currentValue) ? currentValue : DEFAULT_TARGET_PART;
   ui.targetPart.innerHTML = targetParts.map(
@@ -4822,13 +4869,6 @@ function render() {
   renderRoleGate();
   renderPrivateEntries();
   renderTargetState();
-}
-function getAutomaticTargetPenalty(targetPart) {
-  if (targetPart === "Head") return 30;
-  if (targetPart === "L.Arm" || targetPart === "R.Arm" || targetPart === "L.Leg" || targetPart === "R.Leg") {
-    return 15;
-  }
-  return 0;
 }
 function getParryDivisor(mode) {
   if (mode === "off") return 0;
@@ -5081,9 +5121,9 @@ async function performEnvironmentAttack() {
   const totalAttackBonuses = manualAttackBonuses + weaponAccuracy;
   const manualAttackPenalties = Number(ui.attackPenalties.value) || 0;
   const requestedTargetPart = ui.targetPart.value || DEFAULT_TARGET_PART;
-  const availableTargetParts = getTargetableBodyParts(targetData);
+  const availableTargetParts = getTargetableBodyParts(targetData, true);
   const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : DEFAULT_TARGET_PART;
-  const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
+  const automaticTargetPenalty = getBodyPartAttackPenalty(targetData, targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(ui.defenseBonuses.value) || 0;
   const defensePenalties = Number(ui.defensePenalties.value) || 0;

@@ -3731,15 +3731,6 @@ var SHIELD_PART_NAME = "Shield";
 var SPECIAL_PART_NAME = "Special";
 var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
 var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
-var BODY_SLOT_BY_PART = {
-  Head: "head",
-  "L.Arm": "upper-left",
-  "R.Arm": "upper-right",
-  "L.Leg": "lower-left",
-  "R.Leg": "lower-right",
-  Torso: "torso"
-};
-var BODY_PART_SLOTS = ["head", "upper-left", "upper-right", "lower-left", "lower-right", "outer"];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
@@ -3748,7 +3739,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 13;
+var VISUAL_VERSION = 14;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3762,20 +3753,6 @@ var RING_COLORS = {
   border: "#050505"
 };
 var OVERLAY_STROKE_WIDTH = 0.75;
-var OUTER_SEGMENTS = [
-  { part: "Head", angle: -90, span: 30 },
-  { part: "R.Arm", angle: -18, span: 30 },
-  { part: "R.Leg", angle: 54, span: 30 },
-  { part: "L.Leg", angle: 126, span: 30 },
-  { part: "L.Arm", angle: 198, span: 30 }
-];
-var FIXED_OVERLAY_KINDS = [
-  "outer-base",
-  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
-  "torso-ring",
-  "special-ring",
-  "shield-ring"
-];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
 var OVERLAY_UPDATE_DELAY_MS = 75;
 var cachedGridDpi = null;
@@ -3792,7 +3769,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso" },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, attackPenalty: 0, hidden: false },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -3851,6 +3828,11 @@ function numberOrFallback(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
 }
+function getLegacyAttackPenalty(partName) {
+  if (partName === "Head") return 30;
+  if (["L.Arm", "R.Arm", "L.Leg", "R.Leg"].includes(partName)) return 15;
+  return 0;
+}
 function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
   if (!raw || typeof raw !== "object") return next;
@@ -3876,6 +3858,8 @@ function sanitizeTrackerData(raw) {
     part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
+    part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
+    part.hidden = partName === "Torso" ? false : source.hidden === true;
   }
   for (const [partName, source] of Object.entries(raw.body ?? {})) {
     if (Object.hasOwn(next.body, partName)) continue;
@@ -3888,7 +3872,8 @@ function sanitizeTrackerData(raw) {
       armor: clamp(Number(source?.armor) || 0, 0, 999),
       minor: clamp(Number(source?.minor) || 0, 0, 3),
       serious: clamp(Number(source?.serious) || 0, 0, 1),
-      slot: BODY_PART_SLOTS.includes(source?.slot) ? source.slot : BODY_SLOT_BY_PART[name] ?? "outer"
+      attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getLegacyAttackPenalty(name)), 0, 999),
+      hidden: source?.hidden === true
     };
   }
   return next;
@@ -4054,11 +4039,8 @@ async function getTokenMetrics(token, data) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
-  const extraParts = getBodyPartNames(data).filter((partName) => data.body?.[partName]?.slot === "outer");
-  const extraInnerRadius = outerRadius + Math.max(4, visibleDiameter * 0.03);
-  const extraOuterRadius = extraInnerRadius + outerThickness;
   const specialThickness = Math.max(4, visibleDiameter * 0.03);
-  const specialInnerRadius = extraParts.length ? extraOuterRadius : outerRadius;
+  const specialInnerRadius = outerRadius;
   const specialOuterRadius = specialInnerRadius + specialThickness;
   const shieldThickness = Math.max(4, visibleDiameter * 0.028);
   const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
@@ -4069,8 +4051,6 @@ async function getTokenMetrics(token, data) {
     visibleDiameter,
     outerRadius,
     outerInnerRadius,
-    extraInnerRadius,
-    extraOuterRadius,
     torsoOuterRadius,
     torsoInnerRadius,
     specialOuterRadius,
@@ -4081,28 +4061,14 @@ async function getTokenMetrics(token, data) {
   };
 }
 function getOverlayPartLayout(data, metrics) {
-  const slotAngles = {
-    head: -90,
-    "upper-left": 198,
-    "upper-right": -18,
-    "lower-left": 126,
-    "lower-right": 54
-  };
-  const outerParts = getBodyPartNames(data).filter((partName) => data.body?.[partName]?.slot === "outer");
-  const outerAngles = outerParts.map((partName, index) => ({
+  const parts = getBodyPartNames(data).filter(
+    (partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true
+  );
+  return parts.map((partName, index) => ({
     partName,
-    angle: -90 + 360 * index / Math.max(outerParts.length, 1),
-    outer: true
-  }));
-  const innerParts = getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.slot !== "outer").map((partName) => ({
-    partName,
-    angle: slotAngles[data.body?.[partName]?.slot] ?? -90,
-    outer: false
-  }));
-  return [...innerParts, ...outerAngles].map((part) => ({
-    ...part,
-    innerRadius: part.outer ? metrics.extraInnerRadius : metrics.outerInnerRadius,
-    outerRadius: part.outer ? metrics.extraOuterRadius : metrics.outerRadius
+    angle: -90 + 360 * index / Math.max(parts.length, 1),
+    innerRadius: metrics.outerInnerRadius,
+    outerRadius: metrics.outerRadius
   }));
 }
 async function getCachedGridDpi(forceRefresh = false) {
@@ -4263,15 +4229,13 @@ function roundMetric(value) {
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
-    return `${partName}:${part.slot ?? "outer"}:${getPartColor(part)}`;
+    return `${partName}:${part.hidden === true}:${getPartColor(part)}`;
   }).join("|");
   return [
     VISUAL_VERSION,
     roundMetric(metrics.visibleDiameter),
     roundMetric(metrics.outerRadius),
     roundMetric(metrics.outerInnerRadius),
-    roundMetric(metrics.extraInnerRadius),
-    roundMetric(metrics.extraOuterRadius),
     roundMetric(metrics.torsoOuterRadius),
     roundMetric(metrics.torsoInnerRadius),
     roundMetric(metrics.specialOuterRadius),
@@ -4443,7 +4407,7 @@ function buildOverlayItems(token, data, metrics, signature = "") {
 }
 function getExpectedOverlayKinds(data) {
   return [
-    ...getOverlayPartLayout(data, { extraInnerRadius: 0, extraOuterRadius: 0 }).map((part) => `part-${part.partName}`),
+    ...getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true).map((partName) => `part-${partName}`),
     "torso-ring",
     "special-ring",
     "shield-ring"

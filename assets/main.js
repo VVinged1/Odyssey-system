@@ -3888,15 +3888,6 @@ var SHIELD_PART_NAME = "Shield";
 var SPECIAL_PART_NAME = "Special";
 var BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
 var BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
-var BODY_SLOT_BY_PART = {
-  Head: "head",
-  "L.Arm": "upper-left",
-  "R.Arm": "upper-right",
-  "L.Leg": "lower-left",
-  "R.Leg": "lower-right",
-  Torso: "torso"
-};
-var BODY_PART_SLOTS = ["head", "upper-left", "upper-right", "lower-left", "lower-right", "outer"];
 var ROLL_HISTORY_LIMIT = 12;
 var COMBAT_SKILL_CATEGORY = "combat";
 var APPLIED_SKILL_CATEGORY = "applied";
@@ -3905,7 +3896,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 13;
+var VISUAL_VERSION = 14;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -3919,20 +3910,6 @@ var RING_COLORS = {
   border: "#050505"
 };
 var OVERLAY_STROKE_WIDTH = 0.75;
-var OUTER_SEGMENTS = [
-  { part: "Head", angle: -90, span: 30 },
-  { part: "R.Arm", angle: -18, span: 30 },
-  { part: "R.Leg", angle: 54, span: 30 },
-  { part: "L.Leg", angle: 126, span: 30 },
-  { part: "L.Arm", angle: 198, span: 30 }
-];
-var FIXED_OVERLAY_KINDS = [
-  "outer-base",
-  ...OUTER_SEGMENTS.map((segment) => `segment-${segment.part}`),
-  "torso-ring",
-  "special-ring",
-  "shield-ring"
-];
 var overlayEnsureQueue = /* @__PURE__ */ new Map();
 var OVERLAY_UPDATE_DELAY_MS = 75;
 var cachedGridDpi = null;
@@ -3949,7 +3926,7 @@ var DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
   [PARRY_SKILL_NAME]: false
 };
 var BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso" },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, attackPenalty: 0, hidden: false },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 }
 };
@@ -4008,6 +3985,11 @@ function numberOrFallback(value, fallback) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
 }
+function getLegacyAttackPenalty(partName) {
+  if (partName === "Head") return 30;
+  if (["L.Arm", "R.Arm", "L.Leg", "R.Leg"].includes(partName)) return 15;
+  return 0;
+}
 function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
   if (!raw || typeof raw !== "object") return next;
@@ -4033,6 +4015,8 @@ function sanitizeTrackerData(raw) {
     part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
+    part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
+    part.hidden = partName === "Torso" ? false : source.hidden === true;
   }
   for (const [partName, source] of Object.entries(raw.body ?? {})) {
     if (Object.hasOwn(next.body, partName)) continue;
@@ -4045,7 +4029,8 @@ function sanitizeTrackerData(raw) {
       armor: clamp(Number(source?.armor) || 0, 0, 999),
       minor: clamp(Number(source?.minor) || 0, 0, 3),
       serious: clamp(Number(source?.serious) || 0, 0, 1),
-      slot: BODY_PART_SLOTS.includes(source?.slot) ? source.slot : BODY_SLOT_BY_PART[name] ?? "outer"
+      attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getLegacyAttackPenalty(name)), 0, 999),
+      hidden: source?.hidden === true
     };
   }
   return next;
@@ -4225,9 +4210,16 @@ function hasConfiguredSpecial(dataOrBody) {
   if (!special || typeof special !== "object") return false;
   return (Number(special.max) || 0) > 0 || (Number(special.current) || 0) > 0 || (Number(special.armor) || 0) > 0;
 }
-function getTargetableBodyParts(dataOrBody) {
-  const parts = getBodyPartNames(dataOrBody);
+function getTargetableBodyParts(dataOrBody, includeHidden = false) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  const parts = getBodyPartNames(body).filter(
+    (partName) => includeHidden || body[partName]?.hidden !== true
+  );
   return parts.length ? parts : ["Torso"];
+}
+function getBodyPartAttackPenalty(dataOrBody, partName) {
+  const body = dataOrBody?.body ?? dataOrBody ?? {};
+  return clamp(numberOrFallback(body?.[partName]?.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
 }
 function getEffectiveSize(token) {
   const scaleX = Math.abs(token.scale?.x ?? 1);
@@ -4265,11 +4257,8 @@ async function getTokenMetrics(token, data) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
-  const extraParts = getBodyPartNames(data).filter((partName) => data.body?.[partName]?.slot === "outer");
-  const extraInnerRadius = outerRadius + Math.max(4, visibleDiameter * 0.03);
-  const extraOuterRadius = extraInnerRadius + outerThickness;
   const specialThickness = Math.max(4, visibleDiameter * 0.03);
-  const specialInnerRadius = extraParts.length ? extraOuterRadius : outerRadius;
+  const specialInnerRadius = outerRadius;
   const specialOuterRadius = specialInnerRadius + specialThickness;
   const shieldThickness = Math.max(4, visibleDiameter * 0.028);
   const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
@@ -4280,8 +4269,6 @@ async function getTokenMetrics(token, data) {
     visibleDiameter,
     outerRadius,
     outerInnerRadius,
-    extraInnerRadius,
-    extraOuterRadius,
     torsoOuterRadius,
     torsoInnerRadius,
     specialOuterRadius,
@@ -4292,28 +4279,14 @@ async function getTokenMetrics(token, data) {
   };
 }
 function getOverlayPartLayout(data, metrics) {
-  const slotAngles = {
-    head: -90,
-    "upper-left": 198,
-    "upper-right": -18,
-    "lower-left": 126,
-    "lower-right": 54
-  };
-  const outerParts = getBodyPartNames(data).filter((partName) => data.body?.[partName]?.slot === "outer");
-  const outerAngles = outerParts.map((partName, index) => ({
+  const parts = getBodyPartNames(data).filter(
+    (partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true
+  );
+  return parts.map((partName, index) => ({
     partName,
-    angle: -90 + 360 * index / Math.max(outerParts.length, 1),
-    outer: true
-  }));
-  const innerParts = getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.slot !== "outer").map((partName) => ({
-    partName,
-    angle: slotAngles[data.body?.[partName]?.slot] ?? -90,
-    outer: false
-  }));
-  return [...innerParts, ...outerAngles].map((part) => ({
-    ...part,
-    innerRadius: part.outer ? metrics.extraInnerRadius : metrics.outerInnerRadius,
-    outerRadius: part.outer ? metrics.extraOuterRadius : metrics.outerRadius
+    angle: -90 + 360 * index / Math.max(parts.length, 1),
+    innerRadius: metrics.outerInnerRadius,
+    outerRadius: metrics.outerRadius
   }));
 }
 async function getCachedGridDpi(forceRefresh = false) {
@@ -4474,15 +4447,13 @@ function roundMetric(value) {
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
-    return `${partName}:${part.slot ?? "outer"}:${getPartColor(part)}`;
+    return `${partName}:${part.hidden === true}:${getPartColor(part)}`;
   }).join("|");
   return [
     VISUAL_VERSION,
     roundMetric(metrics.visibleDiameter),
     roundMetric(metrics.outerRadius),
     roundMetric(metrics.outerInnerRadius),
-    roundMetric(metrics.extraInnerRadius),
-    roundMetric(metrics.extraOuterRadius),
     roundMetric(metrics.torsoOuterRadius),
     roundMetric(metrics.torsoInnerRadius),
     roundMetric(metrics.specialOuterRadius),
@@ -4578,7 +4549,7 @@ function buildOverlayItems(token, data, metrics, signature = "") {
 }
 function getExpectedOverlayKinds(data) {
   return [
-    ...getOverlayPartLayout(data, { extraInnerRadius: 0, extraOuterRadius: 0 }).map((part) => `part-${part.partName}`),
+    ...getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true).map((partName) => `part-${partName}`),
     "torso-ring",
     "special-ring",
     "shield-ring"
@@ -5608,13 +5579,6 @@ function getCurrentPlayerColor() {
   return String(
     playerColor || partyPlayers.find((player) => player?.id === playerId)?.color || "#facc15"
   );
-}
-function getAutomaticTargetPenalty(targetPart) {
-  if (targetPart === "Head") return 30;
-  if (targetPart === "L.Arm" || targetPart === "R.Arm" || targetPart === "L.Leg" || targetPart === "R.Leg") {
-    return 15;
-  }
-  return 0;
 }
 function getParryDivisor(mode) {
   if (mode === "off") return 0;
@@ -6749,7 +6713,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   const skillOptions = buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill);
   const weaponOptions = buildWeaponOptions(getAttackSelectableWeapons(token), draft2.weaponName);
   const selectedTarget = targetCharacters.find((target) => target.id === draft2.targetTokenId) ?? null;
-  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null);
+  const targetableBodyParts = getTargetableBodyParts(selectedTarget ? getTrackerData(selectedTarget) : null, isEditable());
   const targetName = selectedTarget ? getCharacterName(selectedTarget) : draft2.targetTokenName || "No target selected";
   const isPickingTarget = targetPickState.active && targetPickState.attackerTokenId === token.id;
   const attackDisabledAttr = tokenLocked || !draft2.targetTokenId ? "disabled" : "";
@@ -6858,7 +6822,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Target Body Part</span>
           <select data-manual-attack-field="targetPart" ${disabledAttr}>
-            ${getTargetableBodyParts(data).map(
+            ${getTargetableBodyParts(data, isEditable()).map(
       (part) => `<option value="${part}" ${part === draft2.targetPart ? "selected" : ""}>${part}</option>`
     ).join("")}
           </select>
@@ -7033,6 +6997,8 @@ function renderSelectedToken() {
                         <th>Current HP</th>
                         <th>Max HP</th>
                         <th>Armor</th>
+                        <th>Attack Penalty</th>
+                        <th>Hidden</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -7065,6 +7031,8 @@ function renderSelectedToken() {
         partName
       )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>
+                            <td><input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${bodyFieldDisabled}></td>
+                            <td>${partName === "Torso" ? "" : `<input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "checked" : ""} ${bodyFieldDisabled}>`}</td>
                             <td>${partName === "Torso" ? "" : `<button type="button" class="danger" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}</td>
                           </tr>
                         `;
@@ -7074,9 +7042,10 @@ function renderSelectedToken() {
                 </div>
                 <div class="body-part-add">
                   <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
-                  <label class="field-stack"><span class="field-label">Position</span><select data-body-field="new-slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}">${escapeHtml(slot)}</option>`).join("")}</select></label>
                   <label class="field-stack"><span class="field-label">HP</span><input type="number" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Armor</span><input type="number" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Attack Penalty</span><input type="number" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
+                  <label class="check-label"><input type="checkbox" data-body-field="new-hidden" checked ${bodyFieldDisabled}> <span>Hidden</span></label>
                   <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
@@ -7288,6 +7257,8 @@ async function setBodyField(partName, field, value) {
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
       part.armor = numericValue;
+    } else if (field === "attackPenalty") {
+      part.attackPenalty = numericValue;
     }
     return next;
   });
@@ -7298,9 +7269,7 @@ async function addBodyPart() {
   if (!token) throw new Error("Select a character first.");
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
   const name = getActionFieldValue('[data-body-field="new-name"]').trim();
-  const slot = getActionFieldValue('[data-body-field="new-slot"]');
   if (!name) throw new Error("Enter a body part name first.");
-  if (!BODY_PART_SLOTS.includes(slot) || slot === "torso") throw new Error("Choose a position around the token.");
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     if (next.body[name]) throw new Error("A body part with this name already exists.");
@@ -7311,7 +7280,8 @@ async function addBodyPart() {
       armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
       minor: 0,
       serious: 0,
-      slot
+      attackPenalty: clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999),
+      hidden: document.querySelector('[data-body-field="new-hidden"]')?.checked === true
     };
     return next;
   });
@@ -7325,6 +7295,17 @@ async function removeBodyPart(partName) {
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
     delete next.body[partName];
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+async function toggleBodyPartHidden(partName, hidden) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+  await updateTrackerData2(token.id, (current2) => {
+    const next = structuredClone(current2);
+    if (next.body[partName] && partName !== "Torso") next.body[partName].hidden = hidden;
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -7724,9 +7705,9 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const manualAttackPenalties = Number(
     manualDefense ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]') : getActionFieldValue('[data-attack-field="attackPenalties"]')
   ) || 0;
-  const availableTargetParts = getTargetableBodyParts(targetData);
+  const availableTargetParts = getTargetableBodyParts(targetData, isEditable());
   const targetPart = availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
-  const automaticTargetPenalty = getAutomaticTargetPenalty(targetPart);
+  const automaticTargetPenalty = getBodyPartAttackPenalty(targetData, targetPart);
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
@@ -8212,6 +8193,12 @@ function bindUiEvents() {
     }
     if (action === "remove-body-part") {
       void removeBodyPart(actionNode.dataset.part ?? "").catch((error) => {
+        setStatus(error.message, "error");
+      });
+      return;
+    }
+    if (action === "toggle-part-hidden" && actionNode instanceof HTMLInputElement) {
+      void toggleBodyPartHidden(actionNode.dataset.part ?? "", actionNode.checked).catch((error) => {
         setStatus(error.message, "error");
       });
       return;

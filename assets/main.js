@@ -4340,7 +4340,7 @@ function getOverlayPartLayout(data, metrics) {
     });
   }
   const otherParts = visibleParts.filter((partName) => data.body?.[partName]?.slot === "other");
-  const otherSpan = 360 / Math.max(otherParts.length, 1);
+  const otherSpan = Math.min(60, 360 / Math.max(otherParts.length, 1) * 0.8);
   otherParts.forEach((partName, index) => {
     layouts.push({
       partName,
@@ -7062,28 +7062,32 @@ function renderSelectedToken() {
       return `
                       <div class="body-part-editor">
                         <div class="body-part-editor-head">
-                          <strong class="part-name">${escapeHtml(partName)}</strong>
+                          <div class="body-part-identity">
+                            <div class="body-part-name-line">
+                              <input class="body-part-name-input" type="text" maxlength="40" value="${escapeHtml(partName)}" data-action="rename-body-part" data-part="${escapeHtml(partName)}" ${partName === "Torso" ? "disabled" : bodyFieldDisabled}>
+                              ${partName === "Torso" ? "" : `<button type="button" class="body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" title="Remove body part" aria-label="Remove ${escapeHtml(partName)}" ${bodyFieldDisabled}>\xD7</button>`}
+                            </div>
+                            ${partName === "Torso" ? "" : `<label class="check-label body-part-visible"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "" : "checked"} ${bodyFieldDisabled}> <span>Visible to players</span></label>`}
+                          </div>
                           ${partName === "Torso" ? `<span class="body-part-slot">Torso</span>` : `<label class="field-stack compact-field"><span class="field-label">Position</span><select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>`}
-                          ${partName === "Torso" ? "" : `<label class="check-label body-part-hidden"><input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "checked" : ""} ${bodyFieldDisabled}> <span>Hidden</span></label>`}
-                          ${partName === "Torso" ? "" : `<button type="button" class="danger body-part-remove" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}
                         </div>
                         <div class="body-part-editor-fields">
-                          <label class="field-stack"><span class="field-label">HP</span><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></label>
-                          <label class="field-stack"><span class="field-label">Max HP</span><input type="text" inputmode="numeric" min="0" max="999" value="${part.max}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="max" ${bodyFieldDisabled}></label>
-                          <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" min="0" max="999" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="armor" ${bodyFieldDisabled}></label>
-                          <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></label>
+                          <label class="field-stack"><span class="field-label">HP</span><div class="inline-stepper"><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="-1" ${bodyFieldDisabled}>-</button><input type="text" inputmode="numeric" maxlength="3" min="0" max="${part.max}" value="${part.current}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="current" ${bodyFieldDisabled}><button type="button" data-action="change-part" data-part="${escapeHtml(partName)}" data-field="current" data-delta="1" ${bodyFieldDisabled}>+</button></div></label>
+                          <label class="field-stack"><span class="field-label">Max HP</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="${part.max}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="max" ${bodyFieldDisabled}></label>
+                          <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="${part.armor}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="armor" ${bodyFieldDisabled}></label>
+                          <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></label>
                         </div>
                       </div>
                     `;
     }).join("")}
                 </div>
                 <div class="body-part-add">
-                  <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Part</span><input type="text" maxlength="40" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Position</span><select data-body-field="new-slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${slot === "other" ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>
-                  <label class="field-stack"><span class="field-label">HP</span><input type="number" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
-                  <label class="field-stack"><span class="field-label">Armor</span><input type="number" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
-                  <label class="field-stack"><span class="field-label">Other Penalty</span><input type="number" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
-                  <label class="check-label"><input type="checkbox" data-body-field="new-hidden" checked ${bodyFieldDisabled}> <span>Hidden</span></label>
+                  <label class="field-stack"><span class="field-label">HP</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Armor</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Other Penalty</span><input type="text" inputmode="numeric" maxlength="3" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
+                  <label class="check-label"><input type="checkbox" data-body-field="new-visible" ${bodyFieldDisabled}> <span>Visible to players</span></label>
                   <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
               `,
@@ -7325,7 +7329,7 @@ async function addBodyPart() {
       serious: 0,
       slot,
       attackPenalty: clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999),
-      hidden: document.querySelector('[data-body-field="new-hidden"]')?.checked === true
+      hidden: document.querySelector('[data-body-field="new-visible"]')?.checked !== true
     };
     return next;
   });
@@ -7338,6 +7342,23 @@ async function removeBodyPart(partName) {
   if (partName === "Torso") throw new Error("Torso cannot be removed.");
   await updateTrackerData2(token.id, (current2) => {
     const next = structuredClone(current2);
+    delete next.body[partName];
+    return next;
+  });
+  await ensureOverlayForToken(token.id);
+}
+async function renameBodyPart(partName, value) {
+  const token = getCharacterById(activeTokenId);
+  if (!token) throw new Error("Select a character first.");
+  if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
+  if (partName === "Torso") throw new Error("Torso cannot be renamed.");
+  const nextName = String(value ?? "").trim().slice(0, 40);
+  if (!nextName) throw new Error("Enter a body part name first.");
+  await updateTrackerData2(token.id, (current2) => {
+    const next = structuredClone(current2);
+    if (!next.body[partName] || nextName === partName) return next;
+    if (next.body[nextName]) throw new Error("A body part with this name already exists.");
+    next.body[nextName] = next.body[partName];
     delete next.body[partName];
     return next;
   });
@@ -8242,7 +8263,7 @@ function bindUiEvents() {
       return;
     }
     if (action === "toggle-part-hidden" && actionNode instanceof HTMLInputElement) {
-      void toggleBodyPartHidden(actionNode.dataset.part ?? "", actionNode.checked).catch((error) => {
+      void toggleBodyPartHidden(actionNode.dataset.part ?? "", !actionNode.checked).catch((error) => {
         setStatus(error.message, "error");
       });
       return;
@@ -8455,6 +8476,15 @@ function bindUiEvents() {
       target.value = "";
       void importSelectedTokenData(file).catch((error) => {
         setStatus(error?.message ?? "Unable to import token data.", "error");
+      });
+      return;
+    }
+    if (target.dataset.action === "rename-body-part") {
+      const partName2 = target.dataset.part;
+      if (!partName2) return;
+      void renameBodyPart(partName2, target.value).catch((error) => {
+        setStatus(error.message, "error");
+        scheduleRender();
       });
       return;
     }

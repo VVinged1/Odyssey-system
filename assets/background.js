@@ -4112,7 +4112,7 @@ function getOverlayPartLayout(data, metrics) {
     });
   }
   const otherParts = visibleParts.filter((partName) => data.body?.[partName]?.slot === "other");
-  const otherSpan = 360 / Math.max(otherParts.length, 1);
+  const otherSpan = Math.min(60, 360 / Math.max(otherParts.length, 1) * 0.8);
   otherParts.forEach((partName, index) => {
     layouts.push({
       partName,

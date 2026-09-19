@@ -10,6 +10,30 @@ export const SHIELD_PART_NAME = "Shield";
 export const SPECIAL_PART_NAME = "Special";
 const BODY_TOTAL_ORDER = ["Head", "L.Arm", "R.Arm", "Torso", "L.Leg", "R.Leg"];
 export const BODY_ORDER = [...BODY_TOTAL_ORDER, SHIELD_PART_NAME, SPECIAL_PART_NAME];
+export const BODY_PART_SLOTS = ["head", "left-arm", "right-arm", "left-leg", "right-leg", "other"];
+export const BODY_PART_SLOT_LABELS = {
+  head: "Head",
+  "left-arm": "Left Arm",
+  "right-arm": "Right Arm",
+  "left-leg": "Left Leg",
+  "right-leg": "Right Leg",
+  other: "Other",
+};
+const BODY_SLOT_BY_PART = {
+  Head: "head",
+  "L.Arm": "left-arm",
+  "R.Arm": "right-arm",
+  "L.Leg": "left-leg",
+  "R.Leg": "right-leg",
+  Torso: "torso",
+};
+const BODY_SLOT_LAYOUT = [
+  { slot: "head", angle: -90 },
+  { slot: "right-arm", angle: -18 },
+  { slot: "right-leg", angle: 54 },
+  { slot: "left-leg", angle: 126 },
+  { slot: "left-arm", angle: 198 },
+];
 export const ROLL_HISTORY_LIMIT = 12;
 export const COMBAT_SKILL_CATEGORY = "combat";
 export const APPLIED_SKILL_CATEGORY = "applied";
@@ -18,7 +42,7 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 14;
+const VISUAL_VERSION = 15;
 const SPECIAL_RING_COLOR = "#57D8FF";
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -49,7 +73,7 @@ export const DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES = {
 };
 
 export const BODY_DEFAULTS = {
-  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, attackPenalty: 0, hidden: false },
+  Torso: { current: 3, max: 3, armor: 6, minor: 0, serious: 0, slot: "torso", attackPenalty: 0, hidden: false },
   [SHIELD_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
   [SPECIAL_PART_NAME]: { current: 0, max: 0, armor: 0, minor: 0, serious: 0 },
 };
@@ -113,10 +137,15 @@ function numberOrFallback(value, fallback) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-function getLegacyAttackPenalty(partName) {
-  if (partName === "Head") return 30;
-  if (["L.Arm", "R.Arm", "L.Leg", "R.Leg"].includes(partName)) return 15;
+function getSlotAttackPenalty(slot) {
+  if (slot === "head") return 30;
+  if (["left-arm", "right-arm", "left-leg", "right-leg"].includes(slot)) return 15;
   return 0;
+}
+
+function getPartSlot(partName, source) {
+  if (partName === "Torso") return "torso";
+  return BODY_PART_SLOTS.includes(source?.slot) ? source.slot : (BODY_SLOT_BY_PART[partName] ?? "other");
 }
 
 export function sanitizeTrackerData(raw) {
@@ -150,7 +179,9 @@ export function sanitizeTrackerData(raw) {
     part.armor = clamp(numberOrFallback(source.armor, part.armor), 0, 999);
     part.minor = clamp(numberOrFallback(source.minor, part.minor), 0, 3);
     part.serious = clamp(numberOrFallback(source.serious, part.serious), 0, 1);
-    part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
+    part.slot = getPartSlot(partName, source);
+    part.attackPenalty = clamp(numberOrFallback(source.attackPenalty, getSlotAttackPenalty(part.slot)), 0, 999);
+    if (part.slot !== "other") part.attackPenalty = getSlotAttackPenalty(part.slot);
     part.hidden = partName === "Torso" ? false : source.hidden === true;
   }
 
@@ -165,9 +196,13 @@ export function sanitizeTrackerData(raw) {
       armor: clamp(Number(source?.armor) || 0, 0, 999),
       minor: clamp(Number(source?.minor) || 0, 0, 3),
       serious: clamp(Number(source?.serious) || 0, 0, 1),
-      attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getLegacyAttackPenalty(name)), 0, 999),
+      slot: getPartSlot(name, source),
+      attackPenalty: clamp(numberOrFallback(source?.attackPenalty, getSlotAttackPenalty(getPartSlot(name, source))), 0, 999),
       hidden: source?.hidden === true,
     };
+    if (next.body[name].slot !== "other") {
+      next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
+    }
   }
 
   return next;
@@ -438,7 +473,11 @@ export function getTargetableBodyParts(dataOrBody, includeHidden = false) {
 
 export function getBodyPartAttackPenalty(dataOrBody, partName) {
   const body = dataOrBody?.body ?? dataOrBody ?? {};
-  return clamp(numberOrFallback(body?.[partName]?.attackPenalty, getLegacyAttackPenalty(partName)), 0, 999);
+  const part = body?.[partName];
+  const slot = getPartSlot(partName, part);
+  return slot === "other"
+    ? clamp(numberOrFallback(part?.attackPenalty, 0), 0, 999)
+    : getSlotAttackPenalty(slot);
 }
 
 function getEffectiveSize(token) {
@@ -480,8 +519,13 @@ async function getTokenMetrics(token, data) {
   const outerThickness = Math.max(8, visibleDiameter * 0.08);
   const outerInnerRadius = torsoOuterRadius + ringGap;
   const outerRadius = outerInnerRadius + outerThickness;
+  const otherParts = getBodyPartNames(data).filter(
+    (partName) => data.body?.[partName]?.slot === "other" && data.body?.[partName]?.hidden !== true,
+  );
+  const extraInnerRadius = outerRadius + Math.max(4, visibleDiameter * 0.03);
+  const extraOuterRadius = extraInnerRadius + outerThickness;
   const specialThickness = Math.max(4, visibleDiameter * 0.03);
-  const specialInnerRadius = outerRadius;
+  const specialInnerRadius = otherParts.length ? extraOuterRadius : outerRadius;
   const specialOuterRadius = specialInnerRadius + specialThickness;
   const shieldThickness = Math.max(4, visibleDiameter * 0.028);
   const shieldOuterRadius = Math.max(10, visibleDiameter * 0.1);
@@ -493,6 +537,8 @@ async function getTokenMetrics(token, data) {
     visibleDiameter,
     outerRadius,
     outerInnerRadius,
+    extraInnerRadius,
+    extraOuterRadius,
     torsoOuterRadius,
     torsoInnerRadius,
     specialOuterRadius,
@@ -504,15 +550,36 @@ async function getTokenMetrics(token, data) {
 }
 
 function getOverlayPartLayout(data, metrics) {
-  const parts = getBodyPartNames(data).filter(
+  const visibleParts = getBodyPartNames(data).filter(
     (partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true,
   );
-  return parts.map((partName, index) => ({
-    partName,
-    angle: -90 + (360 * index) / Math.max(parts.length, 1),
-    innerRadius: metrics.outerInnerRadius,
-    outerRadius: metrics.outerRadius,
-  }));
+  const layouts = [];
+  for (const { slot, angle } of BODY_SLOT_LAYOUT) {
+    const parts = visibleParts.filter((partName) => data.body?.[partName]?.slot === slot);
+    const span = 60 / Math.max(parts.length, 1);
+    parts.forEach((partName, index) => {
+      layouts.push({
+        partName,
+        angle: angle - 30 + span * (index + 0.5),
+        span,
+        innerRadius: metrics.outerInnerRadius,
+        outerRadius: metrics.outerRadius,
+      });
+    });
+  }
+
+  const otherParts = visibleParts.filter((partName) => data.body?.[partName]?.slot === "other");
+  const otherSpan = 360 / Math.max(otherParts.length, 1);
+  otherParts.forEach((partName, index) => {
+    layouts.push({
+      partName,
+      angle: -90 + otherSpan * index,
+      span: otherSpan,
+      innerRadius: metrics.extraInnerRadius,
+      outerRadius: metrics.extraOuterRadius,
+    });
+  });
+  return layouts;
 }
 
 async function getCachedGridDpi(forceRefresh = false) {
@@ -791,7 +858,7 @@ function buildOverlayBounds(metrics, data) {
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
-    return `${partName}:${part.hidden === true}:${getPartColor(part)}`;
+    return `${partName}:${part.slot ?? "other"}:${part.hidden === true}:${getPartColor(part)}`;
   }).join("|");
 
   return [
@@ -799,6 +866,8 @@ function buildOverlaySignature(token, data, metrics) {
     roundMetric(metrics.visibleDiameter),
     roundMetric(metrics.outerRadius),
     roundMetric(metrics.outerInnerRadius),
+    roundMetric(metrics.extraInnerRadius),
+    roundMetric(metrics.extraOuterRadius),
     roundMetric(metrics.torsoOuterRadius),
     roundMetric(metrics.torsoInnerRadius),
     roundMetric(metrics.specialOuterRadius),
@@ -822,10 +891,10 @@ function buildOverlaySvgMarkup(token, data, metrics) {
     ...getOverlayPartLayout(data, metrics).map((segment) => ({
       d: commandsToSvgPath(
         buildSectorCommands(
-          metrics.outerRadius,
-          metrics.outerInnerRadius,
+          segment.outerRadius,
+          segment.innerRadius,
           segment.angle,
-          30,
+          segment.span,
         ),
       ),
       fill: getPartColor(data.body[segment.partName]),
@@ -1006,7 +1075,7 @@ export function buildOverlayItems(token, data, metrics, signature = "") {
           segment.outerRadius,
           segment.innerRadius,
           segment.angle,
-          30,
+          segment.span,
         ),
         getPartColor(part),
         1,

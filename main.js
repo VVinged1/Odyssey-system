@@ -4,6 +4,8 @@ import {
   ABILITIES_SKILL_CATEGORY,
   APPLIED_SKILL_CATEGORY,
   BODY_ORDER,
+  BODY_PART_SLOTS,
+  BODY_PART_SLOT_LABELS,
   COMBAT_SKILL_CATEGORY,
   DEFAULT_ODYSSEY_SKILLS,
   MELEE_SKILL_NAME,
@@ -3429,7 +3431,8 @@ function renderSelectedToken() {
                         <th>Current HP</th>
                         <th>Max HP</th>
                         <th>Armor</th>
-                        <th>Attack Penalty</th>
+                        <th>Position</th>
+                        <th>Other Penalty</th>
                         <th>Hidden</th>
                         <th></th>
                       </tr>
@@ -3437,6 +3440,7 @@ function renderSelectedToken() {
                     <tbody>
                       ${getBodyPartNames(data).map((partName) => {
                         const part = data.body[partName];
+                        const penaltyDisabled = part.slot !== "other" ? "disabled" : bodyFieldDisabled;
                         return `
                           <tr>
                             <td class="part-name">${escapeHtml(partName)}</td>
@@ -3463,7 +3467,8 @@ function renderSelectedToken() {
                                 partName
                               )}" data-field="armor" ${bodyFieldDisabled}>
                             </td>
-                            <td><input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${bodyFieldDisabled}></td>
+                            <td>${partName === "Torso" ? "Torso" : `<select data-action="set-field" data-part="${escapeHtml(partName)}" data-field="slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${part.slot === slot ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select>`}</td>
+                            <td><input class="compact-input" type="text" inputmode="numeric" min="0" max="999" value="${part.attackPenalty ?? 0}" data-action="set-field" data-part="${escapeHtml(partName)}" data-field="attackPenalty" ${penaltyDisabled}></td>
                             <td>${partName === "Torso" ? "" : `<input type="checkbox" data-action="toggle-part-hidden" data-part="${escapeHtml(partName)}" ${part.hidden ? "checked" : ""} ${bodyFieldDisabled}>`}</td>
                             <td>${partName === "Torso" ? "" : `<button type="button" class="danger" data-action="remove-body-part" data-part="${escapeHtml(partName)}" ${bodyFieldDisabled}>Remove</button>`}</td>
                           </tr>
@@ -3474,9 +3479,10 @@ function renderSelectedToken() {
                 </div>
                 <div class="body-part-add">
                   <label class="field-stack"><span class="field-label">Part</span><input type="text" data-body-field="new-name" placeholder="Extra arm" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Position</span><select data-body-field="new-slot" ${bodyFieldDisabled}>${BODY_PART_SLOTS.map((slot) => `<option value="${slot}" ${slot === "other" ? "selected" : ""}>${BODY_PART_SLOT_LABELS[slot]}</option>`).join("")}</select></label>
                   <label class="field-stack"><span class="field-label">HP</span><input type="number" min="0" max="999" value="1" data-body-field="new-max" ${bodyFieldDisabled}></label>
                   <label class="field-stack"><span class="field-label">Armor</span><input type="number" min="0" max="999" value="0" data-body-field="new-armor" ${bodyFieldDisabled}></label>
-                  <label class="field-stack"><span class="field-label">Attack Penalty</span><input type="number" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
+                  <label class="field-stack"><span class="field-label">Other Penalty</span><input type="number" min="0" max="999" value="0" data-body-field="new-attack-penalty" ${bodyFieldDisabled}></label>
                   <label class="check-label"><input type="checkbox" data-body-field="new-hidden" checked ${bodyFieldDisabled}> <span>Hidden</span></label>
                   <button type="button" class="secondary" data-action="add-body-part" ${bodyFieldDisabled}>Add Part</button>
                 </div>
@@ -3735,6 +3741,9 @@ async function setBodyField(partName, field, value) {
       part.armor = numericValue;
     } else if (field === "attackPenalty") {
       part.attackPenalty = numericValue;
+    } else if (field === "slot" && BODY_PART_SLOTS.includes(value)) {
+      part.slot = value;
+      part.attackPenalty = getBodyPartAttackPenalty(next.body, partName);
     }
 
     return next;
@@ -3747,7 +3756,9 @@ async function addBodyPart() {
   if (!token) throw new Error("Select a character first.");
   if (!canEditTokenData(token)) throw new Error("Only the GM or assigned player can edit this token.");
   const name = getActionFieldValue('[data-body-field="new-name"]').trim();
+  const slot = getActionFieldValue('[data-body-field="new-slot"]');
   if (!name) throw new Error("Enter a body part name first.");
+  if (!BODY_PART_SLOTS.includes(slot)) throw new Error("Choose a body part position first.");
 
   await updateTrackerData(token.id, (current) => {
     const next = structuredClone(current);
@@ -3759,6 +3770,7 @@ async function addBodyPart() {
       armor: clamp(Number(getActionFieldValue('[data-body-field="new-armor"]')) || 0, 0, 999),
       minor: 0,
       serious: 0,
+      slot,
       attackPenalty: clamp(Number(getActionFieldValue('[data-body-field="new-attack-penalty"]')) || 0, 0, 999),
       hidden: document.querySelector('[data-body-field="new-hidden"]')?.checked === true,
     };

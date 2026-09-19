@@ -3481,119 +3481,61 @@ var GenericItemBuilder = class {
   }
 };
 
-// node_modules/@owlbear-rodeo/sdk/lib/builders/ImageBuilder.js
-var ImageBuilder = class extends GenericItemBuilder {
-  constructor(player, image, grid) {
+// node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
+var PathBuilder = class extends GenericItemBuilder {
+  constructor(player) {
     super(player);
-    this._image = image;
-    this._grid = grid;
-    this._item.name = "Image";
-    this._text = {
-      richText: [
-        {
-          type: "paragraph",
-          children: [{ text: "" }]
-        }
-      ],
-      plainText: "",
-      style: {
-        padding: 8,
-        fontFamily: "Roboto",
-        fontSize: 24,
-        fontWeight: 400,
-        textAlign: "CENTER",
-        textAlignVertical: "BOTTOM",
-        fillColor: "white",
-        fillOpacity: 1,
-        strokeColor: "white",
-        strokeOpacity: 1,
-        strokeWidth: 0,
-        lineHeight: 1.5
-      },
-      type: "PLAIN",
-      width: "AUTO",
-      height: "AUTO"
+    this._commands = [];
+    this._fillRule = "nonzero";
+    this._style = {
+      fillColor: "black",
+      fillOpacity: 1,
+      strokeColor: "white",
+      strokeOpacity: 1,
+      strokeWidth: 5,
+      strokeDash: []
     };
-    this._textItemType = "LABEL";
+    this._item.name = "Path";
+    this._item.layer = "DRAWING";
   }
-  text(text) {
-    this._text = text;
+  commands(commands) {
+    this._commands = commands;
     return this.self();
   }
-  textItemType(textItemType) {
-    this._textItemType = textItemType;
+  fillRule(fillRule) {
+    this._fillRule = fillRule;
     return this.self();
   }
-  textWidth(width) {
-    this._text.width = width;
+  style(style) {
+    this._style = style;
     return this.self();
   }
-  textHeight(height) {
-    this._text.height = height;
+  fillColor(fillColor) {
+    this._style.fillColor = fillColor;
     return this.self();
   }
-  richText(richText) {
-    this._text.richText = richText;
+  fillOpacity(fillOpacity) {
+    this._style.fillOpacity = fillOpacity;
     return this.self();
   }
-  plainText(plainText) {
-    this._text.plainText = plainText;
+  strokeColor(strokeColor) {
+    this._style.strokeColor = strokeColor;
     return this.self();
   }
-  textType(textType) {
-    this._text.type = textType;
+  strokeOpacity(strokeOpacity) {
+    this._style.strokeOpacity = strokeOpacity;
     return this.self();
   }
-  textPadding(padding) {
-    this._text.style.padding = padding;
+  strokeWidth(strokeWidth) {
+    this._style.strokeWidth = strokeWidth;
     return this.self();
   }
-  fontFamily(fontFamily) {
-    this._text.style.fontFamily = fontFamily;
-    return this.self();
-  }
-  fontSize(fontSize) {
-    this._text.style.fontSize = fontSize;
-    return this.self();
-  }
-  fontWeight(fontWeight) {
-    this._text.style.fontWeight = fontWeight;
-    return this.self();
-  }
-  textAlign(textAlign) {
-    this._text.style.textAlign = textAlign;
-    return this.self();
-  }
-  textAlignVertical(textAlignVertical) {
-    this._text.style.textAlignVertical = textAlignVertical;
-    return this.self();
-  }
-  textFillColor(fillColor) {
-    this._text.style.fillColor = fillColor;
-    return this.self();
-  }
-  textFillOpacity(fillOpacity) {
-    this._text.style.fillOpacity = fillOpacity;
-    return this.self();
-  }
-  textStrokeColor(strokeColor) {
-    this._text.style.strokeColor = strokeColor;
-    return this.self();
-  }
-  textStrokeOpacity(strokeOpacity) {
-    this._text.style.strokeOpacity = strokeOpacity;
-    return this.self();
-  }
-  textStrokeWidth(strokeWidth) {
-    this._text.style.strokeWidth = strokeWidth;
-    return this.self();
-  }
-  textLineHeight(lineHeight) {
-    this._text.style.lineHeight = lineHeight;
+  strokeDash(strokeDash) {
+    this._style.strokeDash = strokeDash;
     return this.self();
   }
   build() {
-    return Object.assign(Object.assign({}, this._item), { type: "IMAGE", image: this._image, grid: this._grid, text: this._text, textItemType: this._textItemType });
+    return Object.assign(Object.assign({}, this._item), { type: "PATH", commands: this._commands, fillRule: this._fillRule, style: this._style });
   }
 };
 
@@ -3749,8 +3691,8 @@ var OBR = {
   /** True if the current site is embedded in an instance of Owlbear Rodeo */
   isAvailable: Boolean(details.origin)
 };
-function buildImage(image, grid) {
-  return new ImageBuilder(playerApi, image, grid);
+function buildPath() {
+  return new PathBuilder(playerApi);
 }
 var lib_default = OBR;
 
@@ -3813,7 +3755,7 @@ var MELEE_SKILL_NAME = "Melee";
 var PARRY_SKILL_NAME = "Parry";
 var LEGACY_MELEE_SKILL_NAMES = /* @__PURE__ */ new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 var LEGACY_REMOVED_SKILLS = /* @__PURE__ */ new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-var VISUAL_VERSION = 17;
+var VISUAL_VERSION = 18;
 var SPECIAL_RING_COLOR = "#57D8FF";
 var HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -4303,11 +4245,16 @@ function getSpecialPartColor(part) {
   const ratio = (Number(part?.max) || 0) > 0 ? clamp((Number(part?.current) || 0) / (Number(part?.max) || 1), 0, 1) : (Number(part?.current) || 0) > 0 || (Number(part?.armor) || 0) > 0 ? 1 : 0;
   return mixHexColors("#000000", SPECIAL_RING_COLOR, ratio);
 }
+function buildRingItem(token, metrics, kind, commands, fillColor, zIndex = 0, fillRule = "nonzero", signature = "", itemVisible = true) {
+  return buildPath().name(`${kind}: ${getCharacterName(token)}`).commands(commands).fillRule(fillRule).fillColor(fillColor).fillOpacity(1).strokeColor(RING_COLORS.border).strokeOpacity(1).strokeWidth(OVERLAY_STROKE_WIDTH).position(metrics.center).rotation(0).zIndex((token.zIndex ?? 0) + 100 + zIndex).visible(itemVisible && token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
+    [OVERLAY_KEY]: token.id,
+    kind,
+    visualVersion: VISUAL_VERSION,
+    signature
+  }).build();
+}
 function applyOverlayItemState(target, source) {
   target.name = source.name;
-  target.image = source.image;
-  target.grid = source.grid;
-  target.scale = source.scale;
   target.commands = source.commands;
   target.fillRule = source.fillRule;
   target.fillColor = source.fillColor;
@@ -4339,35 +4286,6 @@ function hasPatchableOverlaySet(token, overlayItems, expectedKinds) {
 function roundMetric(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
-function commandsToSvgPath(commands) {
-  return commands.map((command) => {
-    const [type, x = 0, y = 0] = command;
-    if (type === Command.MOVE) {
-      return `M ${roundMetric(x)} ${roundMetric(y)}`;
-    }
-    if (type === Command.LINE) {
-      return `L ${roundMetric(x)} ${roundMetric(y)}`;
-    }
-    if (type === Command.CLOSE) {
-      return "Z";
-    }
-    return "";
-  }).filter(Boolean).join(" ");
-}
-function buildOverlayBounds(metrics, data) {
-  const specialActive = hasConfiguredSpecial(data);
-  const ringRadius = specialActive ? metrics.specialOuterRadius : metrics.outerRadius;
-  const horizontalExtent = ringRadius;
-  const topExtent = ringRadius;
-  const bottomExtent = ringRadius;
-  const padding = Math.max(2, metrics.visibleDiameter * 0.02);
-  return {
-    minX: -horizontalExtent - padding,
-    maxX: horizontalExtent + padding,
-    minY: -topExtent - padding,
-    maxY: bottomExtent + padding
-  };
-}
 function buildOverlaySignature(token, data, metrics) {
   const bodySignature = getBodyPartNames(data).map((partName) => {
     const part = data.body?.[partName] ?? {};
@@ -4387,58 +4305,6 @@ function buildOverlaySignature(token, data, metrics) {
     hasConfiguredSpecial(data),
     bodySignature
   ].join(";");
-}
-function buildOverlaySvgMarkup(token, data, metrics) {
-  const layers = [
-    {
-      d: commandsToSvgPath(buildAnnulusCommands(metrics.outerRadius, metrics.outerInnerRadius)),
-      fill: RING_COLORS.base,
-      fillRule: "evenodd"
-    },
-    ...getOverlayPartLayout(data, metrics).map((segment) => ({
-      d: commandsToSvgPath(
-        buildSectorCommands(
-          segment.outerRadius,
-          segment.innerRadius,
-          segment.angle,
-          segment.span
-        )
-      ),
-      fill: getPartColor(data.body[segment.partName]),
-      fillRule: "nonzero"
-    })),
-    {
-      d: commandsToSvgPath(
-        buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius)
-      ),
-      fill: getPartColor(data.body.Torso),
-      fillRule: "evenodd"
-    }
-  ];
-  if (hasConfiguredSpecial(data)) {
-    layers.push({
-      d: commandsToSvgPath(
-        buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius)
-      ),
-      fill: getSpecialPartColor(data.body[SPECIAL_PART_NAME]),
-      fillRule: "evenodd"
-    });
-  }
-  const bounds = buildOverlayBounds(metrics, data);
-  const width = Math.max(1, roundMetric(bounds.maxX - bounds.minX));
-  const height = Math.max(1, roundMetric(bounds.maxY - bounds.minY));
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${roundMetric(bounds.minX)} ${roundMetric(bounds.minY)} ${width} ${height}" width="${width}" height="${height}">${layers.map(
-    (layer) => `<path d="${layer.d}" fill="${layer.fill}" fill-rule="${layer.fillRule}" stroke="${RING_COLORS.border}" stroke-width="${OVERLAY_STROKE_WIDTH}" stroke-opacity="1" vector-effect="non-scaling-stroke"/>`
-  ).join("")}</svg>`;
-  return {
-    svg,
-    width,
-    height,
-    signature: buildOverlaySignature(token, data, metrics)
-  };
-}
-function svgToDataUrl(svg) {
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 function applyBodyEffects(body, bodyEffects) {
   if (!bodyEffects || typeof bodyEffects !== "object") return;
@@ -4527,26 +4393,33 @@ async function updateTrackerData(tokenId, updater) {
   });
 }
 function buildOverlayItems(token, data, metrics, signature = "") {
-  const overlay = buildOverlaySvgMarkup(token, data, metrics);
-  return [
-    buildImage(
-      {
-        url: svgToDataUrl(overlay.svg),
-        width: Math.ceil(overlay.width),
-        height: Math.ceil(overlay.height),
-        mime: "image/svg+xml"
-      },
-      token.grid
-    ).name(`Odyssey Overlay: ${getCharacterName(token)}`).position(token.position).scale(token.scale ?? { x: 1, y: 1 }).rotation(0).zIndex((token.zIndex ?? 0) + 100).visible(token.visible !== false).attachedTo(token.id).disableAttachmentBehavior(["ROTATION", "SCALE"]).layer("ATTACHMENT").locked(true).disableHit(true).metadata({
-      [OVERLAY_KEY]: token.id,
-      kind: "overlay-image",
-      visualVersion: VISUAL_VERSION,
-      signature
-    }).build()
-  ];
+  const items = [];
+  const makeSignature = (kind, commands, color, visible) => `${VISUAL_VERSION}|${kind}|${roundMetric(metrics.visibleDiameter)}|${roundMetric(metrics.center.x)}|${roundMetric(metrics.center.y)}|${color}|${visible}|${JSON.stringify(commands)}`;
+  for (const segment of getOverlayPartLayout(data, metrics)) {
+    const part = data.body[segment.partName];
+    const kind = `part-${segment.partName}`;
+    const commands = buildSectorCommands(
+      segment.outerRadius,
+      segment.innerRadius,
+      segment.angle,
+      segment.span
+    );
+    items.push(buildRingItem(token, metrics, kind, commands, getPartColor(part), 1, "nonzero", makeSignature(kind, commands, getPartColor(part), true), true));
+  }
+  const torsoCommands = buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius);
+  items.push(buildRingItem(token, metrics, "torso-ring", torsoCommands, getPartColor(data.body.Torso), 2, "evenodd", makeSignature("torso-ring", torsoCommands, getPartColor(data.body.Torso), true), true));
+  if (hasConfiguredSpecial(data)) {
+    const specialCommands = buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius);
+    items.push(buildRingItem(token, metrics, "special-ring", specialCommands, getSpecialPartColor(data.body[SPECIAL_PART_NAME]), 3, "evenodd", makeSignature("special-ring", specialCommands, getSpecialPartColor(data.body[SPECIAL_PART_NAME]), true), true));
+  }
+  return items;
 }
 function getExpectedOverlayKinds(data) {
-  return ["overlay-image"];
+  return [
+    ...getBodyPartNames(data).filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true).map((partName) => `part-${partName}`),
+    "torso-ring",
+    ...hasConfiguredSpecial(data) ? ["special-ring"] : []
+  ];
 }
 async function removeOverlaysForToken(tokenId, items) {
   const sceneItems = items ?? await lib_default.scene.items.getItems();
@@ -4571,21 +4444,21 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const overlaySignature = buildOverlaySignature(token, data, metrics);
   const expectedKinds = getExpectedOverlayKinds(data);
   if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
-    const signaturesMatch = overlayItems.every(
-      (item) => String(item.metadata?.signature ?? "") === overlaySignature
-    );
-    if (signaturesMatch) {
-      return;
-    }
     const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
     const nextOverlayByKind = new Map(
       nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item])
     );
+    const itemsToUpdate = overlayItems.filter((item) => {
+      const kind = String(item.metadata?.kind ?? "");
+      const nextItem = nextOverlayByKind.get(kind);
+      return String(item.metadata?.signature ?? "") !== String(nextItem?.metadata?.signature ?? "");
+    });
+    if (!itemsToUpdate.length) return;
     try {
       await lib_default.scene.items.updateItems(
-        overlayItems.map((item) => item.id),
-        (itemsToUpdate) => {
-          for (const overlayItem of itemsToUpdate) {
+        itemsToUpdate.map((item) => item.id),
+        (sceneItemsToUpdate) => {
+          for (const overlayItem of sceneItemsToUpdate) {
             const kind = String(overlayItem.metadata?.kind ?? "");
             const nextItem = nextOverlayByKind.get(kind);
             if (!nextItem) continue;
@@ -4669,21 +4542,7 @@ async function syncTrackedOverlays() {
   }
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
-    const overlayItems = overlaysByTokenId.get(token.id) ?? [];
-    const data = getTrackerData(token);
-    const expectedKinds = getExpectedOverlayKinds(data);
-    const patchable = hasPatchableOverlaySet(token, overlayItems, expectedKinds);
-    let needsRebuild = !patchable;
-    if (!needsRebuild && overlayItems.length) {
-      const metrics = await getTokenMetrics(token, data);
-      const expectedSignature = buildOverlaySignature(token, data, metrics);
-      needsRebuild = overlayItems.some(
-        (item) => String(item.metadata?.signature ?? "") !== expectedSignature
-      );
-    }
-    if (needsRebuild) {
-      await ensureOverlayForToken(token.id);
-    }
+    await ensureOverlayForToken(token.id);
   }
 }
 

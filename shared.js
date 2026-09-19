@@ -1,4 +1,4 @@
-import OBR, { Command, buildImage, buildPath, isImage } from "@owlbear-rodeo/sdk";
+import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
 
 export { OBR };
@@ -42,7 +42,7 @@ export const MELEE_SKILL_NAME = "Melee";
 export const PARRY_SKILL_NAME = "Parry";
 const LEGACY_MELEE_SKILL_NAMES = new Set(["Hand", "Cold", "\u0420\u0443\u043A\u043E\u043F\u0430\u0448\u043D\u044B\u0439"]);
 const LEGACY_REMOVED_SKILLS = new Set(["Hand", "Cold", "Throwing", "Rifle", "Turrets"]);
-const VISUAL_VERSION = 17;
+const VISUAL_VERSION = 18;
 const SPECIAL_RING_COLOR = "#57D8FF";
 const HP_COLOR_STOPS = [
   { ratio: 1, color: "#73FF5A" },
@@ -859,9 +859,6 @@ function buildRingItem(
 
 function applyOverlayItemState(target, source) {
   target.name = source.name;
-  target.image = source.image;
-  target.grid = source.grid;
-  target.scale = source.scale;
   target.commands = source.commands;
   target.fillRule = source.fillRule;
   target.fillColor = source.fillColor;
@@ -1126,40 +1123,41 @@ export async function updateTrackerData(tokenId, updater) {
 }
 
 export function buildOverlayItems(token, data, metrics, signature = "") {
-  const overlay = buildOverlaySvgMarkup(token, data, metrics);
-  return [
-    buildImage(
-      {
-        url: svgToDataUrl(overlay.svg),
-        width: Math.ceil(overlay.width),
-        height: Math.ceil(overlay.height),
-        mime: "image/svg+xml",
-      },
-      token.grid,
-    )
-      .name(`Odyssey Overlay: ${getCharacterName(token)}`)
-      .position(token.position)
-      .scale(token.scale ?? { x: 1, y: 1 })
-      .rotation(0)
-      .zIndex((token.zIndex ?? 0) + 100)
-      .visible(token.visible !== false)
-      .attachedTo(token.id)
-      .disableAttachmentBehavior(["ROTATION", "SCALE"])
-      .layer("ATTACHMENT")
-      .locked(true)
-      .disableHit(true)
-      .metadata({
-        [OVERLAY_KEY]: token.id,
-        kind: "overlay-image",
-        visualVersion: VISUAL_VERSION,
-        signature,
-      })
-      .build(),
-  ];
+  const items = [];
+  const makeSignature = (kind, commands, color, visible) =>
+    `${VISUAL_VERSION}|${kind}|${roundMetric(metrics.visibleDiameter)}|${roundMetric(metrics.center.x)}|${roundMetric(metrics.center.y)}|${color}|${visible}|${JSON.stringify(commands)}`;
+
+  for (const segment of getOverlayPartLayout(data, metrics)) {
+    const part = data.body[segment.partName];
+    const kind = `part-${segment.partName}`;
+    const commands = buildSectorCommands(
+      segment.outerRadius,
+      segment.innerRadius,
+      segment.angle,
+      segment.span,
+    );
+    items.push(buildRingItem(token, metrics, kind, commands, getPartColor(part), 1, "nonzero", makeSignature(kind, commands, getPartColor(part), true), true));
+  }
+
+  const torsoCommands = buildAnnulusCommands(metrics.torsoOuterRadius, metrics.torsoInnerRadius);
+  items.push(buildRingItem(token, metrics, "torso-ring", torsoCommands, getPartColor(data.body.Torso), 2, "evenodd", makeSignature("torso-ring", torsoCommands, getPartColor(data.body.Torso), true), true));
+
+  if (hasConfiguredSpecial(data)) {
+    const specialCommands = buildAnnulusCommands(metrics.specialOuterRadius, metrics.specialInnerRadius);
+    items.push(buildRingItem(token, metrics, "special-ring", specialCommands, getSpecialPartColor(data.body[SPECIAL_PART_NAME]), 3, "evenodd", makeSignature("special-ring", specialCommands, getSpecialPartColor(data.body[SPECIAL_PART_NAME]), true), true));
+  }
+
+  return items;
 }
 
 function getExpectedOverlayKinds(data) {
-  return ["overlay-image"];
+  return [
+    ...getBodyPartNames(data)
+      .filter((partName) => partName !== "Torso" && data.body?.[partName]?.hidden !== true)
+      .map((partName) => `part-${partName}`),
+    "torso-ring",
+    ...(hasConfiguredSpecial(data) ? ["special-ring"] : []),
+  ];
 }
 
 export async function removeOverlaysForToken(tokenId, items) {
@@ -1192,22 +1190,21 @@ async function ensureOverlayForTokenInternal(tokenId, items) {
   const expectedKinds = getExpectedOverlayKinds(data);
 
   if (hasPatchableOverlaySet(token, overlayItems, expectedKinds)) {
-    const signaturesMatch = overlayItems.every(
-      (item) => String(item.metadata?.signature ?? "") === overlaySignature,
-    );
-    if (signaturesMatch) {
-      return;
-    }
-
     const nextOverlayItems = buildOverlayItems(token, data, metrics, overlaySignature);
     const nextOverlayByKind = new Map(
       nextOverlayItems.map((item) => [String(item.metadata?.kind ?? ""), item]),
     );
+    const itemsToUpdate = overlayItems.filter((item) => {
+      const kind = String(item.metadata?.kind ?? "");
+      const nextItem = nextOverlayByKind.get(kind);
+      return String(item.metadata?.signature ?? "") !== String(nextItem?.metadata?.signature ?? "");
+    });
+    if (!itemsToUpdate.length) return;
     try {
       await OBR.scene.items.updateItems(
-        overlayItems.map((item) => item.id),
-        (itemsToUpdate) => {
-          for (const overlayItem of itemsToUpdate) {
+        itemsToUpdate.map((item) => item.id),
+        (sceneItemsToUpdate) => {
+          for (const overlayItem of sceneItemsToUpdate) {
             const kind = String(overlayItem.metadata?.kind ?? "");
             const nextItem = nextOverlayByKind.get(kind);
             if (!nextItem) continue;
@@ -1333,22 +1330,6 @@ export async function syncTrackedOverlays() {
 
   const trackedTokens = items.filter((item) => isTrackedCharacter(item) && item.visible !== false);
   for (const token of trackedTokens) {
-    const overlayItems = overlaysByTokenId.get(token.id) ?? [];
-    const data = getTrackerData(token);
-    const expectedKinds = getExpectedOverlayKinds(data);
-    const patchable = hasPatchableOverlaySet(token, overlayItems, expectedKinds);
-    let needsRebuild = !patchable;
-
-    if (!needsRebuild && overlayItems.length) {
-      const metrics = await getTokenMetrics(token, data);
-      const expectedSignature = buildOverlaySignature(token, data, metrics);
-      needsRebuild = overlayItems.some(
-        (item) => String(item.metadata?.signature ?? "") !== expectedSignature,
-      );
-    }
-
-    if (needsRebuild) {
-      await ensureOverlayForToken(token.id);
-    }
+    await ensureOverlayForToken(token.id);
   }
 }

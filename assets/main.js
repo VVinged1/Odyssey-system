@@ -4672,6 +4672,9 @@ function buildOverlaySvgMarkup(token, data, metrics) {
     signature: buildOverlaySignature(token, data, metrics)
   };
 }
+function svgToDataUrl(svg) {
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
 async function updateTrackerData(tokenId, updater) {
   await lib_default.scene.items.updateItems([tokenId], (items) => {
     const token = items[0];
@@ -4687,9 +4690,9 @@ function buildOverlayItems(token, data, metrics, signature = "") {
   return [
     buildImage(
       {
-        url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(overlay.svg)}`,
-        width: overlay.width,
-        height: overlay.height,
+        url: svgToDataUrl(overlay.svg),
+        width: Math.ceil(overlay.width),
+        height: Math.ceil(overlay.height),
         mime: "image/svg+xml"
       },
       token.grid

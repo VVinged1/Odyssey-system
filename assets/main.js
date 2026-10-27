@@ -1311,21 +1311,6 @@ function compactHud({ token, tracker, floating, target, targetData, skills, weap
   return `<section class="od-hud cp-screen"><div class="cp-row"><div><span class="cp-section-title">Character</span><h3>${esc(token.name || "Character")}</h3></div><span class="cp-pill">${Object.entries(tracker.body).filter(([k]) => !["Shield", "Special"].includes(k)).reduce((n2, [, p]) => n2 + p.current, 0)} HP</span><button type="button" data-action="${floating ? "close-character-hud" : "open-character-hud"}" class="secondary">${floating ? "Close HUD" : "Floating HUD"}</button></div><div class="od-hud-grid"><div class="cp-card"><div class="cp-section-title">Weapon & skill</div><label>Weapon<select data-hud-attack-field="weaponName">${weapons}</select></label><label>Skill<select data-hud-attack-field="skill">${skills}</select></label>${ammunition.replaceAll("data-attack-field=", "data-hud-attack-field=")}</div><div class="cp-card"><div class="cp-section-title">Target</div><div class="cp-row"><b>${esc(target?.name || "No target selected")}</b><span data-target-distance class="od-target-distance"></span><span data-range-modifier="attack" class="od-range-readout cp-muted"></span><button type="button" data-action="pick-attack-target">Pick on map</button></div><label>Body zone<select data-hud-attack-field="targetPart">${parts.map(([key, label]) => `<option value="${esc(key)}" ${key === draft2.targetPart ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><p class="cp-muted">${targetData ? "Target selected \xB7 V1 armor, Parry and damage rules" : "Select a visible target to attack."}</p></div><div class="cp-card"><div class="cp-section-title">Action</div><label>Attack bonus<input type="number" value="${Number(draft2.attackBonuses) || 0}" data-hud-attack-field="attackBonuses"></label><label>Attack penalty<input type="number" value="${Number(draft2.attackPenalties) || 0}" data-hud-attack-field="attackPenalties"></label><button type="button" data-action="perform-attack" ${!target ? "disabled" : ""}>Attack</button></div></div><p class="cp-muted" role="status">${esc(tracker.lastRoll?.summary || "No rolls yet.")}</p></section>`;
 }
 
-// poolMetadata.js
-function createPoolMetadata({ getMetadata, onMetadataChange, onChange }) {
-  let revision = 0, request = 0;
-  onMetadataChange((metadata) => {
-    revision++;
-    onChange(metadata || {});
-  });
-  return async () => {
-    const current2 = ++request, before = revision;
-    const metadata = await getMetadata();
-    if (current2 === request && before === revision) onChange(metadata || {});
-    return metadata;
-  };
-}
-
 // itemPool.js
 var ITEM_POOL_PREFIX = "com.codex.body-hp/item-pool/";
 var ITEM_POOL_FORMAT = "odyssey-item-pool";
@@ -1480,6 +1465,159 @@ function copyBlueprint(tracker, raw, quantity = 1, id = newId()) {
   } else saveInventoryEntry(tracker, null, { ...values, quantity }, id);
   return id;
 }
+var ITEM_POOL_ASSET_KEY = "com.codex.body-hp/item-pool-library";
+function poolFromScenes(scenes) {
+  const entries = /* @__PURE__ */ new Map();
+  let found = false;
+  for (const scene of scenes || []) for (const item of scene.items || []) {
+    const payload = item.metadata?.[ITEM_POOL_ASSET_KEY];
+    if (!payload) continue;
+    found = true;
+    for (const blueprint of parsePoolJSON(payload)) entries.set(blueprintText(blueprint), blueprint);
+  }
+  if (!found) throw Error("Selected scenes contain no Odyssey item pool library.");
+  if (entries.size > 2e3) throw Error("Item pool library exceeds 2000 definitions.");
+  const result = [...entries.values()];
+  if (new TextEncoder().encode(JSON.stringify(result)).length > 4 * 1024 * 1024) throw Error("Item pool library exceeds 4 MB.");
+  return result;
+}
+
+// campaignPoolStore.js
+var ITEM_POOL_CACHE_PREFIX = "odyssey.item-pool.v2:";
+var timestamp = (row) => Number.isFinite(row?.updatedAt) ? row.updatedAt : 0;
+function poolRecordWins(incoming, current2) {
+  if (!current2) return true;
+  const delta = timestamp(incoming) - timestamp(current2);
+  if (delta) return delta > 0;
+  return incoming.deleted === true && current2.deleted !== true;
+}
+function mergePoolRecords(current2, ...sources) {
+  const result = { ...current2 };
+  for (const source of sources) for (const [key, row] of Object.entries(source || {})) {
+    if (!key.startsWith(ITEM_POOL_PREFIX) || !row || typeof row !== "object") continue;
+    if (row.deleted !== true) {
+      try {
+        validateBlueprint(row.blueprint);
+      } catch {
+        continue;
+      }
+    }
+    if (poolRecordWins(row, result[key])) result[key] = structuredClone(row);
+  }
+  return result;
+}
+function createCampaignPoolStore({ room, scene, storage, roomId, requireGM, canSync, onChange }) {
+  const cacheKey = ITEM_POOL_CACHE_PREFIX + roomId, warnings = /* @__PURE__ */ new Map();
+  let records = {}, clock = 0, lastNotice = "", readRequest = 0, sceneRevision = 0;
+  const warn = (key, message) => message ? warnings.set(key, message) : warnings.delete(key);
+  let backupReadable = true;
+  try {
+    const raw = storage.getItem(cacheKey);
+    if (raw) {
+      const cache = JSON.parse(raw);
+      if (cache?.version !== 2 || !cache.records || typeof cache.records !== "object") throw Error("Invalid item pool backup.");
+      records = mergePoolRecords({}, cache.records);
+    }
+  } catch {
+    backupReadable = false;
+    warn("backup", "Browser item-pool backup could not be read; the saved copy has been kept.");
+  }
+  const backup = () => {
+    if (!backupReadable) return;
+    try {
+      const json = JSON.stringify({ version: 2, records });
+      if (new TextEncoder().encode(json).length > 4 * 1024 * 1024) throw Error("Item pool backup exceeds 4 MB.");
+      storage.setItem(cacheKey, json);
+      warn("backup", "");
+    } catch (e) {
+      warn("backup", "Browser backup failed: " + e.message + " Export JSON to keep a copy.");
+    }
+  };
+  const notify = () => {
+    const warning = [...warnings.values()].join(" "), signature = blueprintText(records) + "|" + warning;
+    if (signature !== lastNotice) {
+      lastNotice = signature;
+      onChange(structuredClone(records), warning);
+    }
+  };
+  const merge = (metadata) => {
+    records = mergePoolRecords(records, metadata);
+    for (const row of Object.values(records)) clock = Math.max(clock, timestamp(row));
+    backup();
+    notify();
+  };
+  room.onMetadataChange((metadata) => merge(metadata));
+  scene.onMetadataChange((metadata) => {
+    sceneRevision++;
+    merge(metadata);
+  });
+  let syncQueue = Promise.resolve();
+  const persist = () => {
+    const task = syncQueue.catch(() => {
+    }).then(async () => {
+      await requireGM();
+      const metadata = await scene.getMetadata(), patch = {};
+      merge(metadata);
+      for (const [key, row] of Object.entries(records)) if (poolRecordWins(row, metadata[key])) patch[key] = row;
+      if (Object.keys(patch).length) await scene.setMetadata(patch);
+      warn("sharing", "");
+      notify();
+    });
+    syncQueue = task;
+    return task;
+  };
+  async function read() {
+    const request = ++readRequest, before = sceneRevision;
+    const results = await Promise.allSettled([room.getMetadata(), scene.getMetadata()]);
+    if (request !== readRequest) return structuredClone(records);
+    if (results[0].status === "fulfilled") {
+      merge(results[0].value);
+      warn("room", "");
+    } else warn("room", "Legacy room pool could not be read: " + results[0].reason?.message);
+    if (results[1].status === "fulfilled") {
+      if (before === sceneRevision) merge(results[1].value);
+      warn("scene", "");
+    } else warn("scene", "Scene item pool could not be read: " + results[1].reason?.message);
+    if (canSync()) {
+      try {
+        await persist();
+      } catch (e) {
+        warn("sharing", "Pool sharing failed: " + e.message + " Available items are retained in this browser.");
+      }
+    }
+    backup();
+    notify();
+    return structuredClone(records);
+  }
+  scene.onReadyChange((ready) => {
+    if (ready) void read();
+  });
+  return {
+    read,
+    async write(patch) {
+      await requireGM();
+      const next = {};
+      for (const [key, row] of Object.entries(patch)) {
+        if (!key.startsWith(ITEM_POOL_PREFIX)) throw Error("Invalid pool metadata key.");
+        if (row.deleted !== true) validateBlueprint(row.blueprint);
+        next[key] = { ...structuredClone(row), updatedAt: clock = Math.max(Date.now(), clock + 1) };
+      }
+      merge(next);
+      try {
+        await persist();
+      } catch (e) {
+        warn("sharing", "Pool sharing failed: " + e.message + " Available items are retained in this browser.");
+        notify();
+        throw e;
+      }
+    },
+    refreshBackup: () => {
+      backup();
+      notify();
+    },
+    metadata: () => structuredClone(records)
+  };
+}
 
 // poolCategories.js
 var ARMOR_POOL_TIERS = ["Light Armor", "Medium Armor", "Heavy Armor", "Superheavy Armor", "Outside listed ranges"];
@@ -1524,16 +1662,19 @@ function groupPoolEntries(entries) {
 }
 
 // ui/itemPoolView.js
-function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImport }) {
+function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImport, onRefresh, onAccountSave, onAccountLoad }) {
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog od-pool-dialog";
-  dialog.innerHTML = '<div class="cp-row"><h2>Campaign item pool</h2><button type="button" data-pool-close aria-label="Close item pool">\xD7</button></div><p>Give reusable items to ' + esc(character) + '. The pool is shared across scenes in this Owlbear room. Copied equipment is unequipped; magazines are empty.</p><div class="cp-row"><input type="search" data-pool-search placeholder="Search items" aria-label="Search item pool"><button type="button" data-pool-export>Export item pool</button><button type="button" data-pool-import>Import item pool</button></div><div class="cp-row"><button type="button" data-pool-expand title="Expand categories" aria-label="Expand categories">\u25BE</button><button type="button" data-pool-collapse title="Collapse categories" aria-label="Collapse categories">\u25B8</button></div><p data-pool-status role="status"></p><div class="cp-list" data-pool-list></div>';
+  dialog.innerHTML = '<div class="cp-row"><h2>Campaign item pool</h2><button type="button" data-pool-close aria-label="Close item pool">\xD7</button></div><p>Give reusable items to ' + esc(character) + '. The pool is shared in this scene and backed up in this browser for this room. Open the extension after changing scenes to restore the pool. Copied equipment is unequipped; magazines are empty.</p><div class="cp-row"><input type="search" data-pool-search placeholder="Search items" aria-label="Search item pool"><button type="button" data-pool-refresh title="Refresh item pool" aria-label="Refresh item pool">\u21BB</button><button type="button" data-pool-export>Export item pool</button><button type="button" data-pool-import>Import item pool</button><button type="button" data-pool-account-save title="Save item pool to account" aria-label="Save item pool to account">Save to account</button><button type="button" data-pool-account-load title="Load item pool from account" aria-label="Load item pool from account">Load from account</button></div><div class="cp-row"><button type="button" data-pool-expand title="Expand categories" aria-label="Expand categories">\u25BE</button><button type="button" data-pool-collapse title="Collapse categories" aria-label="Collapse categories">\u25B8</button></div><p data-pool-warning class="cp-banner err" role="alert" hidden></p><p data-pool-status role="status"></p><div class="cp-list" data-pool-list></div>';
   document.body.append(dialog);
   let busy = false;
   const expanded = /* @__PURE__ */ new Map();
   const message = dialog.querySelector("[data-pool-status]");
   const refresh = () => {
     const catalog = getCatalog(), search = dialog.querySelector("[data-pool-search]").value.trim().toLowerCase();
+    const warning = dialog.querySelector("[data-pool-warning]");
+    warning.hidden = !catalog.warning;
+    warning.textContent = catalog.warning || "";
     const list = dialog.querySelector("[data-pool-list]");
     for (const details2 of list.querySelectorAll("details[data-pool-category]")) expanded.set(details2.dataset.poolCategory, details2.open);
     const row = (e) => {
@@ -1562,7 +1703,7 @@ function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImp
     refresh();
     try {
       const result = await fn();
-      if (result !== false) message.textContent = "Saved.";
+      if (result !== false) message.textContent = result?.message || "Saved.";
     } catch (e) {
       message.textContent = e.message;
     } finally {
@@ -1586,6 +1727,9 @@ function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImp
     }
     if (node.dataset.poolGive) void run(() => onGive(node.dataset.poolGive));
     if (node.dataset.poolDelete) void run(() => onDelete(node.dataset.poolDelete));
+    if (node.hasAttribute("data-pool-account-save") && onAccountSave) void run(onAccountSave);
+    if (node.hasAttribute("data-pool-account-load") && onAccountLoad) void run(onAccountLoad);
+    if (node.hasAttribute("data-pool-refresh") && onRefresh) void run(onRefresh);
     if (node.hasAttribute("data-pool-export")) void run(onExport);
     if (node.hasAttribute("data-pool-import")) void run(onImport);
   });
@@ -5634,21 +5778,23 @@ function installCharacterTools(host) {
     library = emptyLibrary();
     storageError = e.message;
   }
-  let poolMetadata = {}, catalog = { entries: [], errors: 0 }, poolDialog = null, scanTimer = null, scanPromise = null, scanFingerprint = "";
+  let poolMetadata = {}, catalog = { entries: [], errors: 0 }, poolDialog = null, scanTimer = null, scanPromise = null, scanFingerprint = "", scanWarning = "", poolWarning = "", scanRetryAt = 0;
   const knownBlueprintIds = /* @__PURE__ */ new Map();
-  const refreshPool = (metadata) => {
+  const refreshPool = (metadata, warning = poolWarning) => {
     poolMetadata = metadata || {};
-    catalog = poolEntries(poolMetadata);
+    poolWarning = warning;
+    catalog = { ...poolEntries(poolMetadata), warning: [poolWarning, scanWarning].filter(Boolean).join(" ") };
     poolDialog?.refresh();
     render2();
   };
-  const readPool = createPoolMetadata({ getMetadata: () => OBR2.room.getMetadata(), onMetadataChange: (fn) => OBR2.room.onMetadataChange(fn), onChange: refreshPool });
   const requirePoolGM = async () => {
     if (getRole() !== "GM" || await OBR2.player.getRole() !== "GM") throw new Error("Only the GM can edit the campaign item pool.");
   };
+  const poolStore = createCampaignPoolStore({ room: OBR2.room, scene: OBR2.scene, storage: window.localStorage, roomId: OBR2.room.id, requireGM: requirePoolGM, canSync: () => getRole() === "GM", onChange: refreshPool });
+  const readPool = () => poolStore.read();
   const putBlueprints = async (blueprints, automatic = false) => {
     await requirePoolGM();
-    const metadata = await OBR2.room.getMetadata(), patch = {};
+    const metadata = await readPool(), patch = {};
     let count = Object.entries(metadata).filter(([key, value]) => key.startsWith(ITEM_POOL_PREFIX) && value && !value.deleted).length;
     for (const blueprint of blueprints) {
       validateBlueprint(blueprint);
@@ -5665,22 +5811,55 @@ function installCharacterTools(host) {
       patch[key] = { blueprint };
     }
     await requirePoolGM();
-    if (Object.keys(patch).length) await OBR2.room.setMetadata(patch);
+    if (Object.keys(patch).length) await poolStore.write(patch);
     await readPool();
   };
-  const scanPool = () => {
+  const importBlueprints = async (blueprints) => {
+    const clean = blueprints.map((raw) => {
+      const t = sanitize({}), id = newId();
+      copyBlueprint(t, raw, 1, id);
+      return captureBlueprint(sanitize(t), raw.type, id);
+    });
+    await putBlueprints(clean);
+  };
+  const scanPool = (force = false) => {
+    if (force) {
+      scanFingerprint = "";
+      scanRetryAt = 0;
+    }
     if (getRole() !== "GM") return Promise.resolve();
     if (scanPromise) return scanPromise;
     scanPromise = (async () => {
       try {
+        let tokens = host.getTokens();
+        const issues = [];
+        try {
+          if (host.getPoolTokens) tokens = await host.getPoolTokens();
+        } catch (e) {
+          issues.push("Scene reload failed: " + e.message);
+        }
         const candidates = /* @__PURE__ */ new Map();
-        for (const token of host.getTokens()) {
-          const t = host.tracker(token), o = t.odyssey;
-          const entries = [...o.inventory.items.map((i) => ["item", i.id]), ...o.inventory.magazines.map((i) => ["magazine", i.id]), ...o.ammunition.map((i) => ["ammo", i.id]), ...["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((i) => ["weapon-" + kind, i.id]))];
-          for (const [type, id] of entries) {
-            const blueprint = captureBlueprint(t, type, id);
-            candidates.set(blueprintText(blueprint), blueprint);
+        for (const token of tokens) {
+          try {
+            const t = host.tracker(token), o = t.odyssey;
+            const entries = [...o.inventory.items.map((i) => ["item", i.id]), ...o.inventory.magazines.map((i) => ["magazine", i.id]), ...o.ammunition.map((i) => ["ammo", i.id]), ...["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((i) => ["weapon-" + kind, i.id]))];
+            for (const [type, id] of entries) {
+              try {
+                const blueprint = captureBlueprint(t, type, id);
+                validateBlueprint(blueprint);
+                candidates.set(blueprintText(blueprint), blueprint);
+              } catch (e) {
+                issues.push((token.name || "Character") + ": " + e.message);
+              }
+            }
+          } catch (e) {
+            issues.push((token.name || "Character") + ": " + e.message);
           }
+        }
+        const nextWarning = issues.length ? "Some items could not be recovered: " + issues.slice(0, 3).join("; ") : "";
+        if (nextWarning !== scanWarning) {
+          scanWarning = nextWarning;
+          refreshPool(poolStore.metadata());
         }
         const fingerprint = [...candidates.keys()].sort().join("\n");
         if (fingerprint === scanFingerprint) return;
@@ -5688,7 +5867,10 @@ function installCharacterTools(host) {
         scanFingerprint = fingerprint;
       } catch (e) {
         scanFingerprint = "";
-        status("Item pool: " + e.message, "error");
+        scanRetryAt = Date.now() + 3e4;
+        scanWarning = "Item pool: " + e.message;
+        refreshPool(poolStore.metadata());
+        status(scanWarning, "error");
       }
     })().finally(() => {
       scanPromise = null;
@@ -5696,7 +5878,7 @@ function installCharacterTools(host) {
     return scanPromise;
   };
   const schedulePoolScan = () => {
-    if (getRole() !== "GM" || scanTimer) return;
+    if (getRole() !== "GM" || scanTimer || Date.now() < scanRetryAt) return;
     scanTimer = setTimeout(() => {
       scanTimer = null;
       void scanPool();
@@ -5756,11 +5938,16 @@ function installCharacterTools(host) {
     } else if (action === "open-item-pool") {
       await requirePoolGM();
       await readPool();
-      await scanPool();
+      await scanPool(true);
       await readPool();
       poolDialog = showItemPool({
         getCatalog: () => catalog,
         character: token.name || "Character",
+        onRefresh: async () => {
+          await readPool();
+          await scanPool(true);
+          await readPool();
+        },
         onGive: async (entryId) => {
           const entry = catalog.entries.find((e) => e.id === entryId);
           if (!entry) throw new Error("Item definition no longer exists.");
@@ -5773,9 +5960,24 @@ function installCharacterTools(host) {
         onDelete: async (entryId) => {
           if (!await formDialog("Remove from campaign pool?", [], { danger: true, message: "Existing items on characters are kept." })) return false;
           await requirePoolGM();
-          await OBR2.room.setMetadata({ [ITEM_POOL_PREFIX + entryId]: { deleted: true } });
+          await poolStore.write({ [ITEM_POOL_PREFIX + entryId]: { deleted: true } });
           await readPool();
           return true;
+        },
+        onAccountSave: async () => {
+          await requirePoolGM();
+          await readPool();
+          if (!catalog.entries.length) throw Error("No item definitions to save.");
+          const items = catalog.entries.map((entry) => buildText().name(entry.blueprint.values.name).plainText(entry.blueprint.values.name).position({ x: 0, y: 0 }).metadata({ [ITEM_POOL_ASSET_KEY]: exportPool([entry]) }).build());
+          await OBR2.assets.uploadScenes([buildSceneUpload().name("Odyssey Item Pool").items(items).build()], true);
+          return { message: "Assets folder picker closed. Verify the item-pool snapshot in your Owlbear account." };
+        },
+        onAccountLoad: async () => {
+          await requirePoolGM();
+          const scenes = await OBR2.assets.downloadScenes(true, "Odyssey Item Pool");
+          if (!scenes?.length) return false;
+          await importBlueprints(poolFromScenes(scenes));
+          return { message: "Item pool library loaded." };
         },
         onExport: async () => {
           await requirePoolGM();
@@ -5795,12 +5997,7 @@ function installCharacterTools(host) {
               }
               if (file.size > 4 * 1024 * 1024) throw new Error("Item pool JSON must be under 4 MB.");
               await requirePoolGM();
-              const blueprints = parsePoolJSON(JSON.parse(await file.text())).map((raw) => {
-                const t = sanitize({}), id2 = newId();
-                copyBlueprint(t, raw, 1, id2);
-                return captureBlueprint(sanitize(t), raw.type, id2);
-              });
-              await putBlueprints(blueprints);
+              await importBlueprints(parsePoolJSON(JSON.parse(await file.text())));
               resolve(true);
             } catch (e) {
               reject(e);
@@ -6383,7 +6580,7 @@ function sanitizeRollSummary(raw) {
   const outcome = String(raw.outcome ?? "").trim();
   const total = raw.total == null ? null : Number(raw.total) || 0;
   const targetPart = String(raw.targetPart ?? "").trim();
-  const timestamp = raw.timestamp ? String(raw.timestamp) : null;
+  const timestamp2 = raw.timestamp ? String(raw.timestamp) : null;
   const source = String(raw.source ?? "bridge").trim();
   if (!summary && !actorName && total == null && !outcome) {
     return null;
@@ -6395,7 +6592,7 @@ function sanitizeRollSummary(raw) {
     outcome,
     total,
     targetPart,
-    timestamp,
+    timestamp: timestamp2,
     source
   };
 }
@@ -8137,8 +8334,8 @@ async function exportSelectedTokenData() {
     return;
   }
   const payload = buildTokenExportPayload(token);
-  const timestamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  const fileName = `${sanitizeFileName(getCharacterName(token))}-${timestamp}.odyssey-token.json`;
+  const timestamp2 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const fileName = `${sanitizeFileName(getCharacterName(token))}-${timestamp2}.odyssey-token.json`;
   downloadTextFile(fileName, JSON.stringify(payload, null, 2));
   setStatus(`Exported ${getCharacterName(token)} data to ${fileName}.`, "success");
 }
@@ -10842,6 +11039,7 @@ lib_default.onReady(async () => {
       OBR: lib_default,
       sanitize: sanitizeTrackerData,
       tracker: getTrackerData,
+      getPoolTokens: async () => (await lib_default.scene.items.getItems()).filter(isCharacterToken),
       getTokens: () => characterListCache,
       useItem: useCharacterItem,
       getToken: (id) => getCharacterById(id ?? activeTokenId),

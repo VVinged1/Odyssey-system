@@ -91,3 +91,12 @@ export function copyBlueprint(tracker,raw,quantity=1,id=newId()) {
   } else saveInventoryEntry(tracker,null,{...values,quantity},id);
   return id;
 }
+
+export const ITEM_POOL_ASSET_KEY='com.codex.body-hp/item-pool-library';
+export function poolFromScenes(scenes) {
+ const entries=new Map();let found=false;
+ for(const scene of scenes||[])for(const item of scene.items||[]){const payload=item.metadata?.[ITEM_POOL_ASSET_KEY];if(!payload)continue;found=true;for(const blueprint of parsePoolJSON(payload))entries.set(blueprintText(blueprint),blueprint);}
+ if(!found)throw Error('Selected scenes contain no Odyssey item pool library.');
+ if(entries.size>2000)throw Error('Item pool library exceeds 2000 definitions.');
+ const result=[...entries.values()];if(new TextEncoder().encode(JSON.stringify(result)).length>4*1024*1024)throw Error('Item pool library exceeds 4 MB.');return result;
+}

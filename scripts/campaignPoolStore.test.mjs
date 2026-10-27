@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {createCampaignPoolStore,ITEM_POOL_CACHE_PREFIX} from '../campaignPoolStore.js';
+import {ITEM_POOL_PREFIX,poolEntries,ITEM_POOL_ASSET_KEY,poolFromScenes} from '../itemPool.js';
+const storage=()=>{const rows=new Map();return {getItem:key=>rows.get(key)||null,setItem:(key,value)=>rows.set(key,value)};};
+// Separate API objects expose exact snapshots and enforce the real room size limit.
+function api(metadata={},room=false){const callbacks=[],ready=[];return {metadata,callbacks,ready,writes:0,getMetadata:async()=>structuredClone(metadata),async setMetadata(patch){const next={...metadata,...patch};if(room&&new TextEncoder().encode(JSON.stringify(next)).length>=16384)throw Error('Room metadata exceeds 16 KB.');this.writes++;Object.assign(metadata,patch);callbacks.forEach(fn=>fn(structuredClone(metadata)));},onMetadataChange:fn=>callbacks.push(fn),onReadyChange:fn=>ready.push(fn)};}
+const record=name=>({blueprint:{format:'odyssey-item-blueprint',version:1,type:'item',values:{kind:'resource',name,description:'details '.repeat(100),quantity:1},dependencies:{ammunition:[],magazines:[]}}});
+const room=api({'another.extension/data':{padding:'x'.repeat(15000)}},true),scene=api(),backup=storage(),updates=[];
+const options={room,scene,storage:backup,roomId:'campaign',requireGM:async()=>{},canSync:()=>true,onChange:(rows,warning)=>updates.push({rows,warning})};
+const store=createCampaignPoolStore(options),patch=Object.fromEntries(Array.from({length:80},(_,i)=>[ITEM_POOL_PREFIX+'item-'+i,record('Item '+i)]));await store.write(patch);await store.read();assert.equal(poolEntries(scene.metadata).entries.length,80);assert.ok(new TextEncoder().encode(JSON.stringify(scene.metadata)).length>16384);assert.equal(room.writes,0);assert.equal(poolEntries(store.metadata()).entries.length,80);
+const nextScene=api(),restored=createCampaignPoolStore({...options,scene:nextScene});await restored.read();assert.equal(poolEntries(nextScene.metadata).entries.length,80);
+const anotherGM=createCampaignPoolStore({...options,storage:storage(),scene:nextScene});await anotherGM.read();assert.equal(poolEntries(anotherGM.metadata()).entries.length,80);
+const key=ITEM_POOL_PREFIX+'item-0';await restored.write({[key]:{deleted:true}});room.metadata[key]=record('Item 0');await restored.read();assert.equal(restored.metadata()[key].deleted,true);assert.equal(poolEntries(restored.metadata()).entries.length,79);
+const otherRoom=createCampaignPoolStore({...options,room:api({},true),scene:api(),roomId:'different-room'});await otherRoom.read();assert.equal(poolEntries(otherRoom.metadata()).entries.length,0);
+const brokenScene=api();brokenScene.setMetadata=async()=>{throw Error('quota rejected');};const offlineUpdates=[],offline=createCampaignPoolStore({...options,scene:brokenScene,storage:storage(),onChange:(rows,warning)=>offlineUpdates.push({rows,warning})});await assert.rejects(offline.write({[key]:record('Kept locally')}));assert.equal(poolEntries(offline.metadata()).entries.length,1);assert.match(offlineUpdates.at(-1).warning,/quota rejected/);
+const recovered=api();const sameBackup=storage();const backupRows={version:2,records:offline.metadata()};sameBackup.setItem(ITEM_POOL_CACHE_PREFIX+'campaign',JSON.stringify(backupRows));const retry=createCampaignPoolStore({...options,scene:recovered,storage:sameBackup});await retry.read();assert.equal(poolEntries(recovered.metadata).entries.length,1);
+console.log('Large catalog, full room, new scene, second GM, tombstones, room isolation and failure recovery passed.');
+
+const portable=record('Account item').blueprint,payload={format:'odyssey-item-pool',version:1,entries:[portable]};assert.equal(poolFromScenes([{items:[{metadata:{[ITEM_POOL_ASSET_KEY]:payload}},{metadata:{[ITEM_POOL_ASSET_KEY]:payload}}]}]).length,1);assert.throws(()=>poolFromScenes([{items:[]}]),/no Odyssey item pool/);assert.throws(()=>poolFromScenes([{items:[{metadata:{[ITEM_POOL_ASSET_KEY]:{format:'other'}}}]}]),/Choose/);
+console.log('Account pool snapshots validate formats, deduplicate definitions and reject unrelated scenes.');

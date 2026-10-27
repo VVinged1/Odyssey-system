@@ -139,7 +139,7 @@ try{
  const copies=(await data()).odyssey.inventory.items.filter(i=>i.name==='Campaign vest');assert.equal(copies.find(i=>i.equippedPart).quantity,1);assert.equal(copies.find(i=>!i.equippedPart).quantity,2);
  await addTyped('Campaign magazine','magazine',async()=>{await page.locator('dialog [name="quantity"]').fill('3');await page.locator('dialog [name="capacity"]').fill('9');});
  assert.equal((await data()).odyssey.inventory.magazines.filter(m=>m.name==='Campaign magazine').length,3);
- await page.waitForFunction(()=>Object.values(window.odysseyTest.state.room).some(e=>e?.blueprint?.values?.name==='Campaign vest'));
+ await page.waitForFunction(()=>Object.values(window.odysseyTest.state.sceneMetadata).some(e=>e?.blueprint?.values?.name==='Campaign vest'));
  await page.evaluate(()=>{
    const token=structuredClone(window.odysseyTest.state.items[0]);token.id='new-character';token.name='New campaign character';token.metadata['com.codex.body-hp/data']={enabled:true,body:{Torso:{current:3,max:3,armor:0}},odyssey:{owner:{playerId:'owner'},skills:{},weapons:{melee:[],ranged:[]},ammunition:[],inventory:{version:4,items:[],magazines:[]}}};
    window.odysseyTest.state.items=[token];window.odysseyTest.refresh();window.odysseyTest.select('new-character');
@@ -150,12 +150,12 @@ try{
  await page.waitForFunction(()=>window.odysseyTest.data('new-character').odyssey.inventory.items.some(i=>i.name==='Campaign vest'&&i.quantity===2&&!i.equippedPart));
  await page.locator('[data-pool-search]').fill('Campaign magazine');await page.locator('[data-pool-give]').click();await page.locator('dialog input[name="quantity"]').fill('3');await page.locator('dialog button[type="submit"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data('new-character').odyssey.inventory.magazines.length===3);assert.ok((await page.evaluate(()=>window.odysseyTest.data('new-character'))).odyssey.inventory.magazines.every(m=>m.loaded===0));
- const vestBlueprint=await page.evaluate(()=>Object.values(window.odysseyTest.state.room).find(e=>e?.blueprint?.values?.name==='Campaign vest').blueprint);
+ const vestBlueprint=await page.evaluate(()=>Object.values(window.odysseyTest.state.sceneMetadata).find(e=>e?.blueprint?.values?.name==='Campaign vest').blueprint);
  await page.locator('[data-pool-search]').fill('Campaign vest');await page.locator('[data-pool-delete]').click();await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>!document.querySelector('[data-pool-give]'));
  const chooserPromise=page.waitForEvent('filechooser');await page.locator('[data-pool-import]').click();await (await chooserPromise).setFiles({name:'pool.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({format:'odyssey-item-pool',version:1,entries:[vestBlueprint]}))});await page.locator('[data-pool-give]').waitFor();
  if(shots)await page.screenshot({path:path.join(shots,'odyssey-campaign-item-pool.png'),fullPage:true});
  await page.locator('[data-pool-close]').click();
- const numericSize=await page.locator('[data-attack-field="attackBonuses"]').boundingBox();assert.ok(numericSize.width<=80);
+ await openSection('Attack');const numericSize=await page.locator('[data-attack-field="attackBonuses"]').boundingBox();assert.ok(numericSize.width<=80);
  console.log('Campaign pool persists across scenes, copies to a new character, equipment stacks and separate magazines passed');
  console.log('Typed items, cross-target healing, stims, implant HP, skills and compact icons passed');
 

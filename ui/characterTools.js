@@ -1,6 +1,6 @@
 import {installDescriptions} from './descriptions.js';
-import {createPoolMetadata} from '../poolMetadata.js';
-import {captureBlueprint,blueprintText,blueprintId,validateBlueprint,poolEntries,parsePoolJSON,exportPool,copyBlueprint,ITEM_POOL_PREFIX} from '../itemPool.js';
+import {createCampaignPoolStore} from '../campaignPoolStore.js';
+import {captureBlueprint,blueprintText,blueprintId,validateBlueprint,poolEntries,parsePoolJSON,exportPool,copyBlueprint,ITEM_POOL_PREFIX,ITEM_POOL_ASSET_KEY,poolFromScenes} from '../itemPool.js';
 import {showItemPool} from './itemPoolView.js';
 import {itemEditor,skillEditor} from './itemEditor.js';
 import {ARMOR_TRAINING} from '../characterRules.js';
@@ -30,35 +30,40 @@ export function installCharacterTools(host) {
   const { OBR, sanitize, getToken, getRole, canControl, update, refreshOverlay, render, status, download } = host;
   let library, storageError='';
   try { library=readLibrary(window.localStorage,sanitize); } catch(e) { library=emptyLibrary();storageError=e.message; }
-  let poolMetadata={},catalog={entries:[],errors:0},poolDialog=null,scanTimer=null,scanPromise=null,scanFingerprint='';
+  let poolMetadata={},catalog={entries:[],errors:0},poolDialog=null,scanTimer=null,scanPromise=null,scanFingerprint='',scanWarning='',poolWarning='',scanRetryAt=0;
   const knownBlueprintIds=new Map();
-  const refreshPool=metadata=>{poolMetadata=metadata||{};catalog=poolEntries(poolMetadata);poolDialog?.refresh();render();};
-  const readPool=createPoolMetadata({getMetadata:()=>OBR.room.getMetadata(),onMetadataChange:fn=>OBR.room.onMetadataChange(fn),onChange:refreshPool});
+  const refreshPool=(metadata,warning=poolWarning)=>{poolMetadata=metadata||{};poolWarning=warning;catalog={...poolEntries(poolMetadata),warning:[poolWarning,scanWarning].filter(Boolean).join(' ')};poolDialog?.refresh();render();};
   const requirePoolGM=async()=>{if(getRole()!=='GM'||await OBR.player.getRole()!=='GM')throw new Error('Only the GM can edit the campaign item pool.');};
+  const poolStore=createCampaignPoolStore({room:OBR.room,scene:OBR.scene,storage:window.localStorage,roomId:OBR.room.id,requireGM:requirePoolGM,canSync:()=>getRole()==='GM',onChange:refreshPool});
+  const readPool=()=>poolStore.read();
   const putBlueprints=async(blueprints,automatic=false)=>{
-    await requirePoolGM();const metadata=await OBR.room.getMetadata(),patch={};let count=Object.entries(metadata).filter(([key,value])=>key.startsWith(ITEM_POOL_PREFIX)&&value&&!value.deleted).length;
+    await requirePoolGM();const metadata=await readPool(),patch={};let count=Object.entries(metadata).filter(([key,value])=>key.startsWith(ITEM_POOL_PREFIX)&&value&&!value.deleted).length;
     for(const blueprint of blueprints) {
       validateBlueprint(blueprint);const text=blueprintText(blueprint);let id=knownBlueprintIds.get(text);if(!id){id=await blueprintId(blueprint);knownBlueprintIds.set(text,id);}
       const key=ITEM_POOL_PREFIX+id;if(metadata[key]&&(automatic||!metadata[key].deleted))continue;if(Object.hasOwn(patch,key))continue;
       if((!metadata[key]||metadata[key].deleted)&&++count>2000)throw new Error('Campaign item pool is full. Export a backup and remove unused definitions.');patch[key]={blueprint};
     }
-    await requirePoolGM();if(Object.keys(patch).length)await OBR.room.setMetadata(patch);await readPool();
+    await requirePoolGM();if(Object.keys(patch).length)await poolStore.write(patch);await readPool();
   };
-  const scanPool=()=>{
+  const importBlueprints=async blueprints=>{const clean=blueprints.map(raw=>{const t=sanitize({}),id=newId();copyBlueprint(t,raw,1,id);return captureBlueprint(sanitize(t),raw.type,id);});await putBlueprints(clean);};
+  const scanPool=(force=false)=>{
+    if(force){scanFingerprint='';scanRetryAt=0;}
     if(getRole()!=='GM')return Promise.resolve();if(scanPromise)return scanPromise;
     scanPromise=(async()=>{
     try {
-      const candidates=new Map();for(const token of host.getTokens()) {
+      let tokens=host.getTokens();const issues=[];try{if(host.getPoolTokens)tokens=await host.getPoolTokens();}catch(e){issues.push('Scene reload failed: '+e.message);}
+      const candidates=new Map();for(const token of tokens) {try{
         const t=host.tracker(token),o=t.odyssey;
         const entries=[...o.inventory.items.map(i=>['item',i.id]),...o.inventory.magazines.map(i=>['magazine',i.id]),...o.ammunition.map(i=>['ammo',i.id]),...['melee','ranged'].flatMap(kind=>o.weapons[kind].map(i=>['weapon-'+kind,i.id]))];
-        for(const [type,id]of entries){const blueprint=captureBlueprint(t,type,id);candidates.set(blueprintText(blueprint),blueprint);}
-      }
+        for(const [type,id]of entries){try{const blueprint=captureBlueprint(t,type,id);validateBlueprint(blueprint);candidates.set(blueprintText(blueprint),blueprint);}catch(e){issues.push((token.name||'Character')+': '+e.message);}}
+      }catch(e){issues.push((token.name||'Character')+': '+e.message);}}
+      const nextWarning=issues.length?'Some items could not be recovered: '+issues.slice(0,3).join('; '):'';if(nextWarning!==scanWarning){scanWarning=nextWarning;refreshPool(poolStore.metadata());}
       const fingerprint=[...candidates.keys()].sort().join('\n');if(fingerprint===scanFingerprint)return;
       await putBlueprints([...candidates.values()],true);scanFingerprint=fingerprint;
-    } catch(e){scanFingerprint='';status('Item pool: '+e.message,'error');}
+    } catch(e){scanFingerprint='';scanRetryAt=Date.now()+30000;scanWarning='Item pool: '+e.message;refreshPool(poolStore.metadata());status(scanWarning,'error');}
     })().finally(()=>{scanPromise=null;});return scanPromise;
   };
-  const schedulePoolScan=()=>{if(getRole()!=='GM'||scanTimer)return;scanTimer=setTimeout(()=>{scanTimer=null;void scanPool();},400);};
+  const schedulePoolScan=()=>{if(getRole()!=='GM'||scanTimer||Date.now()<scanRetryAt)return;scanTimer=setTimeout(()=>{scanTimer=null;void scanPool();},400);};
   void readPool().catch(e=>status('Item pool: '+e.message,'error'));
   let busy=false;
   const saveLibrary=next=>{if(getRole()!=='GM')throw new Error('Only the GM can edit templates.');writeLibrary(window.localStorage,next);library=next;storageError='';render();};
@@ -88,18 +93,21 @@ export function installCharacterTools(host) {
       await mutate(tokenId,t=>{saveInventoryEntry(t,existing?{type,id}:null,values,entryId);blueprint=captureBlueprint(sanitize(t),entryType,entryId);},true);
       try{await putBlueprints([blueprint]);}catch(e){throw new Error('Item saved on character; campaign pool was not updated: '+e.message);}
     } else if(action==='open-item-pool') {
-      await requirePoolGM();await readPool();await scanPool();await readPool();
+      await requirePoolGM();await readPool();await scanPool(true);await readPool();
       poolDialog=showItemPool({getCatalog:()=>catalog,character:token.name||'Character',
+        onRefresh:async()=>{await readPool();await scanPool(true);await readPool();},
         onGive:async entryId=>{
           const entry=catalog.entries.find(e=>e.id===entryId);if(!entry)throw new Error('Item definition no longer exists.');
           const value=await formDialog('Give '+entry.blueprint.values.name,[{name:'quantity',label:'Quantity',type:'number',min:1,max:entry.blueprint.type==='ammo'?999999:entry.blueprint.type.startsWith('weapon-')?20:1000,value:1}]);if(!value)return false;
           const copyId=newId();await mutate(tokenId,t=>copyBlueprint(t,entry.blueprint,Number(value.quantity),copyId),true);return true;
         },
-        onDelete:async entryId=>{if(!await formDialog('Remove from campaign pool?',[],{danger:true,message:'Existing items on characters are kept.'}))return false;await requirePoolGM();await OBR.room.setMetadata({[ITEM_POOL_PREFIX+entryId]:{deleted:true}});await readPool();return true;},
+        onDelete:async entryId=>{if(!await formDialog('Remove from campaign pool?',[],{danger:true,message:'Existing items on characters are kept.'}))return false;await requirePoolGM();await poolStore.write({[ITEM_POOL_PREFIX+entryId]:{deleted:true}});await readPool();return true;},
+        onAccountSave:async()=>{await requirePoolGM();await readPool();if(!catalog.entries.length)throw Error('No item definitions to save.');const items=catalog.entries.map(entry=>buildText().name(entry.blueprint.values.name).plainText(entry.blueprint.values.name).position({x:0,y:0}).metadata({[ITEM_POOL_ASSET_KEY]:exportPool([entry])}).build());await OBR.assets.uploadScenes([buildSceneUpload().name('Odyssey Item Pool').items(items).build()],true);return {message:'Assets folder picker closed. Verify the item-pool snapshot in your Owlbear account.'};},
+        onAccountLoad:async()=>{await requirePoolGM();const scenes=await OBR.assets.downloadScenes(true,'Odyssey Item Pool');if(!scenes?.length)return false;await importBlueprints(poolFromScenes(scenes));return {message:'Item pool library loaded.'};},
         onExport:async()=>{await requirePoolGM();download('odyssey-item-pool.json',JSON.stringify(exportPool(catalog.entries),null,2));},
         onImport:()=>new Promise((resolve,reject)=>{
           const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.addEventListener('cancel',()=>resolve(false));
-          input.onchange=async()=>{try{const file=input.files?.[0];if(!file){resolve(false);return;}if(file.size>4*1024*1024)throw new Error('Item pool JSON must be under 4 MB.');await requirePoolGM();const blueprints=parsePoolJSON(JSON.parse(await file.text())).map(raw=>{const t=sanitize({}),id=newId();copyBlueprint(t,raw,1,id);return captureBlueprint(sanitize(t),raw.type,id);});await putBlueprints(blueprints);resolve(true);}catch(e){reject(e);}};input.click();
+          input.onchange=async()=>{try{const file=input.files?.[0];if(!file){resolve(false);return;}if(file.size>4*1024*1024)throw new Error('Item pool JSON must be under 4 MB.');await requirePoolGM();await importBlueprints(parsePoolJSON(JSON.parse(await file.text())));resolve(true);}catch(e){reject(e);}};input.click();
         }),
       });await poolDialog.closed;poolDialog=null;
     } else if(action==='delete-entry') {

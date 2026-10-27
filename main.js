@@ -5424,7 +5424,7 @@ OBR.onReady(async () => {
       defaultHeight: 860,
     });
     characterTools = installCharacterTools({OBR, sanitize:sanitizeTrackerData, tracker:getTrackerData,
-      getTokens:()=>characterListCache, useItem:useCharacterItem, getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
+      getPoolTokens:async()=>(await OBR.scene.items.getItems()).filter(isCharacterToken),getTokens:()=>characterListCache, useItem:useCharacterItem, getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
       canControl:canUseToken, update:updateTrackerData, refreshOverlay:ensureOverlayForToken,
       render:scheduleRender, status:setStatus, download:downloadTextFile,
       resetDraft:id => { pendingFieldDrafts.clear(id);attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },

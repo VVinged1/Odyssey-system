@@ -1,3 +1,8 @@
+import { compactHud } from "./ui/compactHud.js";
+import { attributeCards, skillCards } from "./ui/characterView.js";
+import { installCharacterTools } from "./ui/characterTools.js";
+import { profileData } from "./profiles.js";
+import { swapMagazine } from "./inventory.js";
 import { Command, buildImage, buildPath } from "@owlbear-rodeo/sdk";
 import { reloadMagazine, getAmmoShot, consumeAmmo, effectiveArmor } from "./ammunition.js";
 import {
@@ -62,6 +67,8 @@ const TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
     <path d="M16 6v4M16 22v4M6 16h4M22 16h4" stroke="#7f1d1d" stroke-width="1.2" stroke-linecap="round"/>
   </svg>`,
 )}") 16 16, crosshair`;
+const HUD_MODE = new URLSearchParams(window.location.search).get("hud") === "1";
+document.documentElement.classList.toggle("od-hud-mode", HUD_MODE);
 const CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 const ATTACK_ONLY_EXCLUDED_SKILLS = new Set([PARRY_SKILL_NAME]);
 const UNARMED_WEAPON_NAME = "Not Armed";
@@ -108,6 +115,8 @@ const ui = {
   allTokensList: document.getElementById("allTokensList"),
 };
 
+let characterTools = null;
+let profileRollPending = false;
 let playerRole = "PLAYER";
 let playerId = "";
 let playerName = "";
@@ -331,6 +340,7 @@ function getTransientFieldKey(field) {
   if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
+  if (field.dataset.profileModifier) return `profile:${field.dataset.profileModifier}`;
   if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
   if (field.dataset.rollCharField) return `roll-char:${field.dataset.rollCharField}`;
   if (field.dataset.rollSkillField) return `roll-skill:${field.dataset.rollSkillField}`;
@@ -367,6 +377,7 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
     fieldKey === focusedKey ||
     fieldKey.startsWith("attack:") ||
     fieldKey.startsWith("manual-attack:") ||
+    fieldKey.startsWith("profile:") ||
     fieldKey.startsWith("roll:") ||
     fieldKey.startsWith("roll-char:") ||
     fieldKey.startsWith("roll-skill:") ||
@@ -1262,89 +1273,12 @@ function sanitizeFileName(value) {
 }
 
 function buildTokenExportPayload(token) {
-  const tracker = getTrackerData(token);
-  const odyssey = getOdysseyData(token);
-  const body = BODY_ORDER.reduce((accumulator, partName) => {
-    const part = tracker.body?.[partName] ?? {};
-    accumulator[partName] = {
-      current: Number(part.current) || 0,
-      max: Number(part.max) || 0,
-      armor: Number(part.armor) || 0,
-      minor: Number(part.minor) || 0,
-      serious: Number(part.serious) || 0,
-    };
-    return accumulator;
-  }, {});
-
-  return {
-    format: TOKEN_EXPORT_FORMAT,
-    version: TOKEN_EXPORT_VERSION,
-    exportedAt: new Date().toISOString(),
-    tokenName: getCharacterName(token),
-    data: {
-      enabled: tracker.enabled !== false,
-      minor: Number(tracker.minor) || 0,
-      serious: Number(tracker.serious) || 0,
-      body,
-      odyssey: {
-        skills: structuredClone(odyssey.skills ?? {}),
-        skillCategories: structuredClone(odyssey.skillCategories ?? {}),
-        skillStrengthBonuses: structuredClone(odyssey.skillStrengthBonuses ?? {}),
-        skillLabels: structuredClone(odyssey.skillLabels ?? {}),
-        skillPerks: structuredClone(odyssey.skillPerks ?? {}),
-        attributes: structuredClone(odyssey.attributes ?? {}),
-        weapons: structuredClone(odyssey.weapons ?? { melee: [], ranged: [] }),
-        ammunition: structuredClone(odyssey.ammunition ?? []),
-      },
-    },
-  };
+  return {format:TOKEN_EXPORT_FORMAT, version:TOKEN_EXPORT_VERSION, exportedAt:new Date().toISOString(), tokenName:getCharacterName(token), data:profileData(getTrackerData(token))};
 }
-
 function normalizeImportedTokenPayload(raw) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Import file is empty or has an invalid format.");
-  }
-
-  const source =
-    raw.format === TOKEN_EXPORT_FORMAT && raw.data && typeof raw.data === "object"
-      ? raw.data
-      : raw.trackerData && typeof raw.trackerData === "object"
-        ? raw.trackerData
-        : raw;
-
-  const normalized = sanitizeTrackerData({
-    enabled: source.enabled,
-    minor: source.minor,
-    serious: source.serious,
-    body: source.body,
-    odyssey: {
-      skills: source.odyssey?.skills,
-      skillCategories: source.odyssey?.skillCategories,
-      skillStrengthBonuses: source.odyssey?.skillStrengthBonuses,
-      skillLabels: source.odyssey?.skillLabels,
-      skillPerks: source.odyssey?.skillPerks,
-      attributes: source.odyssey?.attributes,
-      weapons: source.odyssey?.weapons,
-      ammunition: source.odyssey?.ammunition,
-    },
-  });
-
-  return {
-    enabled: normalized.enabled,
-    minor: normalized.minor,
-    serious: normalized.serious,
-    body: structuredClone(normalized.body),
-    odyssey: {
-      skills: structuredClone(normalized.odyssey.skills),
-      skillCategories: structuredClone(normalized.odyssey.skillCategories),
-      skillStrengthBonuses: structuredClone(normalized.odyssey.skillStrengthBonuses),
-      skillLabels: structuredClone(normalized.odyssey.skillLabels),
-      skillPerks: structuredClone(normalized.odyssey.skillPerks),
-      attributes: structuredClone(normalized.odyssey.attributes),
-      weapons: structuredClone(normalized.odyssey.weapons),
-      ammunition: structuredClone(normalized.odyssey.ammunition),
-    },
-  };
+  if (!raw || typeof raw !== "object") throw new Error("Invalid token profile.");
+  const source = raw.format === TOKEN_EXPORT_FORMAT && raw.data ? raw.data : raw.trackerData ?? raw;
+  return profileData(sanitizeTrackerData(source));
 }
 
 function downloadTextFile(filename, content, mimeType = "application/json") {
@@ -1437,6 +1371,7 @@ async function importSelectedTokenData(file) {
     next.odyssey.attributes = structuredClone(imported.odyssey.attributes);
     next.odyssey.weapons = structuredClone(imported.odyssey.weapons);
     next.odyssey.ammunition = structuredClone(imported.odyssey.ammunition);
+    next.odyssey.inventory = structuredClone(imported.odyssey.inventory);
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -2393,20 +2328,8 @@ function legacyRenderSelectedToken() {
     </div>`;
 }
 
-function renderCharacteristicsBlock(data, disabledAttr) {
-  const attributeInputs = ATTRIBUTE_UI_FIELDS.map(
-    ([key, label]) => `
-      <label class="field-stack characteristic-field">
-        <span class="field-label">${escapeHtml(label)}</span>
-        <input type="text" inputmode="numeric" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
-      </label>`
-  ).join("");
-
-  return renderCollapsibleSection(
-    "Characteristics",
-    `<div class="characteristics-grid">${attributeInputs}</div>`,
-    false,
-  );
+function renderCharacteristicsBlock(data) {
+  return renderCollapsibleSection("Characteristics", attributeCards(data.odyssey, ATTRIBUTE_UI_FIELDS, isEditable()), true);
 }
 
 function renderSkillsBlock(data, disabledAttr) {
@@ -2792,6 +2715,8 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
 }
 
 function renderEnglishSkillsBlock(data, disabledAttr) {
+  const cards = skillCards(data.odyssey, [["Combat", getCombatSkillEntries(data.odyssey)], ["Abilities", getAbilitiesSkillEntries(data.odyssey)], ["Applied", getAppliedSkillEntries(data.odyssey)]], isEditable());
+  if (!isEditable()) return renderCollapsibleSection("Skills", cards, true);
   const combatSkillRows = renderOdysseySkillRows(
     data.odyssey,
     getCombatSkillEntries(data.odyssey),
@@ -2811,6 +2736,8 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
   return renderCollapsibleSection(
     "Skills",
     `
+      ${cards}
+      <details class="cp-edit-skills"><summary>GM · Edit skills and perks</summary>
       <div class="skill-group"><div class="skill-group-title">Combat</div><div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div></div>
       <div class="skill-group"><div class="skill-group-title">Abilities</div><div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div></div>
       <div class="skill-group"><div class="skill-group-title">Applied</div><div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div></div>
@@ -2841,8 +2768,9 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
         <div class="skill-add-actions"><button type="button" class="square-icon-button" data-action="add-skill" title="Save skill" aria-label="Save skill" ${disabledAttr}>▣</button><button type="button" class="square-icon-button danger" data-action="close-skill-add" title="Cancel" aria-label="Cancel" ${disabledAttr}>×</button></div>
       </div>` : ""}
       <div class="item-toolbar item-toolbar-bottom"><button type="button" class="square-icon-button" data-action="open-skill-add" title="Add skill" aria-label="Add skill" ${disabledAttr}>+</button></div>
+      </details>
     `,
-    false,
+    true,
   );
 }
 
@@ -2968,6 +2896,7 @@ async function saveWeapon(node) {
     const allWeapons = [...(next.odyssey.weapons.melee ?? []), ...(next.odyssey.weapons.ranged ?? [])];
     if (allWeapons.some((item) => item !== weapon && item.name === name)) throw new Error("A weapon with this name already exists.");
     if (weapon && type !== nextType) {
+      if (type === "ranged" && weapon.magazineId) swapMagazine(next.odyssey, index, "");
       if (type === "ranged" && weapon.loaded > 0) {
         const loadedAmmo = next.odyssey.ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId);
         if (loadedAmmo) loadedAmmo.quantity += weapon.loaded;
@@ -3059,11 +2988,20 @@ async function editAmmunition(action, node) {
     data.ammunition ??= [];
     const weapon = data.weapons.ranged[index];
     if (action === "ammo-remove") {
+      if (data.inventory.magazines.some(m => m.loadedAmmoId === ammoId && m.loaded > 0)) throw new Error("Empty all magazines using this ammo first.");
       if (data.weapons.ranged.some((item) => item.loadedAmmoId === ammoId && item.loaded > 0)) throw new Error("Unload this ammunition before removing it.");
       data.ammunition = data.ammunition.filter((item) => item.id !== ammoId);
       for (const item of data.weapons.ranged) item.ammoIds = item.ammoIds.filter((id) => id !== ammoId);
     }
-    if (action === "ammo-reload") reloadMagazine(data, index, reloadId);
+    if (action === "ammo-reload") {
+      if (weapon && !weapon.magazineId) {
+        const id = `reload-mag-${weapon.id}`;
+        if (!data.inventory.magazines.some(m => m.id === id)) data.inventory.magazines.push({id,name:weapon.name+" magazine",capacity:weapon.capacity,loaded:0,loadedAmmoId:""});
+        swapMagazine(data,index,id);
+      }
+      reloadMagazine(data, index, reloadId);
+    }
+    if (action === "ranged-remove" && weapon?.magazineId) swapMagazine(data, index, "");
     if ((action === "ranged-remove" || action === "ammo-unload") && weapon) {
       const loadedAmmo = data.ammunition.find((item) => item.id === weapon.loadedAmmoId);
       if (weapon.loaded && !loadedAmmo) throw new Error("Loaded ammunition is missing.");
@@ -3352,6 +3290,19 @@ function renderPrivateGmDiceBlock() {
   );
 }
 
+function renderTokenHud(token, data) {
+  const targets = getCharacters().filter(t => t.id !== token.id && t.visible !== false);
+  const draft = getAttackDraft(token, data, targets);
+  const target = targets.find(t => t.id === draft.targetTokenId);
+  const targetData = target ? getTrackerData(target) : null;
+  return compactHud({token,floating:HUD_MODE,tracker:data,target,targetData,draft,
+    skills:buildSkillOptions(getAttackSkillEntries(data.odyssey),draft.skill,data.odyssey),
+    weapons:buildWeaponOptions(getAttackSelectableWeapons(token),draft.weaponName),
+    parts:getTargetableBodyParts(targetData,isEditable()).map(k=>[k,getBodyPartLabel(targetData,k)]),
+    ammunition:renderAttackAmmunition(token,draft,false,""),
+  });
+}
+
 function renderSelectedToken() {
   const panelState = captureSelectedPanelState();
   activeTokenId = resolveActiveTokenId();
@@ -3383,6 +3334,7 @@ function renderSelectedToken() {
   ui.selectedTokenPanel.dataset.tokenId = token.id;
   ui.selectedTokenPanel.innerHTML = `
     <div class="selected-card">
+      ${canUseToken(token) ? renderTokenHud(token, data) : ""}
       <div class="selected-head">
         <div>
           <div class="token-name">${escapeHtml(getCharacterName(token))}</div>
@@ -3417,11 +3369,13 @@ function renderSelectedToken() {
         isEditable()
           ? `
             ${renderOwnerFields({ odyssey }, gmOnlyDisabled)}
-            ${renderCharacteristicsBlock({ odyssey }, gmOnlyDisabled)}
-            ${renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled)}
           `
           : ""
       }
+      ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
+      ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
+      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Inventory · Armor · Magazines", characterTools.renderInventory(data), false) : ""}
+      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Character Templates", characterTools.renderTemplates(), false) : ""}
       ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${isEditable() ? renderAmmunitionBlock(odyssey) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
@@ -4106,6 +4060,7 @@ async function removeWeapon(type = "melee", index) {
 	const weapons = next.odyssey.weapons[type] ?? [];
 	const weapon = weapons[index];
 
+	if (type === "ranged" && weapon?.magazineId) swapMagazine(next.odyssey, index, "");
 	if (type === "ranged" && weapon?.loaded > 0) {
 	  const ammo = next.odyssey.ammunition.find(
 		(item) => item.id === weapon.loadedAmmoId,
@@ -4666,7 +4621,7 @@ async function removeOdysseySkill(skillName) {
   setStatus(`Skill "${skillName}" removed.`, "success");
 }
 
-async function performRollChar() {
+async function performRollCharOnce(options = {}) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
     setStatus("Select a character first.", "error");
@@ -4677,8 +4632,9 @@ async function performRollChar() {
     return;
   }
 
-  const attribute = getActionFieldValue('[data-roll-char-field="attribute"]') || "Strength";
-  const modifier = Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0;
+  const attribute = options.attribute ?? (getActionFieldValue('[data-roll-char-field="attribute"]') || "Strength");
+  if (!ATTRIBUTE_UI_FIELDS.some(([key]) => key === attribute)) throw new Error("Unknown characteristic.");
+  const modifier = options.modifier ?? (Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel =
@@ -4713,7 +4669,7 @@ async function performRollChar() {
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 
-async function performRollSkill() {
+async function performRollSkillOnce(options = {}) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
     setStatus("Select a character first.", "error");
@@ -4724,14 +4680,15 @@ async function performRollSkill() {
     return;
   }
 
-  const skillName = getActionFieldValue('[data-roll-skill-field="skill"]');
+  const skillName = options.skill ?? getActionFieldValue('[data-roll-skill-field="skill"]');
   if (!skillName) {
     setStatus("Choose a skill first.", "error");
     return;
   }
 
-  const modifier = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
+  const modifier = options.modifier ?? (Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
+  if (!Object.hasOwn(odyssey.skills, skillName)) throw new Error("Skill no longer exists.");
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
 
@@ -4761,6 +4718,17 @@ async function performRollSkill() {
     isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info",
   );
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
+}
+
+async function performRollChar(options) {
+  if (profileRollPending) return;
+  profileRollPending = true;
+  try { await performRollCharOnce(options); } finally { profileRollPending = false; }
+}
+async function performRollSkill(options) {
+  if (profileRollPending) return;
+  profileRollPending = true;
+  try { await performRollSkillOnce(options); } finally { profileRollPending = false; }
 }
 
 async function performPrivateGmRoll() {
@@ -4829,6 +4797,27 @@ function bindUiEvents() {
     if (!(actionNode instanceof HTMLElement)) return;
 
 	const action = actionNode.dataset.action;
+    if (actionNode.disabled) return;
+    if (action === "close-character-hud") {
+      void OBR.popover.close("com.codex.body-hp/character-hud").catch(error => setStatus(error.message,"error"));return;
+    }
+    if (action === "open-character-hud") {
+      const id = "com.codex.body-hp/character-hud";
+      void OBR.popover.close(id).catch(() => {}).then(() => OBR.popover.open({id,
+        url:new URL("./index.html?hud=1",window.location.href).href,width:920,height:420,
+        anchorReference:"POSITION",anchorPosition:{left:20,top:80},
+        anchorOrigin:{horizontal:"LEFT",vertical:"TOP"},transformOrigin:{horizontal:"LEFT",vertical:"TOP"},disableClickAway:true,
+      })).catch(error => setStatus(error.message,"error"));
+      return;
+    }
+    if (action === "profile-roll-char" || action === "profile-roll-skill") {
+      const kind = action === "profile-roll-char" ? "attribute" : "skill";
+      const modifier = clamp(Number(ui.selectedTokenPanel.querySelector(`[data-profile-modifier="${kind}"]`)?.value) || 0, -999, 999);
+      actionNode.disabled = true;
+      const operation = kind === "attribute" ? performRollChar({attribute: actionNode.dataset.attribute, modifier}) : performRollSkill({skill: actionNode.dataset.skill, modifier});
+      void operation.catch(error => setStatus(error.message, "error")).finally(() => { if (actionNode.isConnected) actionNode.disabled = false; });
+      return;
+    }
 
     if (action === "open-ammo-add") {
       ammunitionAddOpen = true;
@@ -5117,6 +5106,12 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.hudAttackField) {
+      const field=target.dataset.hudAttackField;
+      const original=ui.selectedTokenPanel.querySelector(`[data-attack-field="${field}"]`);
+      if (original) { original.value=target.value; original.dispatchEvent(new Event("change",{bubbles:true})); }
+      scheduleRender();return;
+    }
     if (target.dataset.weaponDraft === "type") {
       toggleWeaponDraftFields(target);
       return;
@@ -5283,6 +5278,12 @@ function bindUiEvents() {
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
 
+    if (target.dataset.hudAttackField) {
+      const field=target.dataset.hudAttackField;
+      const original=ui.selectedTokenPanel.querySelector(`[data-attack-field="${field}"]`);
+      if (original) original.value=target.value;
+      saveAttackDraftValue(activeTokenId,field,target.value);
+    }
     if (target.dataset.attackField) {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
     }
@@ -5369,6 +5370,12 @@ OBR.onReady(async () => {
       storageKey: "com.codex.body-hp/action-size",
       defaultWidth: 560,
       defaultHeight: 860,
+    });
+    characterTools = installCharacterTools({OBR, sanitize:sanitizeTrackerData, tracker:getTrackerData,
+      getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
+      canControl:canUseToken, update:updateTrackerData, refreshOverlay:ensureOverlayForToken,
+      render:scheduleRender, status:setStatus, download:downloadTextFile,
+      resetDraft:id => { attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },
     });
     bindUiEvents();
     await removeAttackTargetContextMenu();

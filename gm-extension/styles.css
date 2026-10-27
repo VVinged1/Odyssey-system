@@ -413,3 +413,16 @@ select {
     flex-direction: column;
   }
 }
+
+/* V2-style GM panels, keeping all V1 public/private and environment actions. */
+.odyssey-gm { --line:#29415f; --panel:#101d30; --accent:#3ea6ff; }
+.odyssey-gm .panel { border-radius:12px; background:rgba(16,29,48,.94); }
+.odyssey-gm .section-title { text-transform:uppercase; letter-spacing:.05em; font-size:12px; color:#9cb1d1; }
+.odyssey-gm input, .odyssey-gm select { border-radius:8px; background:rgba(8,17,28,.9); }
+.odyssey-gm button { border-radius:8px; }
+.odyssey-gm button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+/* Keep the invisible checkbox inside its eye control, not over adjacent buttons. */
+.odyssey-gm .visibility-eye { position:relative; flex:none; }
+.odyssey-gm .visibility-eye input { inset:0; width:100%; height:100%; margin:0; padding:0; z-index:1; cursor:pointer; }
+.odyssey-gm .visibility-eye span { pointer-events:none; }
+.odyssey-gm #privateLog { max-height:360px; overflow:auto; margin-top:10px; }

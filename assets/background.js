@@ -393,6 +393,56 @@ var require_events = __commonJS({
   }
 });
 
+// inventory.js
+var LIMIT = 200;
+var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+var text = (v, max = 120) => String(v ?? "").trim().slice(0, max);
+var kinds = /* @__PURE__ */ new Set(["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"]);
+function rows(raw, map) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
+}
+function normalizeInventory(raw, weapons = []) {
+  const items = rows(raw?.items, (r, i) => ({
+    id: text(r.id || `legacy-item-${i}`),
+    name: text(r.name) || "Item",
+    kind: kinds.has(r.kind) ? r.kind : "item",
+    quantity: int(r.quantity ?? 1),
+    description: text(r.description, 2e3),
+    armor: int(r.armor, 999),
+    equippedPart: text(r.equippedPart, 40),
+    previousArmor: int(r.previousArmor, 999)
+  }));
+  const magazines = rows(raw?.magazines, (r, i) => ({
+    id: text(r.id || `legacy-magazine-${i}`),
+    name: text(r.name) || "Magazine",
+    capacity: int(r.capacity, 999),
+    loadedAmmoId: text(r.loadedAmmoId),
+    loaded: int(r.loaded, int(r.capacity, 999))
+  }));
+  const assigned = /* @__PURE__ */ new Set();
+  for (const [i, weapon] of weapons.entries()) {
+    const requested = text(weapon.magazineId);
+    let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
+    if (!id) {
+      weapon.magazineId = "";
+      weapon.loaded = 0;
+      weapon.loadedAmmoId = "";
+      continue;
+    }
+    if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
+    let mag = magazines.find((m) => m.id === id);
+    if (!mag) {
+      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
+      magazines.push(mag);
+    }
+    weapon.magazineId = id;
+    assigned.add(id);
+    Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
+  }
+  return { version: 2, items, magazines };
+}
+
 // node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
@@ -3565,7 +3615,7 @@ var btoaPolyfill = (bin) => {
   return pad ? asc.slice(0, pad - 3) + "===".substring(pad) : asc;
 };
 var _btoa = typeof btoa === "function" ? (bin) => btoa(bin) : btoaPolyfill;
-var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? (u8a) => u8a.toBase64() : (u8a) => {
+var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? Function.prototype.call.bind(Uint8Array.prototype.toBase64) : (u8a) => {
   const maxargs = 4096;
   let strs = [];
   for (let i = 0, l = u8a.length; i < l; i += maxargs) {
@@ -3829,6 +3879,7 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
+    inventory: { version: 2, items: [], magazines: [] },
     ammunition: [],
     weapons: {
       melee: [],
@@ -3962,6 +4013,7 @@ function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
   return next;
 }
 function sanitizeWeapons(raw, ranged = false) {
@@ -3970,7 +4022,7 @@ function sanitizeWeapons(raw, ranged = false) {
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
-    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
+    ...ranged ? { ...Object.hasOwn(item, "magazineId") ? { magazineId: String(item.magazineId || "") } : {}, ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -4573,8 +4625,8 @@ async function requestJson(config, path, options = {}) {
     ...options
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Bridge request failed with ${response.status}`);
+    const text2 = await response.text();
+    throw new Error(text2 || `Bridge request failed with ${response.status}`);
   }
   return response.json();
 }

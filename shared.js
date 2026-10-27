@@ -1,3 +1,4 @@
+import { normalizeInventory } from "./inventory.js";
 import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
 
@@ -118,6 +119,7 @@ export const DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0,
     },
+    inventory: { version: 2, items: [], magazines: [] },
     ammunition: [],
     weapons: {
       melee: [],
@@ -360,6 +362,7 @@ export function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
 
   return next;
 }
@@ -372,7 +375,7 @@ function sanitizeWeapons(raw, ranged = false) {
       name: String(item.name ?? "").trim() || "Weapon",
       damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
       accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
-      ...(ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}),
+      ...(ranged ? { ...(Object.hasOwn(item, "magazineId") ? { magazineId: String(item.magazineId || "") } : {}), ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}),
     }))
     .slice(0, 20);
 }

@@ -50,7 +50,7 @@ for (const manualDefense of [false, true]) {
   const context = vm.createContext({
     structuredClone, activeTokenId: token.id, playerName: "Player", SPECIAL_PART_NAME: "Special", PARRY_SKILL_NAME: "Parry",
     getCharacterById: (id) => id === token.id ? token : target,
-    canUseToken: () => true,
+    canUseToken: () => true, isEditable: () => true,
     getOdysseyData: () => state.odyssey,
     getTrackerData: () => ({ body: { Torso: { armor: 10, current: 5 } } }),
     getActionFieldValue: (selector) => {
@@ -59,7 +59,7 @@ for (const manualDefense of [false, true]) {
     },
     getWeaponByName: () => ({ ...state.odyssey.weapons.ranged[0], rangedIndex: 0 }),
     getAmmoShot, consumeAmmo, effectiveArmor,
-    getTargetableBodyParts: () => ["Torso"], getAutomaticTargetPenalty: () => 0,
+    getTargetableBodyParts: () => ["Torso"], getBodyPartAttackPenalty: () => 0,
     getParryDivisor: () => 0, saveAttackDraftValue: () => {}, persistAttackTargetToken: async () => {},
     clamp: (n, min, max) => Math.min(max, Math.max(min, n)), hasConfiguredSpecial: () => false,
     getSkillStrengthBonusFlag: () => true,

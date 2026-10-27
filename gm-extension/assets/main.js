@@ -24,9 +24,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../node_modules/events/events.js
+// node_modules/events/events.js
 var require_events = __commonJS({
-  "../node_modules/events/events.js"(exports, module) {
+  "node_modules/events/events.js"(exports, module) {
     "use strict";
     var R = typeof Reflect === "object" ? Reflect : null;
     var ReflectApply = R && typeof R.apply === "function" ? R.apply : function ReflectApply2(target, receiver, args) {
@@ -393,7 +393,57 @@ var require_events = __commonJS({
   }
 });
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
+// inventory.js
+var LIMIT = 200;
+var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+var text = (v, max = 120) => String(v ?? "").trim().slice(0, max);
+var kinds = /* @__PURE__ */ new Set(["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"]);
+function rows(raw, map) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
+}
+function normalizeInventory(raw, weapons = []) {
+  const items = rows(raw?.items, (r, i) => ({
+    id: text(r.id || `legacy-item-${i}`),
+    name: text(r.name) || "Item",
+    kind: kinds.has(r.kind) ? r.kind : "item",
+    quantity: int(r.quantity ?? 1),
+    description: text(r.description, 2e3),
+    armor: int(r.armor, 999),
+    equippedPart: text(r.equippedPart, 40),
+    previousArmor: int(r.previousArmor, 999)
+  }));
+  const magazines = rows(raw?.magazines, (r, i) => ({
+    id: text(r.id || `legacy-magazine-${i}`),
+    name: text(r.name) || "Magazine",
+    capacity: int(r.capacity, 999),
+    loadedAmmoId: text(r.loadedAmmoId),
+    loaded: int(r.loaded, int(r.capacity, 999))
+  }));
+  const assigned = /* @__PURE__ */ new Set();
+  for (const [i, weapon] of weapons.entries()) {
+    const requested = text(weapon.magazineId);
+    let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
+    if (!id) {
+      weapon.magazineId = "";
+      weapon.loaded = 0;
+      weapon.loadedAmmoId = "";
+      continue;
+    }
+    if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
+    let mag = magazines.find((m) => m.id === id);
+    if (!mag) {
+      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
+      magazines.push(mag);
+    }
+    weapon.magazineId = id;
+    assigned.add(id);
+    Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
+  }
+  return { version: 2, items, magazines };
+}
+
+// node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -533,7 +583,7 @@ var PlayerApi = class {
 };
 var PlayerApi_default = PlayerApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/ViewportApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/ViewportApi.js
 var __awaiter2 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -632,15 +682,15 @@ var ViewportApi = class {
 };
 var ViewportApi_default = ViewportApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/messages/Message.js
+// node_modules/@owlbear-rodeo/sdk/lib/messages/Message.js
 function isMessage(message) {
   return typeof message.id === "string";
 }
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/messages/MessageBus.js
+// node_modules/@owlbear-rodeo/sdk/lib/messages/MessageBus.js
 var import_events = __toESM(require_events());
 
-// ../node_modules/uuid/dist/esm-browser/rng.js
+// node_modules/uuid/dist/esm-browser/rng.js
 var getRandomValues;
 var rnds8 = new Uint8Array(16);
 function rng() {
@@ -653,7 +703,7 @@ function rng() {
   return getRandomValues(rnds8);
 }
 
-// ../node_modules/uuid/dist/esm-browser/stringify.js
+// node_modules/uuid/dist/esm-browser/stringify.js
 var byteToHex = [];
 for (let i = 0; i < 256; ++i) {
   byteToHex.push((i + 256).toString(16).slice(1));
@@ -662,13 +712,13 @@ function unsafeStringify(arr, offset = 0) {
   return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
 }
 
-// ../node_modules/uuid/dist/esm-browser/native.js
+// node_modules/uuid/dist/esm-browser/native.js
 var randomUUID = typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID.bind(crypto);
 var native_default = {
   randomUUID
 };
 
-// ../node_modules/uuid/dist/esm-browser/v4.js
+// node_modules/uuid/dist/esm-browser/v4.js
 function v4(options, buf, offset) {
   if (native_default.randomUUID && !buf && !options) {
     return native_default.randomUUID();
@@ -688,7 +738,7 @@ function v4(options, buf, offset) {
 }
 var v4_default = v4;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/messages/MessageBus.js
+// node_modules/@owlbear-rodeo/sdk/lib/messages/MessageBus.js
 var MessageBus = class extends import_events.EventEmitter {
   constructor(origin, roomId) {
     super();
@@ -754,7 +804,7 @@ var MessageBus = class extends import_events.EventEmitter {
 };
 var MessageBus_default = MessageBus;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/NotificationApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/NotificationApi.js
 var __awaiter3 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -800,7 +850,7 @@ var NotificationApi = class {
 };
 var NotificationApi_default = NotificationApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneFogApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneFogApi.js
 var __awaiter4 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -881,7 +931,7 @@ var SceneFogApi = class {
 };
 var SceneFogApi_default = SceneFogApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneGridApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneGridApi.js
 var __awaiter5 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -1033,7 +1083,7 @@ var SceneGridApi = class {
 };
 var SceneGridApi_default = SceneGridApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneHistoryApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneHistoryApi.js
 var __awaiter6 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -1090,7 +1140,7 @@ var SceneHistoryApi = class {
 };
 var SceneHistoryApi_default = SceneHistoryApi;
 
-// ../node_modules/immer/dist/immer.mjs
+// node_modules/immer/dist/immer.mjs
 var NOTHING = Symbol.for("immer-nothing");
 var DRAFTABLE = Symbol.for("immer-draftable");
 var DRAFT_STATE = Symbol.for("immer-state");
@@ -2058,7 +2108,7 @@ var produceWithPatches = /* @__PURE__ */ immer.produceWithPatches.bind(
   immer
 );
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneItemsApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneItemsApi.js
 var __awaiter7 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2179,7 +2229,7 @@ var SceneItemsApi = class {
 };
 var SceneItemsApi_default = SceneItemsApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneLocalApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneLocalApi.js
 var __awaiter8 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2301,7 +2351,7 @@ var SceneLocalApi = class {
 };
 var SceneLocalApi_default = SceneLocalApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/scene/SceneApi.js
 var __awaiter9 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2380,7 +2430,7 @@ var SceneApi = class {
 };
 var SceneApi_default = SceneApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/common/normalize.js
+// node_modules/@owlbear-rodeo/sdk/lib/common/normalize.js
 function normalizeUrl(url) {
   return url.startsWith("http") ? url : `${window.location.origin}${url}`;
 }
@@ -2391,7 +2441,7 @@ function normalizeUrlObject(urlObject) {
   return Object.assign(Object.assign({}, urlObject), { url: normalizeUrl(urlObject.url) });
 }
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/ContextMenuApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/ContextMenuApi.js
 var __awaiter10 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2452,7 +2502,7 @@ var ContextMenuApi = class {
 };
 var ContextMenuApi_default = ContextMenuApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/ToolApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/ToolApi.js
 var __awaiter11 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2788,7 +2838,7 @@ var ToolApi = class {
 };
 var ToolApi_default = ToolApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/PopoverApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/PopoverApi.js
 var __awaiter12 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2855,7 +2905,7 @@ var PopoverApi = class {
 };
 var PopoverApi_default = PopoverApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/ModalApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/ModalApi.js
 var __awaiter13 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -2900,7 +2950,7 @@ var ModalApi = class {
 };
 var ModalApi_default = ModalApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/ActionApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/ActionApi.js
 var __awaiter14 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3033,7 +3083,7 @@ var ActionApi = class {
 };
 var ActionApi_default = ActionApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/InteractionApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/InteractionApi.js
 var __awaiter15 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3088,7 +3138,7 @@ var InteractionApi = class {
 };
 var InteractionApi_default = InteractionApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/PartyApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/PartyApi.js
 var __awaiter16 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3140,7 +3190,7 @@ var PartyApi = class {
 };
 var PartyApi_default = PartyApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/RoomApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/RoomApi.js
 var __awaiter17 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3217,7 +3267,7 @@ var RoomApi = class {
 };
 var RoomApi_default = RoomApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/ThemeApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/ThemeApi.js
 var __awaiter18 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3269,7 +3319,7 @@ var ThemeApi = class {
 };
 var ThemeApi_default = ThemeApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/AssetsApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/AssetsApi.js
 var __awaiter19 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3332,7 +3382,7 @@ var AssetsApi = class {
 };
 var AssetsApi_default = AssetsApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/api/BroadcastApi.js
+// node_modules/@owlbear-rodeo/sdk/lib/api/BroadcastApi.js
 var __awaiter20 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function(resolve) {
@@ -3384,7 +3434,7 @@ var BroadcastApi = class {
 };
 var BroadcastApi_default = BroadcastApi;
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/builders/GenericItemBuilder.js
+// node_modules/@owlbear-rodeo/sdk/lib/builders/GenericItemBuilder.js
 var GenericItemBuilder = class {
   constructor(player) {
     this._item = {
@@ -3481,7 +3531,7 @@ var GenericItemBuilder = class {
   }
 };
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
+// node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
 var PathBuilder = class extends GenericItemBuilder {
   constructor(player) {
     super(player);
@@ -3539,7 +3589,7 @@ var PathBuilder = class extends GenericItemBuilder {
   }
 };
 
-// ../node_modules/js-base64/base64.mjs
+// node_modules/js-base64/base64.mjs
 var _TD = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { ignoreBOM: true }) : void 0;
 var _TE = typeof TextEncoder === "function" ? new TextEncoder() : void 0;
 var b64ch = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
@@ -3565,7 +3615,7 @@ var btoaPolyfill = (bin) => {
   return pad ? asc.slice(0, pad - 3) + "===".substring(pad) : asc;
 };
 var _btoa = typeof btoa === "function" ? (bin) => btoa(bin) : btoaPolyfill;
-var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? (u8a) => u8a.toBase64() : (u8a) => {
+var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? Function.prototype.call.bind(Uint8Array.prototype.toBase64) : (u8a) => {
   const maxargs = 4096;
   let strs = [];
   for (let i = 0, l = u8a.length; i < l; i += maxargs) {
@@ -3611,7 +3661,7 @@ var _decode = _TD ? (a) => _TD.decode(_toUint8Array(a)) : (a) => btou(_atob(a));
 var _unURI = (a) => _tidyB64(a.replace(/[-_]/g, (m0) => m0 == "-" ? "+" : "/"));
 var decode = (src) => _decode(_unURI(src));
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/common/getDetails.js
+// node_modules/@owlbear-rodeo/sdk/lib/common/getDetails.js
 function getDetails() {
   const urlSearchParams = new URLSearchParams(window.location.search);
   const ref = urlSearchParams.get("obrref");
@@ -3628,12 +3678,12 @@ function getDetails() {
   return { origin, roomId };
 }
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/types/items/Image.js
+// node_modules/@owlbear-rodeo/sdk/lib/types/items/Image.js
 function isImage(item) {
   return item.type === "IMAGE";
 }
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/types/items/Path.js
+// node_modules/@owlbear-rodeo/sdk/lib/types/items/Path.js
 var Command;
 (function(Command2) {
   Command2[Command2["MOVE"] = 0] = "MOVE";
@@ -3644,7 +3694,7 @@ var Command;
   Command2[Command2["CLOSE"] = 5] = "CLOSE";
 })(Command || (Command = {}));
 
-// ../node_modules/@owlbear-rodeo/sdk/lib/index.js
+// node_modules/@owlbear-rodeo/sdk/lib/index.js
 var details = getDetails();
 var messageBus = new MessageBus_default(details.origin, details.roomId);
 var viewportApi = new ViewportApi_default(messageBus);
@@ -3696,7 +3746,7 @@ function buildPath() {
 }
 var lib_default = OBR;
 
-// ../ammunition.js
+// ammunition.js
 var integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
 var modifier = (value) => Math.min(999, Math.max(-999, Math.trunc(Number(value) || 0)));
 function sanitizeAmmunition(raw) {
@@ -3723,7 +3773,7 @@ function sanitizeMagazine(weapon) {
   };
 }
 
-// ../shared.js
+// shared.js
 var EXTENSION_ID = "com.codex.body-hp";
 var META_KEY = `${EXTENSION_ID}/data`;
 var OVERLAY_KEY = `${EXTENSION_ID}/overlayFor`;
@@ -3829,6 +3879,7 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
+    inventory: { version: 2, items: [], magazines: [] },
     ammunition: [],
     weapons: {
       melee: [],
@@ -4017,6 +4068,7 @@ function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
   return next;
 }
 function sanitizeWeapons(raw, ranged = false) {
@@ -4025,7 +4077,7 @@ function sanitizeWeapons(raw, ranged = false) {
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
-    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
+    ...ranged ? { ...Object.hasOwn(item, "magazineId") ? { magazineId: String(item.magazineId || "") } : {}, ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -4518,7 +4570,7 @@ async function flushOverlayEnsure(tokenId, pending) {
   }
 }
 
-// ../odyssey_rules.js
+// odyssey_rules.js
 function rollPercent() {
   return Math.floor(Math.random() * 100) + 1;
 }
@@ -4684,7 +4736,7 @@ function buildAttackSummary({ part, outcome, damage, attackRoll, attackTotal, de
   return `${getAttackOutcomeIcon(outcome)} Missed ${part}. ${attackTotal} vs ${defenseTotal}.`;
 }
 
-// main.js
+// gm-extension/main.js
 var DEBUG_LOG_KEY = "com.codex.body-hp/debugLog";
 var DEBUG_BROADCAST_CHANNEL = "com.codex.body-hp/debug";
 var DEBUG_ENTRY_LIMIT = 50;
@@ -4700,6 +4752,7 @@ var TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   </svg>`
 )}") 16 16, crosshair`;
 var ui = {
+  privateLog: document.getElementById("privateLog"),
   roleBadge: document.getElementById("roleBadge"),
   refreshBtn: document.getElementById("refreshBtn"),
   statusBox: document.getElementById("statusBox"),

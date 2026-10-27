@@ -3,12 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node ammunition.test.mjs && node scripts/integration.test.mjs",
+    "test:ui": "node scripts/browser.test.mjs"
   },
   "dependencies": {
     "@owlbear-rodeo/sdk": "3.1.0"
   },
   "devDependencies": {
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "playwright": "1.56.1"
   }
 }

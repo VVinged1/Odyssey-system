@@ -40,6 +40,7 @@ const TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
 )}") 16 16, crosshair`;
 
 const ui = {
+  privateLog: document.getElementById("privateLog"),
   roleBadge: document.getElementById("roleBadge"),
   refreshBtn: document.getElementById("refreshBtn"),
   statusBox: document.getElementById("statusBox"),

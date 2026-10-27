@@ -393,6 +393,37 @@ var require_events = __commonJS({
   }
 });
 
+// ui/characterView.js
+var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function attributeCards(odyssey, fields, editable) {
+  return `<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="attribute" aria-label="Characteristic roll modifier"></label><span class="cp-muted">Click a card to roll \xB7 V1 rules</span></div><div class="cp-attrs">${fields.map(([key, label]) => `<div class="cp-attr-wrap"><button type="button" class="cp-attr" data-action="profile-roll-char" data-attribute="${esc(key)}" aria-label="Roll ${esc(label)}"><span class="cp-attr-val">${odyssey.attributes[key] ?? 0}</span><span class="cp-attr-code">${esc(label)}</span></button>${editable ? `<label class="cp-edit-value">Value <input type="number" min="0" max="20" value="${odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${esc(key)}" aria-label="Edit ${esc(label)}"></label>` : ""}</div>`).join("")}</div></div>`;
+}
+function skillCards(odyssey, groups, editable) {
+  return `<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="skill" aria-label="Skill roll modifier"></label><span class="cp-muted">Click a skill to roll \xB7 levels 0\u201310</span></div>${groups.map(([label, entries]) => `<div class="cp-section-title">${esc(label)}</div><div class="cp-list">${entries.map(([key, value]) => {
+    const name = odyssey.skillLabels[key] || key;
+    const perks = odyssey.skillPerks[key] || [];
+    return `<button class="cp-card cp-skill-card" type="button" data-action="profile-roll-skill" data-skill="${esc(key)}" aria-label="Roll ${esc(name)}"><span><b>${esc(name)}</b>${odyssey.skillStrengthBonuses[key] ? '<span class="cp-pill">STR bonus</span>' : ""}<span class="cp-perks">${perks.map((p) => `<span class="cp-pill">${esc(p)}</span>`).join("")}</span></span><span class="cp-skill-level"><span class="cp-pips">${Array.from({ length: 10 }, (_, i) => `<i class="cp-pip ${i < value ? "on" : ""}"></i>`).join("")}</span><strong>${value}/10</strong></span></button>`;
+  }).join("") || '<div class="cp-muted">No skills.</div>'}</div>`).join("")}${editable ? '<p class="cp-muted">GM editing and perks remain available below.</p>' : ""}</div>`;
+}
+function inventoryView(tracker, gm) {
+  const o = tracker.odyssey, inv = o.inventory;
+  const itemRows = inv.items.map((i) => `<article class="cp-card"><div class="cp-row"><b>${esc(i.name)}</b><span class="cp-pill">${esc(i.kind)}</span><span class="cp-pill">\xD7${i.quantity}</span>${i.armor ? `<span class="cp-pill">Armor ${i.armor}</span>` : ""}</div><p class="cp-muted cp-description">${esc(i.description)}</p><div class="cp-row">${i.equippedPart ? `<span>Equipped: ${esc(tracker.body[i.equippedPart]?.label || i.equippedPart)}</span><button type="button" data-od-action="unequip" data-id="${esc(i.id)}">Unequip</button>` : ["armor", "shield", "implant"].includes(i.kind) ? `<label>Body part <select data-equip-part="${esc(i.id)}">${Object.entries(tracker.body).filter(([, p]) => gm || !p.hidden).map(([k, p]) => `<option value="${esc(k)}">${esc(p.label || k)}</option>`).join("")}</select></label><button type="button" data-od-action="equip" data-id="${esc(i.id)}" ${!i.quantity ? "disabled" : ""}>Equip</button>` : ["consumable", "medical", "resource"].includes(i.kind) ? `<button type="button" data-od-action="consume" data-id="${esc(i.id)}" ${!i.quantity ? "disabled" : ""}>Use one</button>` : ""}${gm ? `<button type="button" class="secondary" data-od-action="edit-item" data-id="${esc(i.id)}">Edit</button><button type="button" class="danger" data-od-action="delete-item" data-id="${esc(i.id)}">Remove</button>` : ""}</div></article>`).join("");
+  const mags = inv.magazines.map((m) => {
+    const w = o.weapons.ranged.find((w2) => w2.magazineId === m.id), a = o.ammunition.find((a2) => a2.id === m.loadedAmmoId);
+    return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name || "Empty")} ${w ? `\xB7 ${esc(w.name)}` : "\xB7 Reserve magazine"}</span></div>${gm && !w ? `<div class="cp-row"><label>Ammo <select data-mag-ammo="${esc(m.id)}">${o.ammunition.map((a2) => `<option value="${esc(a2.id)}">${esc(a2.name)} (${a2.quantity})</option>`).join("")}</select></label><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button><button type="button" class="danger" data-od-action="delete-mag" data-id="${esc(m.id)}">Remove</button></div>` : ""}</article>`;
+  }).join("");
+  const mounts = o.weapons.ranged.map((w, index) => `<div class="cp-card cp-row"><b>${esc(w.name)}</b><span>${w.loaded}/${w.capacity}</span>${gm ? `<label>Magazine <select data-weapon-mag="${index}"><option value="">Detached</option>${inv.magazines.filter((m) => m.id === w.magazineId || !o.weapons.ranged.some((x) => x.magazineId === m.id) && m.capacity === w.capacity && (!m.loaded || w.ammoIds.includes(m.loadedAmmoId))).map((m) => `<option value="${esc(m.id)}" ${m.id === w.magazineId ? "selected" : ""}>${esc(m.name)} \xB7 ${m.loaded}/${m.capacity}</option>`).join("")}</select></label><button type="button" data-od-action="mount-mag" data-index="${index}">Apply</button>` : ""}</div>`).join("");
+  return `<div class="cp-screen"><div class="cp-section-title">Items & equipment</div><div class="cp-list">${itemRows || '<p class="cp-muted">No items yet.</p>'}</div>${gm ? '<button type="button" data-od-action="add-item">+ Item / armor / implant</button>' : ""}<div class="cp-section-title">Magazines</div><div class="cp-list">${mags || '<p class="cp-muted">No magazines.</p>'}${mounts}</div>${gm ? '<button type="button" data-od-action="add-mag">+ Magazine</button>' : ""}<p class="cp-muted">Weapon reload and ammunition reserve remain in Weapons / Ammunition. Using a medical item consumes one; healing remains a GM action. Armor replaces the chosen part\u2019s armor value while equipped.</p></div>`;
+}
+function templatesView(library, gm) {
+  return `<div class="cp-screen"><p class="cp-muted">Templates are saved in this browser. Export JSON for backup, or save a library scene to your Owlbear account. Account save opens the Assets folder picker; it creates a snapshot.</p><div class="cp-row"><button type="button" data-od-action="save-template">Save character as template</button><button type="button" data-od-action="export-library">Export JSON</button><button type="button" data-od-action="import-library">Import JSON</button><button type="button" data-od-action="account-save">Save to account</button><button type="button" data-od-action="account-load">Load from account</button></div><div class="cp-list">${library.templates.map((t) => `<article class="cp-card cp-row"><b>${esc(t.name)}</b>${gm ? `<button type="button" data-od-action="apply-template" data-id="${esc(t.id)}">Apply to token\u2026</button>` : ""}<button type="button" class="secondary" data-od-action="rename-template" data-id="${esc(t.id)}">Rename</button><button type="button" class="secondary" data-od-action="duplicate-template" data-id="${esc(t.id)}">Duplicate</button><button type="button" class="danger" data-od-action="delete-template" data-id="${esc(t.id)}">Remove</button></article>`).join("") || '<p class="cp-muted">No templates saved.</p>'}</div></div>`;
+}
+
+// ui/compactHud.js
+function compactHud({ token, tracker, floating, target, targetData, skills, weapons, draft: draft2, parts, ammunition }) {
+  return `<section class="od-hud cp-screen"><div class="cp-row"><div><span class="cp-section-title">Character</span><h3>${esc(token.name || "Character")}</h3></div><span class="cp-pill">${Object.entries(tracker.body).filter(([k]) => !["Shield", "Special"].includes(k)).reduce((n, [, p]) => n + p.current, 0)} HP</span><button type="button" data-action="${floating ? "close-character-hud" : "open-character-hud"}" class="secondary">${floating ? "Close HUD" : "Floating HUD"}</button></div><div class="od-hud-grid"><div class="cp-card"><div class="cp-section-title">Weapon & skill</div><label>Weapon<select data-hud-attack-field="weaponName">${weapons}</select></label><label>Skill<select data-hud-attack-field="skill">${skills}</select></label>${ammunition.replaceAll("data-attack-field=", "data-hud-attack-field=")}</div><div class="cp-card"><div class="cp-section-title">Target</div><div class="cp-row"><b>${esc(target?.name || "No target selected")}</b><button type="button" data-action="pick-attack-target">Pick on map</button></div><label>Body zone<select data-hud-attack-field="targetPart">${parts.map(([key, label]) => `<option value="${esc(key)}" ${key === draft2.targetPart ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><p class="cp-muted">${targetData ? "Target selected \xB7 V1 armor, Parry and damage rules" : "Select a visible target to attack."}</p></div><div class="cp-card"><div class="cp-section-title">Action</div><label>Attack bonus<input type="number" value="${Number(draft2.attackBonuses) || 0}" data-hud-attack-field="attackBonuses"></label><label>Attack penalty<input type="number" value="${Number(draft2.attackPenalties) || 0}" data-hud-attack-field="attackPenalties"></label><button type="button" data-action="perform-attack" ${!target ? "disabled" : ""}>Attack</button></div></div><p class="cp-muted" role="status">${esc(tracker.lastRoll?.summary || "No rolls yet.")}</p></section>`;
+}
+
 // node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
@@ -3516,8 +3547,8 @@ var ImageBuilder = class extends GenericItemBuilder {
     };
     this._textItemType = "LABEL";
   }
-  text(text) {
-    this._text = text;
+  text(text2) {
+    this._text = text2;
     return this.self();
   }
   textItemType(textItemType) {
@@ -3597,6 +3628,116 @@ var ImageBuilder = class extends GenericItemBuilder {
   }
 };
 
+// node_modules/@owlbear-rodeo/sdk/lib/builders/TextBuilder.js
+var TextBuilder = class extends GenericItemBuilder {
+  constructor(player) {
+    super(player);
+    this._text = {
+      richText: [
+        {
+          type: "paragraph",
+          children: [{ text: "" }]
+        }
+      ],
+      plainText: "",
+      style: {
+        padding: 0,
+        fontFamily: "Roboto",
+        fontSize: 16,
+        fontWeight: 400,
+        textAlign: "LEFT",
+        textAlignVertical: "TOP",
+        fillColor: "white",
+        fillOpacity: 1,
+        strokeColor: "white",
+        strokeOpacity: 1,
+        strokeWidth: 0,
+        lineHeight: 1.5
+      },
+      type: "RICH",
+      width: "AUTO",
+      height: "AUTO"
+    };
+    this._item.layer = "TEXT";
+    this._item.name = "Text";
+  }
+  text(text2) {
+    this._text = text2;
+    return this.self();
+  }
+  width(width) {
+    this._text.width = width;
+    return this.self();
+  }
+  height(height) {
+    this._text.height = height;
+    return this.self();
+  }
+  richText(richText) {
+    this._text.richText = richText;
+    return this.self();
+  }
+  plainText(plainText) {
+    this._text.plainText = plainText;
+    return this.self();
+  }
+  textType(textType) {
+    this._text.type = textType;
+    return this.self();
+  }
+  padding(padding) {
+    this._text.style.padding = padding;
+    return this.self();
+  }
+  fontFamily(fontFamily) {
+    this._text.style.fontFamily = fontFamily;
+    return this.self();
+  }
+  fontSize(fontSize) {
+    this._text.style.fontSize = fontSize;
+    return this.self();
+  }
+  fontWeight(fontWeight) {
+    this._text.style.fontWeight = fontWeight;
+    return this.self();
+  }
+  textAlign(textAlign) {
+    this._text.style.textAlign = textAlign;
+    return this.self();
+  }
+  textAlignVertical(textAlignVertical) {
+    this._text.style.textAlignVertical = textAlignVertical;
+    return this.self();
+  }
+  fillColor(fillColor) {
+    this._text.style.fillColor = fillColor;
+    return this.self();
+  }
+  fillOpacity(fillOpacity) {
+    this._text.style.fillOpacity = fillOpacity;
+    return this.self();
+  }
+  strokeColor(strokeColor) {
+    this._text.style.strokeColor = strokeColor;
+    return this.self();
+  }
+  strokeOpacity(strokeOpacity) {
+    this._text.style.strokeOpacity = strokeOpacity;
+    return this.self();
+  }
+  strokeWidth(strokeWidth) {
+    this._text.style.strokeWidth = strokeWidth;
+    return this.self();
+  }
+  lineHeight(lineHeight) {
+    this._text.style.lineHeight = lineHeight;
+    return this.self();
+  }
+  build() {
+    return Object.assign(Object.assign({}, this._item), { type: "TEXT", text: this._text });
+  }
+};
+
 // node_modules/@owlbear-rodeo/sdk/lib/builders/PathBuilder.js
 var PathBuilder = class extends GenericItemBuilder {
   constructor(player) {
@@ -3655,6 +3796,84 @@ var PathBuilder = class extends GenericItemBuilder {
   }
 };
 
+// node_modules/@owlbear-rodeo/sdk/lib/builders/SceneUploadBuilder.js
+var SceneUploadBuilder = class {
+  constructor() {
+    this._upload = {
+      name: "New Scene",
+      fog: { filled: false, style: { color: "#222222", strokeWidth: 5 } },
+      grid: {
+        dpi: 150,
+        scale: "5ft",
+        style: {
+          lineColor: "LIGHT",
+          lineOpacity: 0.4,
+          lineType: "DASHED",
+          lineWidth: 2
+        },
+        measurement: "CHEBYSHEV",
+        type: "SQUARE"
+      },
+      items: []
+    };
+  }
+  name(name) {
+    this._upload.name = name;
+    return this;
+  }
+  fogFilled(filled) {
+    this._upload.fog.filled = filled;
+    return this;
+  }
+  fogColor(color) {
+    this._upload.fog.style.color = color;
+    return this;
+  }
+  fogStrokeWidth(width) {
+    this._upload.fog.style.strokeWidth = width;
+    return this;
+  }
+  gridScale(scale) {
+    this._upload.grid.scale = scale;
+    return this;
+  }
+  gridColor(color) {
+    this._upload.grid.style.lineColor = color;
+    return this;
+  }
+  gridOpacity(opacity) {
+    this._upload.grid.style.lineOpacity = opacity;
+    return this;
+  }
+  gridLineType(lineType) {
+    this._upload.grid.style.lineType = lineType;
+    return this;
+  }
+  gridMeasurement(measurement) {
+    this._upload.grid.measurement = measurement;
+    return this;
+  }
+  gridType(type) {
+    this._upload.grid.type = type;
+    return this;
+  }
+  items(items) {
+    this._upload.items = items;
+    return this;
+  }
+  baseMap(baseMap) {
+    this._upload.baseMap = baseMap;
+    return this;
+  }
+  thumbnail(thumbnail) {
+    this._upload.thumbnail = thumbnail;
+    return this;
+  }
+  build() {
+    return this._upload;
+  }
+};
+
 // node_modules/js-base64/base64.mjs
 var _TD = typeof TextDecoder === "function" ? new TextDecoder("utf-8", { ignoreBOM: true }) : void 0;
 var _TE = typeof TextEncoder === "function" ? new TextEncoder() : void 0;
@@ -3681,7 +3900,7 @@ var btoaPolyfill = (bin) => {
   return pad ? asc.slice(0, pad - 3) + "===".substring(pad) : asc;
 };
 var _btoa = typeof btoa === "function" ? (bin) => btoa(bin) : btoaPolyfill;
-var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? (u8a) => u8a.toBase64() : (u8a) => {
+var _fromUint8Array = typeof Uint8Array.prototype.toBase64 === "function" ? Function.prototype.call.bind(Uint8Array.prototype.toBase64) : (u8a) => {
   const maxargs = 4096;
   let strs = [];
   for (let i = 0, l = u8a.length; i < l; i += maxargs) {
@@ -3810,10 +4029,450 @@ var OBR = {
 function buildImage(image, grid) {
   return new ImageBuilder(playerApi, image, grid);
 }
+function buildText() {
+  return new TextBuilder(playerApi);
+}
 function buildPath() {
   return new PathBuilder(playerApi);
 }
+function buildSceneUpload() {
+  return new SceneUploadBuilder();
+}
 var lib_default = OBR;
+
+// inventory.js
+var LIMIT = 200;
+var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+var text = (v, max = 120) => String(v ?? "").trim().slice(0, max);
+var kinds = /* @__PURE__ */ new Set(["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"]);
+function newId() {
+  return globalThis.crypto.randomUUID();
+}
+function rows(raw, map) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
+}
+function normalizeInventory(raw, weapons = []) {
+  const items = rows(raw?.items, (r, i) => ({
+    id: text(r.id || `legacy-item-${i}`),
+    name: text(r.name) || "Item",
+    kind: kinds.has(r.kind) ? r.kind : "item",
+    quantity: int(r.quantity ?? 1),
+    description: text(r.description, 2e3),
+    armor: int(r.armor, 999),
+    equippedPart: text(r.equippedPart, 40),
+    previousArmor: int(r.previousArmor, 999)
+  }));
+  const magazines = rows(raw?.magazines, (r, i) => ({
+    id: text(r.id || `legacy-magazine-${i}`),
+    name: text(r.name) || "Magazine",
+    capacity: int(r.capacity, 999),
+    loadedAmmoId: text(r.loadedAmmoId),
+    loaded: int(r.loaded, int(r.capacity, 999))
+  }));
+  const assigned = /* @__PURE__ */ new Set();
+  for (const [i, weapon] of weapons.entries()) {
+    const requested = text(weapon.magazineId);
+    let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
+    if (!id) {
+      weapon.magazineId = "";
+      weapon.loaded = 0;
+      weapon.loadedAmmoId = "";
+      continue;
+    }
+    if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
+    let mag = magazines.find((m) => m.id === id);
+    if (!mag) {
+      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
+      magazines.push(mag);
+    }
+    weapon.magazineId = id;
+    assigned.add(id);
+    Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
+  }
+  return { version: 2, items, magazines };
+}
+function magazineWeapon(odyssey, id) {
+  return odyssey.weapons.ranged.find((w) => w.magazineId === id);
+}
+function swapMagazine(odyssey, weaponIndex, magazineId) {
+  const weapon = odyssey.weapons.ranged[weaponIndex];
+  if (!weapon) throw new Error("Weapon no longer exists.");
+  const current2 = odyssey.inventory.magazines.find((m) => m.id === weapon.magazineId);
+  if (current2) Object.assign(current2, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
+  const next = magazineId ? odyssey.inventory.magazines.find((m) => m.id === magazineId) : null;
+  if (magazineId && !next) throw new Error("Magazine no longer exists.");
+  if (next && magazineWeapon(odyssey, next.id) && weapon.magazineId !== next.id) throw new Error("Magazine is already mounted.");
+  if (next && next.capacity !== weapon.capacity) throw new Error("Magazine capacity must match this weapon.");
+  if (next?.loaded && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error("Magazine ammunition is incompatible.");
+  weapon.magazineId = next?.id || "";
+  weapon.loaded = next?.loaded || 0;
+  weapon.loadedAmmoId = next?.loadedAmmoId || "";
+}
+function fillMagazine(odyssey, id, ammoId) {
+  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
+  const ammo = odyssey.ammunition.find((a) => a.id === ammoId);
+  if (!mag || !ammo) throw new Error("Choose a magazine and ammunition.");
+  if (magazineWeapon(odyssey, id)) throw new Error("Detach the magazine before filling it, or use weapon reload.");
+  if (mag.loaded && mag.loadedAmmoId !== ammoId) throw new Error("Empty the magazine before changing ammunition.");
+  const count = Math.min(mag.capacity - mag.loaded, ammo.quantity);
+  if (count < 1) throw new Error("Magazine is full or reserve is empty.");
+  mag.loadedAmmoId = ammoId;
+  mag.loaded += count;
+  ammo.quantity -= count;
+}
+function emptyMagazine(odyssey, id) {
+  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
+  if (!mag) throw new Error("Magazine no longer exists.");
+  if (magazineWeapon(odyssey, id)) throw new Error("Detach the magazine first.");
+  const ammo = odyssey.ammunition.find((a) => a.id === mag.loadedAmmoId);
+  if (mag.loaded && !ammo) throw new Error("The loaded ammunition is missing.");
+  if (ammo && ammo.quantity + mag.loaded > 999999) throw new Error("Ammo reserve is full.");
+  if (ammo) ammo.quantity += mag.loaded;
+  mag.loaded = 0;
+  mag.loadedAmmoId = "";
+}
+function equipItem(tracker, id, partName) {
+  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
+  if (!item || !["armor", "shield", "implant"].includes(item.kind)) throw new Error("Choose equipment.");
+  if (item.quantity < 1) throw new Error("Item is not available.");
+  if (item.equippedPart) throw new Error("Unequip this item first.");
+  const part = tracker.body[partName];
+  if (!part) throw new Error("Body part no longer exists.");
+  if (tracker.odyssey.inventory.items.some((i) => i.equippedPart === partName)) throw new Error("This body part already has equipment.");
+  item.previousArmor = part.armor;
+  item.equippedPart = partName;
+  part.armor = item.armor;
+}
+function unequipItem(tracker, id) {
+  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
+  if (!item) throw new Error("Item no longer exists.");
+  const part = tracker.body[item.equippedPart];
+  if (part && part.armor === item.armor) part.armor = item.previousArmor;
+  item.equippedPart = "";
+  item.previousArmor = 0;
+}
+function consumeItem(tracker, id) {
+  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
+  if (!item || !["consumable", "medical", "resource"].includes(item.kind) || item.quantity < 1) throw new Error("No usable item available.");
+  item.quantity -= 1;
+}
+
+// profiles.js
+var LIBRARY_FORMAT = "odyssey-template-library";
+var TEMPLATE_FORMAT = "odyssey-character-template";
+var LIBRARY_ITEM_KEY = "com.codex.body-hp/template-library";
+var LIBRARY_STORAGE_KEY = "odyssey.templates.v1";
+var profileFields = ["skills", "skillCategories", "skillStrengthBonuses", "skillLabels", "skillPerks", "attributes", "weapons", "ammunition", "inventory"];
+function profileData(tracker) {
+  return {
+    enabled: true,
+    minor: tracker.minor || 0,
+    serious: tracker.serious || 0,
+    body: structuredClone(tracker.body),
+    odyssey: Object.fromEntries(profileFields.map((k) => [k, structuredClone(tracker.odyssey[k])]))
+  };
+}
+function makeTemplate(name, tracker) {
+  const data = profileData(tracker);
+  data.minor = 0;
+  data.serious = 0;
+  for (const part of Object.values(data.body)) {
+    part.current = part.max;
+    part.minor = 0;
+    part.serious = 0;
+  }
+  return { format: TEMPLATE_FORMAT, version: 1, id: newId(), name: String(name || "Character").trim().slice(0, 120), updatedAt: (/* @__PURE__ */ new Date()).toISOString(), data };
+}
+function normalizeLibrary(raw, sanitize) {
+  if (raw?.format !== LIBRARY_FORMAT || raw.version !== 1 || !Array.isArray(raw.templates)) throw new Error("Choose an Odyssey template library JSON (version 1).");
+  if (raw.templates.length > 100) throw new Error("A library can contain at most 100 templates.");
+  const seen = /* @__PURE__ */ new Set();
+  const templates = raw.templates.map((t) => {
+    if (t?.format !== TEMPLATE_FORMAT || t.version !== 1 || !t.data?.body || !t.data?.odyssey) throw new Error("Invalid character template.");
+    const id = String(t.id || newId()).slice(0, 120);
+    if (seen.has(id)) throw new Error("Duplicate template IDs in library.");
+    seen.add(id);
+    return { format: TEMPLATE_FORMAT, version: 1, id, name: String(t.name || "Character").trim().slice(0, 120), updatedAt: String(t.updatedAt || ""), data: profileData(sanitize(t.data)) };
+  });
+  return { format: LIBRARY_FORMAT, version: 1, templates };
+}
+function emptyLibrary() {
+  return { format: LIBRARY_FORMAT, version: 1, templates: [] };
+}
+function mergeLibraries(local, imported) {
+  const entries = new Map(local.templates.map((t) => [t.id, t]));
+  for (const template of imported.templates) entries.set(template.id, template);
+  if (entries.size > 100) throw new Error("Library limit is 100 templates. Export or remove templates first.");
+  return { ...emptyLibrary(), templates: [...entries.values()] };
+}
+function instantiateTemplate(current2, template, sanitize) {
+  const validated = normalizeLibrary({ ...emptyLibrary(), templates: [template] }, sanitize).templates[0];
+  const data = structuredClone(validated.data);
+  const ammoIds = new Map(data.odyssey.ammunition.map((a) => [a.id, newId()]));
+  const magIds = new Map(data.odyssey.inventory.magazines.map((m) => [m.id, newId()]));
+  for (const a of data.odyssey.ammunition) a.id = ammoIds.get(a.id);
+  for (const mag of data.odyssey.inventory.magazines) {
+    mag.id = magIds.get(mag.id);
+    mag.loadedAmmoId = ammoIds.get(mag.loadedAmmoId) || "";
+  }
+  for (const w of data.odyssey.weapons.ranged) {
+    w.id = newId();
+    w.ammoIds = w.ammoIds.map((id) => ammoIds.get(id)).filter(Boolean);
+    w.loadedAmmoId = ammoIds.get(w.loadedAmmoId) || "";
+    w.magazineId = magIds.get(w.magazineId) || "";
+  }
+  for (const item of data.odyssey.inventory.items) item.id = newId();
+  const next = sanitize({ ...current2, ...data, odyssey: { ...current2.odyssey, ...data.odyssey, owner: current2.odyssey.owner, attackDraft: { targetTokenId: "", targetTokenName: "" } } });
+  return next;
+}
+function readLibrary(storage, sanitize) {
+  const raw = storage.getItem(LIBRARY_STORAGE_KEY);
+  return raw ? normalizeLibrary(JSON.parse(raw), sanitize) : emptyLibrary();
+}
+function writeLibrary(storage, library) {
+  const json = JSON.stringify(library);
+  if (new TextEncoder().encode(json).length > 4 * 1024 * 1024) throw new Error("Library exceeds 4 MB. Export a smaller library.");
+  storage.setItem(LIBRARY_STORAGE_KEY, json);
+}
+function libraryFromScenes(scenes, sanitize) {
+  let result = emptyLibrary();
+  let found = false;
+  for (const scene of scenes || []) for (const item of scene.items || []) {
+    const payload = item.metadata?.[LIBRARY_ITEM_KEY];
+    if (payload) {
+      result = mergeLibraries(result, normalizeLibrary(payload, sanitize));
+      found = true;
+    }
+  }
+  if (!found) throw new Error("Selected scenes contain no Odyssey template library.");
+  return result;
+}
+
+// ui/characterTools.js
+function formDialog(title, fields, { danger = false, message = "" } = {}) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "od-dialog";
+  dialog.innerHTML = `<form><h2>${esc(title)}</h2>${message ? `<p>${esc(message)}</p>` : ""}${fields.map((f) => `<label>${esc(f.label)}${f.options ? `<select name="${esc(f.name)}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v === f.value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>` : f.type === "textarea" ? `<textarea name="${esc(f.name)}" maxlength="2000">${esc(f.value)}</textarea>` : `<input name="${esc(f.name)}" type="${esc(f.type || "text")}" value="${esc(f.value ?? "")}" ${f.required ? "required" : ""} ${f.type === "number" ? `min="${f.min ?? 0}" max="${f.max ?? 999999}" step="1"` : 'maxlength="120"'}>`}</label>`).join("")}<div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit" class="${danger ? "danger" : ""}">${danger ? "Apply" : "Save"}</button></div></form>`;
+  document.body.append(dialog);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    dialog.querySelector("[data-cancel]").onclick = () => finish(null);
+    dialog.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      finish(null);
+    });
+    dialog.querySelector("form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      finish(Object.fromEntries(new FormData(e.target)));
+    });
+    dialog.showModal();
+  });
+}
+function installCharacterTools(host) {
+  const { OBR: OBR2, sanitize, getToken, getRole, canControl, update, refreshOverlay, render: render2, status, download } = host;
+  let library, storageError = "";
+  try {
+    library = readLibrary(window.localStorage, sanitize);
+  } catch (e) {
+    library = emptyLibrary();
+    storageError = e.message;
+  }
+  let busy = false;
+  const saveLibrary = (next) => {
+    writeLibrary(window.localStorage, next);
+    library = next;
+    storageError = "";
+    render2();
+  };
+  const check = (id, gm = false) => {
+    const token = getToken(id);
+    if (!token || !canControl(token) || gm && getRole() !== "GM") throw new Error(gm ? "Only the GM can perform this action." : "You cannot control this character.");
+    return token;
+  };
+  const mutate = async (id, fn, gm = false) => {
+    check(id, gm);
+    await update(id, (current2) => {
+      check(id, gm);
+      const next = structuredClone(current2);
+      fn(next);
+      return next;
+    });
+    await refreshOverlay(id);
+    render2();
+  };
+  const readSelect = (root, attribute, value) => Array.from(root.querySelectorAll(`[${attribute}]`)).find((e) => e.getAttribute(attribute) === String(value))?.value || "";
+  async function handle(action, node) {
+    const token = check();
+    const tokenId = token.id, panel = node.closest("#selectedTokenPanel"), id = node.dataset.id;
+    const gmActions = ["add-item", "edit-item", "delete-item", "add-mag", "fill-mag", "empty-mag", "delete-mag", "mount-mag", "apply-template"];
+    if (gmActions.includes(action)) check(tokenId, true);
+    if (action === "add-item" || action === "edit-item") {
+      const existing = host.tracker(token).odyssey.inventory.items.find((i) => i.id === id);
+      if (action === "edit-item" && !existing) throw new Error("Item no longer exists.");
+      const value = await formDialog(existing ? "Edit item" : "Add item / armor", [
+        { name: "name", label: "Name", required: true, value: existing?.name },
+        { name: "kind", label: "Type", value: existing?.kind || "item", options: ["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"].map((k) => [k, k]) },
+        { name: "quantity", label: "Quantity", type: "number", value: existing?.quantity ?? 1 },
+        { name: "armor", label: "Armor value (equipment)", type: "number", max: 999, value: existing?.armor ?? 0 },
+        { name: "description", label: "Description", type: "textarea", value: existing?.description }
+      ]);
+      if (!value) return;
+      const itemId = existing?.id || newId();
+      await mutate(tokenId, (t) => {
+        const rows2 = t.odyssey.inventory.items, i = rows2.find((i2) => i2.id === itemId);
+        if (i?.equippedPart) throw new Error("Unequip the item before editing it.");
+        if (!i && rows2.length >= 200) throw new Error("Inventory limit is 200 items.");
+        const item = { id: itemId, ...value, quantity: Number(value.quantity), armor: Number(value.armor), equippedPart: "", previousArmor: 0 };
+        if (i) Object.assign(i, item);
+        else rows2.push(item);
+      }, true);
+    } else if (action === "delete-item") {
+      const yes = await formDialog("Remove item?", [], { danger: true, message: "This removes the item from this token." });
+      if (!yes) return;
+      await mutate(tokenId, (t) => {
+        unequipItem(t, id);
+        t.odyssey.inventory.items = t.odyssey.inventory.items.filter((i) => i.id !== id);
+      }, true);
+    } else if (action === "consume") await mutate(tokenId, (t) => consumeItem(t, id));
+    else if (action === "equip") {
+      const part = readSelect(panel, "data-equip-part", id);
+      await mutate(tokenId, (t) => equipItem(t, id, part));
+    } else if (action === "unequip") await mutate(tokenId, (t) => unequipItem(t, id));
+    else if (action === "add-mag") {
+      const value = await formDialog("New magazine", [{ name: "name", label: "Name", required: true, value: "Magazine" }, { name: "capacity", label: "Capacity", type: "number", min: 1, max: 999, value: 6 }]);
+      if (!value) return;
+      const magazine = { id: newId(), name: value.name, capacity: Number(value.capacity), loaded: 0, loadedAmmoId: "" };
+      await mutate(tokenId, (t) => {
+        if (t.odyssey.inventory.magazines.length >= 200) throw new Error("Magazine limit is 200.");
+        t.odyssey.inventory.magazines.push(magazine);
+      }, true);
+    } else if (action === "fill-mag") {
+      const ammoId = readSelect(panel, "data-mag-ammo", id);
+      await mutate(tokenId, (t) => fillMagazine(t.odyssey, id, ammoId), true);
+    } else if (action === "empty-mag") await mutate(tokenId, (t) => emptyMagazine(t.odyssey, id), true);
+    else if (action === "delete-mag") await mutate(tokenId, (t) => {
+      emptyMagazine(t.odyssey, id);
+      t.odyssey.inventory.magazines = t.odyssey.inventory.magazines.filter((m) => m.id !== id);
+    }, true);
+    else if (action === "mount-mag") {
+      const index = Number(node.dataset.index), magId = readSelect(panel, "data-weapon-mag", index);
+      await mutate(tokenId, (t) => swapMagazine(t.odyssey, index, magId), true);
+    } else if (action === "save-template") {
+      const value = await formDialog("Save character template", [{ name: "name", label: "Template name", required: true, value: token.name || "Character" }], { message: "Saves a healthy character. Owner, target, history and bridge events are excluded." });
+      if (!value) return;
+      if (storageError) throw new Error("Export the unreadable local library before importing a replacement. " + storageError);
+      const current2 = check(tokenId);
+      const template = makeTemplate(value.name, host.tracker(current2));
+      saveLibrary(mergeLibraries(library, { ...emptyLibrary(), templates: [template] }));
+    } else if (action === "export-library") {
+      const json = storageError ? window.localStorage.getItem(LIBRARY_STORAGE_KEY) : JSON.stringify(library, null, 2);
+      download("odyssey-templates.json", json || "{}");
+      return;
+    } else if (action === "import-library") {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.onchange = async () => {
+        try {
+          const file = input.files?.[0];
+          if (!file) return;
+          if (file.size > 4 * 1024 * 1024) throw new Error("Library must be under 4 MB.");
+          const incoming = normalizeLibrary(JSON.parse(await file.text()), sanitize);
+          if (storageError) {
+            const yes = await formDialog("Replace unreadable library?", [], { danger: true, message: "Export your existing JSON first. This replaces the unreadable local copy." });
+            if (!yes) return;
+            saveLibrary(incoming);
+          } else saveLibrary(mergeLibraries(library, incoming));
+          status("Template library imported.", "success");
+        } catch (e) {
+          status(e.message, "error");
+        }
+      };
+      input.click();
+      return;
+    } else if (action === "apply-template") {
+      const template = library.templates.find((t) => t.id === id);
+      if (!template) throw new Error("Template no longer exists.");
+      const yes = await formDialog(`Apply ${template.name}?`, [], { danger: true, message: "Replaces body, attributes, skills, weapons and inventory on this token. Destination owner and history are preserved. Saved attack target is cleared." });
+      if (!yes) return;
+      const source = check(tokenId, true), next = instantiateTemplate(host.tracker(source), template, sanitize);
+      await mutate(tokenId, (t) => {
+        t.enabled = next.enabled;
+        t.minor = next.minor;
+        t.serious = next.serious;
+        t.body = next.body;
+        t.odyssey = { ...next.odyssey, owner: t.odyssey.owner };
+      }, true);
+      host.resetDraft?.(tokenId);
+    } else if (action === "rename-template" || action === "duplicate-template") {
+      const t = library.templates.find((t2) => t2.id === id);
+      if (!t) throw new Error("Template no longer exists.");
+      const value = await formDialog(action === "rename-template" ? "Rename template" : "Duplicate template", [{ name: "name", label: "Name", required: true, value: t.name + (action === "duplicate-template" ? " copy" : "") }]);
+      if (!value) return;
+      const copy = { ...structuredClone(t), name: value.name.trim(), updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      const next = structuredClone(library);
+      if (action === "duplicate-template") {
+        copy.id = newId();
+        next.templates.push(copy);
+      } else next.templates = next.templates.map((x) => x.id === id ? copy : x);
+      saveLibrary(normalizeLibrary(next, sanitize));
+    } else if (action === "delete-template") {
+      const yes = await formDialog("Remove template?", [], { danger: true, message: "Existing characters are unaffected." });
+      if (!yes) return;
+      saveLibrary({ ...library, templates: library.templates.filter((t) => t.id !== id) });
+    } else if (action === "account-save") {
+      if (!library.templates.length) throw new Error("Save at least one template first.");
+      const items = library.templates.map((t) => buildText().name(t.name).plainText(t.name).position({ x: 0, y: 0 }).metadata({ [LIBRARY_ITEM_KEY]: { ...emptyLibrary(), templates: [t] } }).build());
+      await OBR2.assets.uploadScenes([buildSceneUpload().name("Odyssey Templates").items(items).build()], true);
+      status("Assets folder picker closed. Verify the library snapshot in your Owlbear account.", "info");
+      return;
+    } else if (action === "account-load") {
+      const scenes = await OBR2.assets.downloadScenes(true, "Odyssey Templates");
+      if (!scenes?.length) return;
+      const incoming = libraryFromScenes(scenes, sanitize);
+      if (storageError) {
+        const yes = await formDialog("Replace unreadable library?", [], { danger: true, message: "Export your existing JSON before replacing it with the account snapshot." });
+        if (!yes) return;
+        saveLibrary(incoming);
+      } else saveLibrary(mergeLibraries(library, incoming));
+    }
+    status("Saved.", "success");
+  }
+  document.addEventListener("click", (event) => {
+    const node = event.target.closest?.("[data-od-action]");
+    if (!node || node.disabled || busy) return;
+    busy = true;
+    node.disabled = true;
+    handle(node.dataset.odAction, node).catch((e) => status(e.message, "error")).finally(() => {
+      busy = false;
+      render2();
+      if (node.isConnected) node.disabled = false;
+    });
+  });
+  const reload = () => {
+    try {
+      library = readLibrary(window.localStorage, sanitize);
+      storageError = "";
+      render2();
+    } catch (e) {
+      storageError = e.message;
+      render2();
+    }
+  };
+  window.addEventListener("storage", (event) => {
+    if (event.key === LIBRARY_STORAGE_KEY) reload();
+  });
+  const disabledWhileBusy = (html) => busy ? html.replaceAll("<button ", "<button disabled ") : html;
+  return { renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
+}
 
 // ammunition.js
 var integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
@@ -3994,6 +4653,7 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
+    inventory: { version: 2, items: [], magazines: [] },
     ammunition: [],
     weapons: {
       melee: [],
@@ -4182,6 +4842,7 @@ function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
   return next;
 }
 function sanitizeWeapons(raw, ranged = false) {
@@ -4190,7 +4851,7 @@ function sanitizeWeapons(raw, ranged = false) {
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
-    ...ranged ? { ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
+    ...ranged ? { ...Object.hasOwn(item, "magazineId") ? { magazineId: String(item.magazineId || "") } : {}, ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
   })).slice(0, 20);
 }
 function sanitizeRollSummary(raw) {
@@ -4929,6 +5590,8 @@ var TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
     <path d="M16 6v4M16 22v4M6 16h4M22 16h4" stroke="#7f1d1d" stroke-width="1.2" stroke-linecap="round"/>
   </svg>`
 )}") 16 16, crosshair`;
+var HUD_MODE = new URLSearchParams(window.location.search).get("hud") === "1";
+document.documentElement.classList.toggle("od-hud-mode", HUD_MODE);
 var CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 var ATTACK_ONLY_EXCLUDED_SKILLS = /* @__PURE__ */ new Set([PARRY_SKILL_NAME]);
 var UNARMED_WEAPON_NAME = "Not Armed";
@@ -4961,6 +5624,8 @@ var ui = {
   allCount: document.getElementById("allCount"),
   allTokensList: document.getElementById("allTokensList")
 };
+var characterTools = null;
+var profileRollPending = false;
 var playerRole = "PLAYER";
 var playerId = "";
 var playerName = "";
@@ -5139,6 +5804,7 @@ function getTransientFieldKey(field) {
   if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
+  if (field.dataset.profileModifier) return `profile:${field.dataset.profileModifier}`;
   if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
   if (field.dataset.rollCharField) return `roll-char:${field.dataset.rollCharField}`;
   if (field.dataset.rollSkillField) return `roll-skill:${field.dataset.rollSkillField}`;
@@ -5168,7 +5834,7 @@ function getTransientFieldKey(field) {
   return "";
 }
 function shouldPreserveFieldValue(fieldKey, focusedKey) {
-  return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
+  return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("profile:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
 }
 function captureSelectedPanelState() {
   const renderedTokenId = String(ui.selectedTokenPanel.dataset.tokenId ?? "").trim();
@@ -5723,9 +6389,9 @@ function formatRollSkillDebug({ tokenName, skillName, result }) {
     )
   ].join("\n");
 }
-function formatTextTable(headers, rows) {
+function formatTextTable(headers, rows2) {
   const normalizedHeaders = headers.map((cell) => String(cell ?? ""));
-  const normalizedRows = rows.map((row) => row.map((cell) => String(cell ?? "")));
+  const normalizedRows = rows2.map((row) => row.map((cell) => String(cell ?? "")));
   const widths = normalizedHeaders.map(
     (header, columnIndex) => Math.max(
       header.length,
@@ -5858,79 +6524,12 @@ function sanitizeFileName(value) {
   return String(value ?? "").trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-").replace(/\s+/g, "_").slice(0, 80) || "token";
 }
 function buildTokenExportPayload(token) {
-  const tracker = getTrackerData(token);
-  const odyssey = getOdysseyData(token);
-  const body = BODY_ORDER.reduce((accumulator, partName) => {
-    const part = tracker.body?.[partName] ?? {};
-    accumulator[partName] = {
-      current: Number(part.current) || 0,
-      max: Number(part.max) || 0,
-      armor: Number(part.armor) || 0,
-      minor: Number(part.minor) || 0,
-      serious: Number(part.serious) || 0
-    };
-    return accumulator;
-  }, {});
-  return {
-    format: TOKEN_EXPORT_FORMAT,
-    version: TOKEN_EXPORT_VERSION,
-    exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    tokenName: getCharacterName(token),
-    data: {
-      enabled: tracker.enabled !== false,
-      minor: Number(tracker.minor) || 0,
-      serious: Number(tracker.serious) || 0,
-      body,
-      odyssey: {
-        skills: structuredClone(odyssey.skills ?? {}),
-        skillCategories: structuredClone(odyssey.skillCategories ?? {}),
-        skillStrengthBonuses: structuredClone(odyssey.skillStrengthBonuses ?? {}),
-        skillLabels: structuredClone(odyssey.skillLabels ?? {}),
-        skillPerks: structuredClone(odyssey.skillPerks ?? {}),
-        attributes: structuredClone(odyssey.attributes ?? {}),
-        weapons: structuredClone(odyssey.weapons ?? { melee: [], ranged: [] }),
-        ammunition: structuredClone(odyssey.ammunition ?? [])
-      }
-    }
-  };
+  return { format: TOKEN_EXPORT_FORMAT, version: TOKEN_EXPORT_VERSION, exportedAt: (/* @__PURE__ */ new Date()).toISOString(), tokenName: getCharacterName(token), data: profileData(getTrackerData(token)) };
 }
 function normalizeImportedTokenPayload(raw) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Import file is empty or has an invalid format.");
-  }
-  const source = raw.format === TOKEN_EXPORT_FORMAT && raw.data && typeof raw.data === "object" ? raw.data : raw.trackerData && typeof raw.trackerData === "object" ? raw.trackerData : raw;
-  const normalized = sanitizeTrackerData({
-    enabled: source.enabled,
-    minor: source.minor,
-    serious: source.serious,
-    body: source.body,
-    odyssey: {
-      skills: source.odyssey?.skills,
-      skillCategories: source.odyssey?.skillCategories,
-      skillStrengthBonuses: source.odyssey?.skillStrengthBonuses,
-      skillLabels: source.odyssey?.skillLabels,
-      skillPerks: source.odyssey?.skillPerks,
-      attributes: source.odyssey?.attributes,
-      weapons: source.odyssey?.weapons,
-      ammunition: source.odyssey?.ammunition
-    }
-  });
-  return {
-    enabled: normalized.enabled,
-    minor: normalized.minor,
-    serious: normalized.serious,
-    body: structuredClone(normalized.body),
-    odyssey: {
-      skills: structuredClone(normalized.odyssey.skills),
-      skillCategories: structuredClone(normalized.odyssey.skillCategories),
-      skillStrengthBonuses: structuredClone(normalized.odyssey.skillStrengthBonuses),
-      skillLabels: structuredClone(normalized.odyssey.skillLabels),
-      skillPerks: structuredClone(normalized.odyssey.skillPerks),
-      attributes: structuredClone(normalized.odyssey.attributes),
-      weapons: structuredClone(normalized.odyssey.weapons),
-      ammunition: structuredClone(normalized.odyssey.ammunition)
-    }
-  };
+  if (!raw || typeof raw !== "object") throw new Error("Invalid token profile.");
+  const source = raw.format === TOKEN_EXPORT_FORMAT && raw.data ? raw.data : raw.trackerData ?? raw;
+  return profileData(sanitizeTrackerData(source));
 }
 function downloadTextFile(filename, content, mimeType = "application/json") {
   const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
@@ -5993,10 +6592,10 @@ async function importSelectedTokenData(file) {
     setStatus("Choose an import file first.", "error");
     return;
   }
-  const text = await file.text();
+  const text2 = await file.text();
   let parsed;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(text2);
   } catch (error) {
     throw new Error("Import file must contain valid JSON.");
   }
@@ -6015,6 +6614,7 @@ async function importSelectedTokenData(file) {
     next.odyssey.attributes = structuredClone(imported.odyssey.attributes);
     next.odyssey.weapons = structuredClone(imported.odyssey.weapons);
     next.odyssey.ammunition = structuredClone(imported.odyssey.ammunition);
+    next.odyssey.inventory = structuredClone(imported.odyssey.inventory);
     return next;
   });
   await ensureOverlayForToken(token.id);
@@ -6482,19 +7082,8 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
     false
   );
 }
-function renderCharacteristicsBlock(data, disabledAttr) {
-  const attributeInputs = ATTRIBUTE_UI_FIELDS.map(
-    ([key, label]) => `
-      <label class="field-stack characteristic-field">
-        <span class="field-label">${escapeHtml(label)}</span>
-        <input type="text" inputmode="numeric" value="${data.odyssey.attributes[key] ?? 0}" data-action="set-odyssey-attribute" data-attribute="${escapeHtml(key)}" ${disabledAttr}>
-      </label>`
-  ).join("");
-  return renderCollapsibleSection(
-    "Characteristics",
-    `<div class="characteristics-grid">${attributeInputs}</div>`,
-    false
-  );
+function renderCharacteristicsBlock(data) {
+  return renderCollapsibleSection("Characteristics", attributeCards(data.odyssey, ATTRIBUTE_UI_FIELDS, isEditable()), true);
 }
 function renderOdysseySkillRows(odyssey, skillEntries, disabledAttr) {
   return skillEntries.map(
@@ -6518,6 +7107,8 @@ function renderOdysseySkillRows(odyssey, skillEntries, disabledAttr) {
   ).join("");
 }
 function renderEnglishSkillsBlock(data, disabledAttr) {
+  const cards = skillCards(data.odyssey, [["Combat", getCombatSkillEntries(data.odyssey)], ["Abilities", getAbilitiesSkillEntries(data.odyssey)], ["Applied", getAppliedSkillEntries(data.odyssey)]], isEditable());
+  if (!isEditable()) return renderCollapsibleSection("Skills", cards, true);
   const combatSkillRows = renderOdysseySkillRows(
     data.odyssey,
     getCombatSkillEntries(data.odyssey),
@@ -6536,6 +7127,8 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
   return renderCollapsibleSection(
     "Skills",
     `
+      ${cards}
+      <details class="cp-edit-skills"><summary>GM \xB7 Edit skills and perks</summary>
       <div class="skill-group"><div class="skill-group-title">Combat</div><div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div></div>
       <div class="skill-group"><div class="skill-group-title">Abilities</div><div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div></div>
       <div class="skill-group"><div class="skill-group-title">Applied</div><div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div></div>
@@ -6566,8 +7159,9 @@ function renderEnglishSkillsBlock(data, disabledAttr) {
         <div class="skill-add-actions"><button type="button" class="square-icon-button" data-action="add-skill" title="Save skill" aria-label="Save skill" ${disabledAttr}>\u25A3</button><button type="button" class="square-icon-button danger" data-action="close-skill-add" title="Cancel" aria-label="Cancel" ${disabledAttr}>\xD7</button></div>
       </div>` : ""}
       <div class="item-toolbar item-toolbar-bottom"><button type="button" class="square-icon-button" data-action="open-skill-add" title="Add skill" aria-label="Add skill" ${disabledAttr}>+</button></div>
+      </details>
     `,
-    false
+    true
   );
 }
 function renderAmmunitionBlock(odyssey) {
@@ -6686,6 +7280,7 @@ async function saveWeapon(node) {
     const allWeapons = [...next.odyssey.weapons.melee ?? [], ...next.odyssey.weapons.ranged ?? []];
     if (allWeapons.some((item) => item !== weapon && item.name === name)) throw new Error("A weapon with this name already exists.");
     if (weapon && type !== nextType) {
+      if (type === "ranged" && weapon.magazineId) swapMagazine(next.odyssey, index, "");
       if (type === "ranged" && weapon.loaded > 0) {
         const loadedAmmo = next.odyssey.ammunition.find((ammo) => ammo.id === weapon.loadedAmmoId);
         if (loadedAmmo) loadedAmmo.quantity += weapon.loaded;
@@ -6772,11 +7367,20 @@ async function editAmmunition(action, node) {
     data.ammunition ?? (data.ammunition = []);
     const weapon = data.weapons.ranged[index];
     if (action === "ammo-remove") {
+      if (data.inventory.magazines.some((m) => m.loadedAmmoId === ammoId && m.loaded > 0)) throw new Error("Empty all magazines using this ammo first.");
       if (data.weapons.ranged.some((item) => item.loadedAmmoId === ammoId && item.loaded > 0)) throw new Error("Unload this ammunition before removing it.");
       data.ammunition = data.ammunition.filter((item) => item.id !== ammoId);
       for (const item of data.weapons.ranged) item.ammoIds = item.ammoIds.filter((id) => id !== ammoId);
     }
-    if (action === "ammo-reload") reloadMagazine(data, index, reloadId);
+    if (action === "ammo-reload") {
+      if (weapon && !weapon.magazineId) {
+        const id = `reload-mag-${weapon.id}`;
+        if (!data.inventory.magazines.some((m) => m.id === id)) data.inventory.magazines.push({ id, name: weapon.name + " magazine", capacity: weapon.capacity, loaded: 0, loadedAmmoId: "" });
+        swapMagazine(data, index, id);
+      }
+      reloadMagazine(data, index, reloadId);
+    }
+    if (action === "ranged-remove" && weapon?.magazineId) swapMagazine(data, index, "");
     if ((action === "ranged-remove" || action === "ammo-unload") && weapon) {
       const loadedAmmo = data.ammunition.find((item) => item.id === weapon.loadedAmmoId);
       if (weapon.loaded && !loadedAmmo) throw new Error("Loaded ammunition is missing.");
@@ -6986,6 +7590,24 @@ function renderEnglishDiceBlock(token, data, tokenLocked) {
     false
   );
 }
+function renderTokenHud(token, data) {
+  const targets = getCharacters().filter((t) => t.id !== token.id && t.visible !== false);
+  const draft2 = getAttackDraft(token, data, targets);
+  const target = targets.find((t) => t.id === draft2.targetTokenId);
+  const targetData = target ? getTrackerData(target) : null;
+  return compactHud({
+    token,
+    floating: HUD_MODE,
+    tracker: data,
+    target,
+    targetData,
+    draft: draft2,
+    skills: buildSkillOptions(getAttackSkillEntries(data.odyssey), draft2.skill, data.odyssey),
+    weapons: buildWeaponOptions(getAttackSelectableWeapons(token), draft2.weaponName),
+    parts: getTargetableBodyParts(targetData, isEditable()).map((k) => [k, getBodyPartLabel(targetData, k)]),
+    ammunition: renderAttackAmmunition(token, draft2, false, "")
+  });
+}
 function renderSelectedToken() {
   const panelState = captureSelectedPanelState();
   activeTokenId = resolveActiveTokenId();
@@ -7010,6 +7632,7 @@ function renderSelectedToken() {
   ui.selectedTokenPanel.dataset.tokenId = token.id;
   ui.selectedTokenPanel.innerHTML = `
     <div class="selected-card">
+      ${canUseToken(token) ? renderTokenHud(token, data) : ""}
       <div class="selected-head">
         <div>
           <div class="token-name">${escapeHtml(getCharacterName(token))}</div>
@@ -7036,9 +7659,11 @@ function renderSelectedToken() {
 
       ${isEditable() ? `
             ${renderOwnerFields({ odyssey }, gmOnlyDisabled)}
-            ${renderCharacteristicsBlock({ odyssey }, gmOnlyDisabled)}
-            ${renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled)}
           ` : ""}
+      ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
+      ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
+      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Inventory \xB7 Armor \xB7 Magazines", characterTools.renderInventory(data), false) : ""}
+      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Character Templates", characterTools.renderTemplates(), false) : ""}
       ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${isEditable() ? renderAmmunitionBlock(odyssey) : ""}
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
@@ -7632,6 +8257,7 @@ async function removeWeapon(type = "melee", index) {
     const next = structuredClone(current2);
     const weapons = next.odyssey.weapons[type] ?? [];
     const weapon = weapons[index];
+    if (type === "ranged" && weapon?.magazineId) swapMagazine(next.odyssey, index, "");
     if (type === "ranged" && weapon?.loaded > 0) {
       const ammo = next.odyssey.ammunition.find(
         (item) => item.id === weapon.loadedAmmoId
@@ -8095,7 +8721,7 @@ async function removeOdysseySkill(skillName) {
   });
   setStatus(`Skill "${skillName}" removed.`, "success");
 }
-async function performRollChar() {
+async function performRollCharOnce(options = {}) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
     setStatus("Select a character first.", "error");
@@ -8105,8 +8731,9 @@ async function performRollChar() {
     setStatus("You cannot roll for this token.", "error");
     return;
   }
-  const attribute = getActionFieldValue('[data-roll-char-field="attribute"]') || "Strength";
-  const modifier2 = Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0;
+  const attribute = options.attribute ?? (getActionFieldValue('[data-roll-char-field="attribute"]') || "Strength");
+  if (!ATTRIBUTE_UI_FIELDS.some(([key]) => key === attribute)) throw new Error("Unknown characteristic.");
+  const modifier2 = options.modifier ?? (Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier2);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
@@ -8137,7 +8764,7 @@ async function performRollChar() {
   );
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
-async function performRollSkill() {
+async function performRollSkillOnce(options = {}) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
     setStatus("Select a character first.", "error");
@@ -8147,13 +8774,14 @@ async function performRollSkill() {
     setStatus("You cannot roll for this token.", "error");
     return;
   }
-  const skillName = getActionFieldValue('[data-roll-skill-field="skill"]');
+  const skillName = options.skill ?? getActionFieldValue('[data-roll-skill-field="skill"]');
   if (!skillName) {
     setStatus("Choose a skill first.", "error");
     return;
   }
-  const modifier2 = Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0;
+  const modifier2 = options.modifier ?? (Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
+  if (!Object.hasOwn(odyssey.skills, skillName)) throw new Error("Skill no longer exists.");
   const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier2);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
   await updateTrackerData2(token.id, (current2) => {
@@ -8181,6 +8809,24 @@ async function performRollSkill() {
     isResolvedCheckResultSuccess(result.result) ? "success" : result.result === "Critical Failure" ? "error" : "info"
   );
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
+}
+async function performRollChar(options) {
+  if (profileRollPending) return;
+  profileRollPending = true;
+  try {
+    await performRollCharOnce(options);
+  } finally {
+    profileRollPending = false;
+  }
+}
+async function performRollSkill(options) {
+  if (profileRollPending) return;
+  profileRollPending = true;
+  try {
+    await performRollSkillOnce(options);
+  } finally {
+    profileRollPending = false;
+  }
 }
 async function performPrivateGmRoll() {
   if (!isEditable()) {
@@ -8236,6 +8882,37 @@ function bindUiEvents() {
     const actionNode = target.closest("[data-action]");
     if (!(actionNode instanceof HTMLElement)) return;
     const action = actionNode.dataset.action;
+    if (actionNode.disabled) return;
+    if (action === "close-character-hud") {
+      void lib_default.popover.close("com.codex.body-hp/character-hud").catch((error) => setStatus(error.message, "error"));
+      return;
+    }
+    if (action === "open-character-hud") {
+      const id = "com.codex.body-hp/character-hud";
+      void lib_default.popover.close(id).catch(() => {
+      }).then(() => lib_default.popover.open({
+        id,
+        url: new URL("./index.html?hud=1", window.location.href).href,
+        width: 920,
+        height: 420,
+        anchorReference: "POSITION",
+        anchorPosition: { left: 20, top: 80 },
+        anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
+        transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
+        disableClickAway: true
+      })).catch((error) => setStatus(error.message, "error"));
+      return;
+    }
+    if (action === "profile-roll-char" || action === "profile-roll-skill") {
+      const kind = action === "profile-roll-char" ? "attribute" : "skill";
+      const modifier2 = clamp(Number(ui.selectedTokenPanel.querySelector(`[data-profile-modifier="${kind}"]`)?.value) || 0, -999, 999);
+      actionNode.disabled = true;
+      const operation = kind === "attribute" ? performRollChar({ attribute: actionNode.dataset.attribute, modifier: modifier2 }) : performRollSkill({ skill: actionNode.dataset.skill, modifier: modifier2 });
+      void operation.catch((error) => setStatus(error.message, "error")).finally(() => {
+        if (actionNode.isConnected) actionNode.disabled = false;
+      });
+      return;
+    }
     if (action === "open-ammo-add") {
       ammunitionAddOpen = true;
       scheduleRender();
@@ -8482,6 +9159,16 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.hudAttackField) {
+      const field2 = target.dataset.hudAttackField;
+      const original = ui.selectedTokenPanel.querySelector(`[data-attack-field="${field2}"]`);
+      if (original) {
+        original.value = target.value;
+        original.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      scheduleRender();
+      return;
+    }
     if (target.dataset.weaponDraft === "type") {
       toggleWeaponDraftFields(target);
       return;
@@ -8631,6 +9318,12 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
+    if (target.dataset.hudAttackField) {
+      const field = target.dataset.hudAttackField;
+      const original = ui.selectedTokenPanel.querySelector(`[data-attack-field="${field}"]`);
+      if (original) original.value = target.value;
+      saveAttackDraftValue(activeTokenId, field, target.value);
+    }
     if (target.dataset.attackField) {
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
     }
@@ -8709,6 +9402,28 @@ lib_default.onReady(async () => {
       storageKey: "com.codex.body-hp/action-size",
       defaultWidth: 560,
       defaultHeight: 860
+    });
+    characterTools = installCharacterTools({
+      OBR: lib_default,
+      sanitize: sanitizeTrackerData,
+      tracker: getTrackerData,
+      getToken: (id) => getCharacterById(id ?? activeTokenId),
+      getRole: () => playerRole,
+      canControl: canUseToken,
+      update: updateTrackerData2,
+      refreshOverlay: ensureOverlayForToken,
+      render: scheduleRender,
+      status: setStatus,
+      download: downloadTextFile,
+      resetDraft: (id) => {
+        attackFormDrafts.delete(id);
+        for (const [key, timer] of inputAutosaveTimers) {
+          if (key.startsWith(id + "|")) {
+            clearTimeout(timer);
+            inputAutosaveTimers.delete(key);
+          }
+        }
+      }
     });
     bindUiEvents();
     await removeAttackTargetContextMenu();

@@ -1,3 +1,5 @@
+import {captureBlueprint,blueprintText,blueprintId,validateBlueprint,poolEntries,parsePoolJSON,exportPool,copyBlueprint,ITEM_POOL_PREFIX} from '../itemPool.js';
+import {showItemPool} from './itemPoolView.js';
 import {itemEditor,skillEditor} from './itemEditor.js';
 import {ARMOR_TRAINING} from '../characterRules.js';
 import {findInventoryEntry,saveInventoryEntry,deleteInventoryEntry} from '../inventory.js';
@@ -25,6 +27,34 @@ export function installCharacterTools(host) {
   const { OBR, sanitize, getToken, getRole, canControl, update, refreshOverlay, render, status, download } = host;
   let library, storageError='';
   try { library=readLibrary(window.localStorage,sanitize); } catch(e) { library=emptyLibrary();storageError=e.message; }
+  let poolMetadata={},catalog={entries:[],errors:0},poolDialog=null,scanTimer=null,scanRunning=false,scanAgain=false,scanFingerprint='';
+  const knownBlueprintIds=new Map();
+  const refreshPool=metadata=>{poolMetadata=metadata||{};catalog=poolEntries(poolMetadata);poolDialog?.refresh();render();};
+  const requirePoolGM=async()=>{if(getRole()!=='GM'||await OBR.player.getRole()!=='GM')throw new Error('Only the GM can edit the campaign item pool.');};
+  const putBlueprints=async(blueprints,automatic=false)=>{
+    await requirePoolGM();const metadata=await OBR.room.getMetadata(),patch={};let count=Object.entries(metadata).filter(([key,value])=>key.startsWith(ITEM_POOL_PREFIX)&&value&&!value.deleted).length;
+    for(const blueprint of blueprints) {
+      validateBlueprint(blueprint);const text=blueprintText(blueprint);let id=knownBlueprintIds.get(text);if(!id){id=await blueprintId(blueprint);knownBlueprintIds.set(text,id);}
+      const key=ITEM_POOL_PREFIX+id;if(metadata[key]&&(automatic||!metadata[key].deleted))continue;if(Object.hasOwn(patch,key))continue;
+      if((!metadata[key]||metadata[key].deleted)&&++count>2000)throw new Error('Campaign item pool is full. Export a backup and remove unused definitions.');patch[key]={blueprint};
+    }
+    await requirePoolGM();if(Object.keys(patch).length)await OBR.room.setMetadata(patch);refreshPool({...metadata,...patch});
+  };
+  const scanPool=async()=>{
+    if(getRole()!=='GM')return;if(scanRunning){scanAgain=true;return;}scanRunning=true;
+    try {
+      const candidates=new Map();for(const token of host.getTokens()) {
+        const t=host.tracker(token),o=t.odyssey;
+        const entries=[...o.inventory.items.map(i=>['item',i.id]),...o.inventory.magazines.map(i=>['magazine',i.id]),...o.ammunition.map(i=>['ammo',i.id]),...['melee','ranged'].flatMap(kind=>o.weapons[kind].map(i=>['weapon-'+kind,i.id]))];
+        for(const [type,id]of entries){const blueprint=captureBlueprint(t,type,id);candidates.set(blueprintText(blueprint),blueprint);}
+      }
+      const fingerprint=[...candidates.keys()].sort().join('\n');if(fingerprint===scanFingerprint)return;scanFingerprint=fingerprint;
+      await putBlueprints([...candidates.values()],true);
+    } catch(e){scanFingerprint='';status('Item pool: '+e.message,'error');}finally{scanRunning=false;if(scanAgain){scanAgain=false;schedulePoolScan();}}
+  };
+  const schedulePoolScan=()=>{if(getRole()!=='GM'||scanTimer)return;scanTimer=setTimeout(()=>{scanTimer=null;void scanPool();},400);};
+  void OBR.room.getMetadata().then(refreshPool).catch(e=>status('Item pool: '+e.message,'error'));
+  OBR.room.onMetadataChange(refreshPool);
   let busy=false;
   const saveLibrary=next=>{if(getRole()!=='GM')throw new Error('Only the GM can edit templates.');writeLibrary(window.localStorage,next);library=next;storageError='';render();};
   const check=(id,gm=false)=>{
@@ -41,6 +71,7 @@ export function installCharacterTools(host) {
   async function handle(action,node) {
     const token=check(); const tokenId=token.id, panel=node.closest('#selectedTokenPanel'), id=node.dataset.id;
     const gmActions=['add-item','edit-item','delete-item','add-mag','fill-mag','set-mag-rounds','empty-mag','delete-mag','mount-mag','apply-template'];
+    if(action==='open-item-pool')check(tokenId,true);
     if(gmActions.includes(action)||action.includes('template')||action.includes('library')||action.startsWith('account-')) check(tokenId,true);
     if(action==='add-item'||action==='edit-entry') {
       check(tokenId,true);const t=host.tracker(token),o=t.odyssey,type=node.dataset.entryType||'item';
@@ -48,7 +79,24 @@ export function installCharacterTools(host) {
       if(action==='edit-entry'&&!existing)throw new Error('Item no longer exists.');
       const kind=type.startsWith('weapon-')?'weapon':type==='item'?(['item','tool'].includes(existing?.kind)?'resource':existing?.kind==='medical'?'consumable':existing?.kind||'resource'):type;
       const values=await itemEditor({existing:{...existing,...(type.startsWith('weapon-')?{weaponKind:type.slice(7)}:{})},type:kind,skills:Object.entries(o.skills).map(([k])=>[k,o.skillLabels[k]||k]),parts:Object.entries(t.body).map(([k,p])=>[k,p.label||k]),ammunition:o.ammunition,magazines:o.inventory.magazines});if(!values)return;
-      await mutate(tokenId,t=>saveInventoryEntry(t,existing?{type,id}:null,values,existing?.id||newId()),true);
+      const entryId=existing?.id||newId(),entryType=values.kind==='weapon'?'weapon-'+values.weaponKind:['ammo','magazine'].includes(values.kind)?values.kind:'item';let blueprint;
+      await mutate(tokenId,t=>{saveInventoryEntry(t,existing?{type,id}:null,values,entryId);blueprint=captureBlueprint(sanitize(t),entryType,entryId);},true);
+      try{await putBlueprints([blueprint]);}catch(e){throw new Error('Item saved on character; campaign pool was not updated: '+e.message);}
+    } else if(action==='open-item-pool') {
+      await requirePoolGM();refreshPool(await OBR.room.getMetadata());await scanPool();
+      poolDialog=showItemPool({getCatalog:()=>catalog,character:token.name||'Character',
+        onGive:async entryId=>{
+          const entry=catalog.entries.find(e=>e.id===entryId);if(!entry)throw new Error('Item definition no longer exists.');
+          const value=await formDialog('Give '+entry.blueprint.values.name,[{name:'quantity',label:'Quantity',type:'number',min:1,max:entry.blueprint.type==='ammo'?999999:entry.blueprint.type.startsWith('weapon-')?20:1000,value:1}]);if(!value)return false;
+          const copyId=newId();await mutate(tokenId,t=>copyBlueprint(t,entry.blueprint,Number(value.quantity),copyId),true);return true;
+        },
+        onDelete:async entryId=>{if(!await formDialog('Remove from campaign pool?',[],{danger:true,message:'Existing items on characters are kept.'}))return false;await requirePoolGM();await OBR.room.setMetadata({[ITEM_POOL_PREFIX+entryId]:{deleted:true}});refreshPool(await OBR.room.getMetadata());return true;},
+        onExport:async()=>{await requirePoolGM();download('odyssey-item-pool.json',JSON.stringify(exportPool(catalog.entries),null,2));},
+        onImport:()=>new Promise((resolve,reject)=>{
+          const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.addEventListener('cancel',()=>resolve(false));
+          input.onchange=async()=>{try{const file=input.files?.[0];if(!file){resolve(false);return;}if(file.size>4*1024*1024)throw new Error('Item pool JSON must be under 4 MB.');await requirePoolGM();const blueprints=parsePoolJSON(JSON.parse(await file.text())).map(raw=>{const t=sanitize({}),id=newId();copyBlueprint(t,raw,1,id);return captureBlueprint(sanitize(t),raw.type,id);});await putBlueprints(blueprints);resolve(true);}catch(e){reject(e);}};input.click();
+        }),
+      });await poolDialog.closed;poolDialog=null;
     } else if(action==='delete-entry') {
       check(tokenId,true);if(!await formDialog('Remove item?',[],{danger:true,message:'Remove this item from this token?'}))return;
       await mutate(tokenId,t=>deleteInventoryEntry(t,node.dataset.entryType,id),true);
@@ -152,5 +200,5 @@ export function installCharacterTools(host) {
   const reload=()=>{try {library=readLibrary(window.localStorage,sanitize);storageError='';render();}catch(e){storageError=e.message;render();}};
   window.addEventListener('storage',event=>{if(event.key===LIBRARY_STORAGE_KEY)reload();});
   const disabledWhileBusy=html=>busy?html.replaceAll('<button ', '<button disabled ').replaceAll('<select ', '<select disabled ').replaceAll('<input ', '<input disabled '):html;
-  return {isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>getRole()!=='GM'?'':disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
+  return {syncPool:schedulePoolScan,isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>getRole()!=='GM'?'':disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
 }

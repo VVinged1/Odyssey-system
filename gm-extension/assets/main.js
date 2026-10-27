@@ -624,11 +624,8 @@ function setCombinedPartHp(tracker, partName, value) {
   part.current = goal;
 }
 
-// ui/characterView.js
-var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-
 // inventory.js
-var LIMIT = 200;
+var LIMIT = 2e3;
 var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
 var text = (v, max = 120) => String(v ?? "").trim().slice(0, max);
 var kinds = /* @__PURE__ */ new Set(["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"]);
@@ -657,6 +654,12 @@ function normalizeInventory(raw, weapons = []) {
     equippedPart: text(r.equippedPart, 40),
     previousArmor: int(r.previousArmor, 999)
   }));
+  for (const item of [...items]) if (item.equippedPart && ["armor", "shield", "implant"].includes(item.kind) && item.quantity > 1) {
+    let id = item.id.slice(0, 90) + "-reserve", suffix = 1;
+    while (items.some((i) => i.id === id)) id = item.id.slice(0, 90) + "-reserve-" + suffix++;
+    items.push({ ...structuredClone(item), id, quantity: item.quantity - 1, equippedPart: "", previousArmor: 0, legacyEquipment: false });
+    item.quantity = 1;
+  }
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`),
     name: text(r.name) || "Magazine",
@@ -688,8 +691,11 @@ function normalizeInventory(raw, weapons = []) {
     assigned.add(id);
     Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
   }
-  return { version: 4, items, magazines, armorHp: Object.fromEntries(Object.entries(raw?.armorHp || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), { max: int(v?.max, 99999), remaining: int(v?.remaining, 99999) }])), baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
+  return { version: 5, items, magazines, armorHp: Object.fromEntries(Object.entries(raw?.armorHp || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), { max: int(v?.max, 99999), remaining: int(v?.remaining, 99999) }])), baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
 }
+
+// ui/characterView.js
+var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 // node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
 var __awaiter = function(thisArg, _arguments, P, generator) {

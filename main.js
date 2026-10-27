@@ -629,6 +629,7 @@ async function pushDebugEntry(title, body, kind = "info") {
   const nextEntries = mergeDebugEntries([entry], metadata?.[DEBUG_LOG_KEY], debugEntries);
   debugEntries = nextEntries;
   renderDebugConsole();
+  characterTools?.syncPool();
   pendingLocalDebugEntryIds.add(entry.id);
   await OBR.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,

@@ -1,3 +1,4 @@
+import {magazineCompatible} from '../inventory.js';
 import { ARMOR_TRAINING, equipmentFits } from '../characterRules.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export {esc};
@@ -16,7 +17,7 @@ export function effectChips(o,gm) {
 export function inventoryView(tracker,gm) {
   const o=tracker.odyssey,inv=o.inventory;
   const edit=(type,id)=>gm?`<button type="button" class="cp-pencil" data-od-action="edit-entry" data-entry-type="${type}" data-id="${esc(id)}" aria-label="Edit item">✎</button><button type="button" class="danger cp-pencil" data-od-action="delete-entry" data-entry-type="${type}" data-id="${esc(id)}" aria-label="Remove item">×</button>`:'';
-  const items=inv.items.map(i=>{
+  const renderItem=i=>{
     const equipment=['armor','shield','implant'].includes(i.kind),broken=i.kind!=='implant'&&i.criticalMax>0&&i.criticalDamage>=i.criticalMax;
     const usable=['consumable','medical'].includes(i.kind),subtype=i.kind==='medical'?'medkit':i.subtype;
     let controls='';
@@ -31,21 +32,23 @@ export function inventoryView(tracker,gm) {
     }else if(usable)controls='<button type="button" data-od-action="use-item" data-id="'+esc(i.id)+'" '+(!i.quantity||subtype==='grenade'?'disabled':'')+'>'+(subtype==='grenade'?'Grenade · placeholder':'Use…')+'</button>';
     return '<article class="cp-card"><div class="cp-row"><b>'+esc(i.name)+'</b><span class="cp-pill">'+esc(usable?subtype:i.kind)+'</span><span class="cp-pill">×'+i.quantity+'</span>'+(i.armor?'<span class="cp-pill">Armor '+i.armor+'</span>':'')+(i.kind==='implant'&&i.criticalMax?'<span class="cp-pill">Body HP +'+i.criticalMax+'</span>':i.criticalMax?'<span class="cp-pill '+(broken?'bad':'')+'">Durability '+(i.criticalMax-i.criticalDamage)+'/'+i.criticalMax+'</span>':'')+edit('item',i.id)+'</div>'+(i.description?'<p class="cp-muted cp-description">'+esc(i.description)+'</p>':'')+(bonusText(i.bonuses)?'<p class="cp-muted">'+esc(bonusText(i.bonuses))+'</p>':'')+'<div class="cp-row">'+controls+'</div></article>';
 
-  }).join('');
+  };
+  const equippedItems=inv.items.filter(i=>i.equippedPart).map(renderItem).join('');
+  const items=inv.items.filter(i=>!i.equippedPart).map(renderItem).join('');
   const ammo=o.ammunition.map(a=>`<article class="cp-card cp-row"><b>${esc(a.name)}</b><span class="cp-pill">Ammo ×${a.quantity}</span><span class="cp-muted">DMG ${a.damage} · AP ${a.penetration}</span>${edit('ammo',a.id)}</article>`).join('');
   const mags=inv.magazines.map(m=>{const w=o.weapons.ranged.find(w=>w.magazineId===m.id),a=o.ammunition.find(a=>a.id===m.loadedAmmoId);return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">Magazine ${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name||'Empty')}${w?' · '+esc(w.name):''}</span>${gm?`<button type="button" class="secondary" data-od-action="set-mag-rounds" data-id="${esc(m.id)}">GM · Set rounds…</button>`:''}${edit('magazine',m.id)}</div>${gm&&!w?`<div class="cp-row"><select aria-label="Magazine ammunition" data-mag-ammo="${esc(m.id)}">${o.ammunition.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} (${a.quantity})</option>`).join('')}</select><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button></div>`:''}</article>`;}).join('');
   const weapons=['melee','ranged'].flatMap(kind=>o.weapons[kind].map((w,index)=>{
     let controls='';
     if(gm&&kind==='ranged') {
       if(w.acceptsMagazines!==false) {
-        const compatible=inv.magazines.filter(m=>m.id===w.magazineId||(!o.weapons.ranged.some(x=>x.magazineId===m.id)&&(Array.isArray(w.acceptedMagazineIds)?w.acceptedMagazineIds.includes(m.id):m.capacity===w.capacity&&(!m.loaded||w.ammoIds.includes(m.loadedAmmoId)))));
+        const compatible=inv.magazines.filter(m=>m.id===w.magazineId||(!o.weapons.ranged.some(x=>x.magazineId===m.id)&&magazineCompatible(o,w,m)));
         controls='<div class="cp-row"><label>Magazine<select data-weapon-mag="'+index+'"><option value="">Detached</option>'+compatible.map(m=>'<option value="'+esc(m.id)+'" '+(m.id===w.magazineId?'selected':'')+'>'+esc(m.name)+' · '+m.loaded+'/'+m.capacity+'</option>').join('')+'</select></label><button type="button" data-od-action="mount-mag" data-index="'+index+'">Apply magazine</button></div>';
       } else controls='<div class="cp-row"><label>Ammo<select data-reload-kind="'+index+'">'+o.ammunition.filter(a=>w.ammoIds.includes(a.id)).map(a=>'<option value="'+esc(a.id)+'" '+(a.id===w.loadedAmmoId?'selected':'')+'>'+esc(a.name)+' ('+a.quantity+')</option>').join('')+'</select></label><button type="button" data-od-action="reload-weapon" data-index="'+index+'">Reload built-in magazine</button></div>';
     }
     return '<article class="cp-card"><div class="cp-row"><b>'+esc(w.name)+'</b><span class="cp-pill">'+kind+'</span><span class="cp-muted">ACC '+w.accuracy+(kind==='melee'?' · DMG '+w.damage:' · '+(w.acceptsMagazines===false?'Built-in ':'Magazine ')+w.loaded+'/'+w.capacity)+'</span>'+edit('weapon-'+kind,w.id||String(index))+'</div>'+controls+'</article>';
   }));
   const group=(label,html)=>html?`<div class="cp-section-title">${label}</div><div class="cp-list">${html}</div>`:'';
-  return `<div class="cp-screen">${gm?'<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button></div>':''}${group('Items',items)}${group('Weapons',weapons.join(''))}${group('Ammunition',ammo)}${group('Magazines',mags)}${!items&&!ammo&&!mags&&!weapons.length?'<p class="cp-muted">Inventory is empty.</p>':''}</div>`;
+  return `<div class="cp-screen">${gm?'<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button><button type="button" data-od-action="open-item-pool">Campaign item pool</button></div>':''}${group('Equipped',equippedItems)}${group('Items',items)}${group('Weapons',weapons.join(''))}${group('Ammunition',ammo)}${group('Magazines',mags)}${!equippedItems&&!items&&!ammo&&!mags&&!weapons.length?'<p class="cp-muted">Inventory is empty.</p>':''}</div>`;
 }
 
 export function templatesView(library, gm) {

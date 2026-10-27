@@ -29,3 +29,15 @@ Players see only armor training skills at level one. Equipment slot checkboxes l
 Armor durability is included in body-part HP/Max: maximum durability increases Max, remaining durability increases HP. Damage is retained on the armor when removed and restored to the display when re-equipped. Critical hits consume armor HP first; medkits heal only body HP and repair kits heal only armor HP. Manual HP edits and bridge HP deltas use the same pool. Existing V3 tokens migrate without repeatedly adding durability.
 
 Validation: ammunition suite, 23 integration checks and browser tests, including 100 implants on one limb, armor slot conflicts, migration, template health, healing/repair separation, player permissions and combined HP display.
+
+## 1.7.0
+
+The GM Campaign item pool lives in Owlbear room metadata and persists across scenes and characters. Creating/editing items automatically saves reusable definitions; opening existing scenes also captures their items. Give copies from Items → Campaign item pool. Copies are unequipped and undamaged, and physical magazines are empty. Required ammunition definitions and compatible empty magazines are remapped to the destination when missing. Skill bonuses bind to destination skill labels. JSON import/export moves catalog definitions between rooms.
+
+Catalog entries use independent SHA-256 metadata keys so different definitions from concurrent GMs do not overwrite each other. Removing a definition leaves a tombstone, preventing scene scans from immediately restoring it; explicit creation or import can restore it.
+
+Equipping one unit from a gear stack separates that unit from the spare quantity, preserving its individual damage and bonuses. Creating multiple magazines creates distinct IDs and independent round counts. Numeric attack fields are 72px wide in character and GM attack cards.
+
+Validation: ammunition suite, 23 character integration checks, 7 item-pool/instance checks, and browser scenarios for scene changes, new-character issuance, JSON catalog restoration, independent quantities and compact field widths.
+
+Magazine compatibility follows the selected magazine design (name and capacity), so all identical physical copies fit the weapon while retaining separate IDs and round counts.

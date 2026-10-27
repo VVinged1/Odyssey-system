@@ -9,6 +9,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
   const values={...existing,kind:type,acceptsMagazines:existing.acceptsMagazines!==false};
   values.slots??=[existing.slot||'any'];
   values.acceptedMagazineIds??=existing.id?magazines.filter(m=>m.id===existing.magazineId||(m.capacity===existing.capacity&&(!m.loaded||(existing.ammoIds||[]).includes(m.loadedAmmoId)))).map(m=>m.id):[];
+  const magazineChoices=[...new Map(magazines.map(m=>[JSON.stringify([m.name,m.capacity]),m])).values()];
   const skillChoices=[...skills];
   for(const key of Object.keys(existing.bonuses?.skills||{}))if(!skillChoices.some(([k])=>k===key))skillChoices.push([key,key]);
   dialog.innerHTML=`<form><h2>${existing.id?'Edit item':'New item'}</h2>${select('kind','Type',ITEM_TYPES,type)}${field('name','Name',existing.name||'')}${field('quantity','Quantity / ammo reserve',existing.quantity??1,'number',999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description||'')}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
@@ -47,7 +48,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
       html+=select('weaponKind','Weapon type',[['melee','Melee'],['ranged','Ranged']],values.weaponKind||'melee')+field('accuracy','Accuracy',values.accuracy??0,'number');
       if(values.weaponKind==='ranged') {
         html+=checkbox('acceptsMagazines','Accepts detachable magazines',values.acceptsMagazines);
-        if(values.acceptsMagazines)html+='<fieldset><legend>Compatible magazines</legend>'+magazines.map(m=>checkbox('magazineCompatible',m.name+' · '+m.capacity+' rounds',values.acceptedMagazineIds.includes(m.id)).replace('name="magazineCompatible"','name="magazineCompatible" value="'+esc(m.id)+'"')).join('')+(magazines.length?'':'<p class="cp-muted">Create a magazine in Items first.</p>')+'</fieldset>';
+        if(values.acceptsMagazines)html+='<fieldset><legend>Compatible magazines</legend>'+magazineChoices.map(m=>checkbox('magazineCompatible',m.name+' · '+m.capacity+' rounds',values.acceptedMagazineIds.some(id=>magazines.some(reference=>reference.id===id&&reference.name===m.name&&reference.capacity===m.capacity))).replace('name="magazineCompatible"','name="magazineCompatible" value="'+esc(m.id)+'"')).join('')+(magazines.length?'':'<p class="cp-muted">Create a magazine in Items first.</p>')+'</fieldset>';
         else html+=field('capacity','Built-in magazine capacity',values.capacity||6,'number')+field('loaded','Loaded rounds · GM correction',values.loaded||0,'number')+select('loadedAmmoId','Loaded ammunition',[['','Empty'],...ammunition.map(a=>[a.id,a.name])],values.loadedAmmoId||'')+'<fieldset><legend>Compatible ammunition</legend>'+ammunition.map(a=>checkbox('ammoCompatible',a.name,(values.ammoIds||[]).includes(a.id)).replace('name="ammoCompatible"','name="ammoCompatible" value="'+esc(a.id)+'"')).join('')+'</fieldset>';
       }
       else html+=field('damage','Damage',values.damage??0,'number');
@@ -60,7 +61,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     host.innerHTML=html;
     // Bonus inputs accept signed modifiers.
     for(const input of host.querySelectorAll('[name^="attr:"],[name^="skill:"]'))input.min='-999';
-    form.elements.quantity.closest('label').hidden=['magazine','weapon'].includes(kind);
+    form.elements.quantity.closest('label').hidden=kind==='weapon'||(kind==='magazine'&&!!existing.id);
   }
   form.addEventListener('change',e=>{if(['kind','subtype','weaponKind','acceptsMagazines'].includes(e.target.name)){collect();render();}});
   form.addEventListener('click',e=>{if(e.target.closest('[data-add-bonus-skill]')) {

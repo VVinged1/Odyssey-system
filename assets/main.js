@@ -669,6 +669,312 @@ function useItemOnTracker(target, item, partName, effectId) {
   throw new Error("This item cannot be used.");
 }
 
+// inventory.js
+var LIMIT = 2e3;
+var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+var text = (v, max = 120) => String(v ?? "").trim().slice(0, max);
+var kinds = /* @__PURE__ */ new Set(["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"]);
+function newId() {
+  return globalThis.crypto.randomUUID();
+}
+function rows(raw, map) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
+}
+function normalizeInventory(raw, weapons = []) {
+  const items = rows(raw?.items, (r, i) => ({
+    id: text(r.id || `legacy-item-${i}`),
+    name: text(r.name) || "Item",
+    kind: kinds.has(r.kind) ? r.kind : "item",
+    quantity: int(r.quantity ?? 1),
+    description: text(r.description, 2e3),
+    armor: int(r.armor, 999),
+    subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
+    healCritical: int(r.healCritical ?? 1, 999),
+    slots: [...new Set((Array.isArray(r.slots) ? r.slots : [r.slot || "any"]).map((s) => text(s, 40)).filter(Boolean))].slice(0, 100),
+    slot: text(r.slot || "any", 40),
+    criticalMax: int(r.criticalMax, 999),
+    criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
+    playerRemovable: r.playerRemovable === true,
+    bonuses: normalizeBonuses(r.bonuses),
+    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
+    legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
+    equippedPart: text(r.equippedPart, 40),
+    previousArmor: int(r.previousArmor, 999)
+  }));
+  for (const item of [...items]) if (item.equippedPart && ["armor", "shield", "implant"].includes(item.kind) && item.quantity > 1) {
+    let id = item.id.slice(0, 90) + "-reserve", suffix = 1;
+    while (items.some((i) => i.id === id)) id = item.id.slice(0, 90) + "-reserve-" + suffix++;
+    items.push({ ...structuredClone(item), id, quantity: item.quantity - 1, equippedPart: "", previousArmor: 0, legacyEquipment: false });
+    item.quantity = 1;
+  }
+  const magazines = rows(raw?.magazines, (r, i) => ({
+    id: text(r.id || `legacy-magazine-${i}`),
+    name: text(r.name) || "Magazine",
+    capacity: int(r.capacity, 999),
+    loadedAmmoId: text(r.loadedAmmoId),
+    loaded: int(r.loaded, int(r.capacity, 999))
+  }));
+  const assigned = /* @__PURE__ */ new Set();
+  for (const [i, weapon] of weapons.entries()) {
+    if (weapon.acceptsMagazines === false) {
+      weapon.magazineId = "";
+      continue;
+    }
+    const requested = text(weapon.magazineId);
+    let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
+    if (!id) {
+      weapon.magazineId = "";
+      weapon.loaded = 0;
+      weapon.loadedAmmoId = "";
+      continue;
+    }
+    if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
+    let mag = magazines.find((m) => m.id === id);
+    if (!mag) {
+      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
+      magazines.push(mag);
+    }
+    weapon.magazineId = id;
+    assigned.add(id);
+    Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
+  }
+  return { version: 5, items, magazines, armorHp: Object.fromEntries(Object.entries(raw?.armorHp || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), { max: int(v?.max, 99999), remaining: int(v?.remaining, 99999) }])), baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
+}
+function magazineWeapon(odyssey, id) {
+  return odyssey.weapons.ranged.find((w) => w.magazineId === id);
+}
+function magazineCompatible(odyssey, weapon, magazine) {
+  if (weapon.acceptsMagazines === false) return false;
+  if (!Array.isArray(weapon.acceptedMagazineIds)) return magazine.capacity === weapon.capacity && (!magazine.loaded || weapon.ammoIds.includes(magazine.loadedAmmoId));
+  return weapon.acceptedMagazineIds.some((id) => id === magazine.id || odyssey.inventory.magazines.some((reference) => reference.id === id && reference.name === magazine.name && reference.capacity === magazine.capacity));
+}
+function swapMagazine(odyssey, weaponIndex, magazineId) {
+  const weapon = odyssey.weapons.ranged[weaponIndex];
+  if (!weapon) throw new Error("Weapon no longer exists.");
+  if (weapon.acceptsMagazines === false) throw new Error("This weapon has a built-in magazine.");
+  const current2 = odyssey.inventory.magazines.find((m) => m.id === weapon.magazineId);
+  if (current2) Object.assign(current2, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
+  const next = magazineId ? odyssey.inventory.magazines.find((m) => m.id === magazineId) : null;
+  if (magazineId && !next) throw new Error("Magazine no longer exists.");
+  if (next && magazineWeapon(odyssey, next.id) && weapon.magazineId !== next.id) throw new Error("Magazine is already mounted.");
+  const selectedMagazines = Array.isArray(weapon.acceptedMagazineIds);
+  if (next && selectedMagazines && !magazineCompatible(odyssey, weapon, next)) throw new Error("This magazine is incompatible with the weapon.");
+  if (next && !selectedMagazines && next.capacity !== weapon.capacity) throw new Error("Magazine capacity must match this weapon.");
+  if (next?.loaded && !selectedMagazines && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error("Magazine ammunition is incompatible.");
+  if (selectedMagazines) {
+    weapon.capacity = next?.capacity || 0;
+    weapon.ammoIds = next?.loadedAmmoId ? [next.loadedAmmoId] : [];
+  }
+  weapon.magazineId = next?.id || "";
+  weapon.loaded = next?.loaded || 0;
+  weapon.loadedAmmoId = next?.loadedAmmoId || "";
+}
+function fillMagazine(odyssey, id, ammoId) {
+  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
+  const ammo = odyssey.ammunition.find((a) => a.id === ammoId);
+  if (!mag || !ammo) throw new Error("Choose a magazine and ammunition.");
+  if (magazineWeapon(odyssey, id)) throw new Error("Detach the magazine before filling it, or use weapon reload.");
+  if (mag.loaded && mag.loadedAmmoId !== ammoId) throw new Error("Empty the magazine before changing ammunition.");
+  const count = Math.min(mag.capacity - mag.loaded, ammo.quantity);
+  if (count < 1) throw new Error("Magazine is full or reserve is empty.");
+  mag.loadedAmmoId = ammoId;
+  mag.loaded += count;
+  ammo.quantity -= count;
+}
+function setMagazineRounds(odyssey, id, rounds, ammoId) {
+  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
+  if (!mag) throw new Error("Magazine no longer exists.");
+  if (!Number.isInteger(rounds) || rounds < 0 || rounds > mag.capacity) {
+    throw new Error(`Rounds must be a whole number from 0 to ${mag.capacity}.`);
+  }
+  const selectedAmmoId = String(ammoId ?? mag.loadedAmmoId ?? "");
+  const ammo = odyssey.ammunition.find((a) => a.id === selectedAmmoId);
+  const weapon = magazineWeapon(odyssey, id);
+  if ((rounds > 0 || selectedAmmoId) && !ammo) throw new Error("Choose a valid ammunition type.");
+  if (weapon && !Array.isArray(weapon.acceptedMagazineIds) && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
+    throw new Error("This ammunition is incompatible with the mounted weapon.");
+  }
+  mag.loaded = rounds;
+  mag.loadedAmmoId = selectedAmmoId;
+  if (weapon) {
+    if (Array.isArray(weapon.acceptedMagazineIds)) weapon.ammoIds = selectedAmmoId ? [selectedAmmoId] : [];
+    weapon.loaded = rounds;
+    weapon.loadedAmmoId = selectedAmmoId;
+  }
+}
+function emptyMagazine(odyssey, id) {
+  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
+  if (!mag) throw new Error("Magazine no longer exists.");
+  if (magazineWeapon(odyssey, id)) throw new Error("Detach the magazine first.");
+  const ammo = odyssey.ammunition.find((a) => a.id === mag.loadedAmmoId);
+  if (mag.loaded && !ammo) throw new Error("The loaded ammunition is missing.");
+  if (ammo && ammo.quantity + mag.loaded > 999999) throw new Error("Ammo reserve is full.");
+  if (ammo) ammo.quantity += mag.loaded;
+  mag.loaded = 0;
+  mag.loadedAmmoId = "";
+}
+function equipItem(tracker, id, partName, gm = true) {
+  var _a;
+  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
+  if (!item || !["armor", "shield", "implant"].includes(item.kind)) throw new Error("Choose equipment.");
+  if (item.kind === "implant" && !gm && !item.playerRemovable) throw new Error("Only the GM can equip this implant.");
+  if (item.quantity < 1 || item.equippedPart) throw new Error("Item is unavailable or already equipped.");
+  const part = tracker.body[partName];
+  if (!part) throw new Error("Body part no longer exists.");
+  if (!equipmentFits(item, partName, part)) throw new Error("This item does not fit the selected slot.");
+  if (item.kind !== "implant" && tracker.odyssey.inventory.items.some((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName)) throw new Error("Armor is already equipped on this part.");
+  if (item.quantity > 1) {
+    if (tracker.odyssey.inventory.items.length >= 1e3) throw new Error("Inventory is full.");
+    tracker.odyssey.inventory.items.push({ ...structuredClone(item), id: newId(), quantity: item.quantity - 1, equippedPart: "", previousArmor: 0, legacyEquipment: false });
+    item.quantity = 1;
+  }
+  (_a = tracker.odyssey.inventory).baseArmor ?? (_a.baseArmor = {});
+  if (!Object.hasOwn(tracker.odyssey.inventory.baseArmor, partName)) tracker.odyssey.inventory.baseArmor[partName] = part.armor;
+  item.equippedPart = partName;
+  item.legacyEquipment = false;
+  reconcileEquipment(tracker);
+}
+function unequipItem(tracker, id, gm = true) {
+  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
+  if (!item) throw new Error("Item no longer exists.");
+  if (item.kind === "implant" && !gm && !item.playerRemovable) throw new Error("Only the GM can remove this implant.");
+  const part = tracker.body[item.equippedPart], inv = tracker.odyssey.inventory;
+  if (part && Object.hasOwn(inv.baseArmor || {}, item.equippedPart)) {
+    const expected = inv.baseArmor[item.equippedPart] + inv.items.filter((i) => i.equippedPart === item.equippedPart && ["armor", "shield", "implant"].includes(i.kind) && i.quantity > 0 && (i.kind === "implant" || !i.criticalMax || i.criticalDamage < i.criticalMax)).reduce((sum, i) => sum + i.armor, 0);
+    if (part.armor !== expected) inv.baseArmor[item.equippedPart] = part.armor;
+  }
+  item.equippedPart = "";
+  reconcileEquipment(tracker);
+}
+function consumeItem(tracker, id) {
+  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
+  if (!item || !["consumable", "medical", "resource"].includes(item.kind) || item.quantity < 1) throw new Error("No usable item available.");
+  item.quantity -= 1;
+}
+function findInventoryEntry(tracker, type, id) {
+  const o = tracker.odyssey;
+  if (type === "ammo") return o.ammunition.find((a) => a.id === id);
+  if (type === "magazine") return o.inventory.magazines.find((m) => m.id === id);
+  if (type?.startsWith("weapon-")) return o.weapons[type.slice(7)]?.find((w, index) => (w.id || String(index)) === id);
+  return o.inventory.items.find((i) => i.id === id);
+}
+function deleteInventoryEntry(tracker, type, id) {
+  const o = tracker.odyssey;
+  if (type === "ammo") {
+    if (o.inventory.magazines.some((m) => m.loadedAmmoId === id && m.loaded) || o.weapons.ranged.some((w) => w.acceptsMagazines === false && w.loadedAmmoId === id && w.loaded)) throw new Error("Empty all magazines using this ammo first.");
+    o.ammunition = o.ammunition.filter((a) => a.id !== id);
+    for (const w of o.weapons.ranged) w.ammoIds = w.ammoIds.filter((a) => a !== id);
+    return;
+  }
+  if (type === "magazine") {
+    const removed = o.inventory.magazines.find((m) => m.id === id), replacement = removed && o.inventory.magazines.find((m) => m.id !== id && m.name === removed.name && m.capacity === removed.capacity);
+    const index = o.weapons.ranged.findIndex((w) => w.magazineId === id);
+    if (index >= 0) swapMagazine(o, index, "");
+    emptyMagazine(o, id);
+    o.inventory.magazines = o.inventory.magazines.filter((m) => m.id !== id);
+    for (const w of o.weapons.ranged) if (w.acceptedMagazineIds) w.acceptedMagazineIds = [...new Set(w.acceptedMagazineIds.flatMap((m) => m === id ? replacement ? [replacement.id] : [] : [m]))];
+    return;
+  }
+  if (type?.startsWith("weapon-")) {
+    const kind = type.slice(7), index = o.weapons[kind].findIndex((w, j) => (w.id || String(j)) === id);
+    if (index < 0) throw new Error("Weapon no longer exists.");
+    if (kind === "ranged") {
+      const w = o.weapons.ranged[index];
+      if (w.acceptsMagazines === false && w.loaded) {
+        const a = o.ammunition.find((a2) => a2.id === w.loadedAmmoId);
+        if (!a || a.quantity + w.loaded > 999999) throw new Error("Cannot return loaded ammunition to reserve.");
+        a.quantity += w.loaded;
+      } else if (w.magazineId) swapMagazine(o, index, "");
+    }
+    o.weapons[kind].splice(index, 1);
+    return;
+  }
+  const item = o.inventory.items.find((i) => i.id === id);
+  if (!item) throw new Error("Item no longer exists.");
+  if (item.equippedPart) unequipItem(tracker, id, true);
+  o.inventory.items = o.inventory.items.filter((i) => i.id !== id);
+}
+function saveInventoryEntry(tracker, origin, values, id) {
+  const o = tracker.odyssey, existing = origin ? findInventoryEntry(tracker, origin.type, origin.id) : null;
+  if (origin && !existing) throw new Error("Item no longer exists.");
+  const kind = values.kind, weaponKind = values.weaponKind === "ranged" ? "ranged" : "melee";
+  const dest = kind === "weapon" ? "weapon-" + weaponKind : kind === "ammo" ? "ammo" : kind === "magazine" ? "magazine" : "item";
+  if (origin && origin.type !== dest) deleteInventoryEntry(tracker, origin.type, origin.id);
+  const same = origin?.type === dest ? existing : null;
+  if (kind === "ammo") {
+    const row2 = { id, name: values.name, damage: Number(values.damage) || 0, penetration: Number(values.penetration) || 0, quantity: Number(values.quantity) || 0 };
+    if (same) Object.assign(same, row2);
+    else {
+      if (o.ammunition.length >= 200) throw new Error("Too many ammo types.");
+      o.ammunition.push(row2);
+    }
+    return;
+  }
+  if (kind === "magazine") {
+    const capacity = Number(values.capacity), loaded = Number(values.loaded);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 999 || !Number.isInteger(loaded) || loaded < 0 || loaded > capacity) throw new Error("Invalid magazine capacity or rounds.");
+    const mounted = same && magazineWeapon(o, same.id);
+    if (mounted && capacity !== mounted.capacity) throw new Error("Detach the magazine before changing its capacity.");
+    if (same) {
+      same.capacity = capacity;
+      same.name = values.name;
+      setMagazineRounds(o, same.id, loaded, values.loadedAmmoId);
+    } else {
+      const quantity = Number(values.quantity ?? 1);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1e3 || o.inventory.magazines.length + quantity > 1e3) throw new Error("Invalid magazine quantity or inventory is full.");
+      for (let i = 0; i < quantity; i++) {
+        const magazineId = i ? id + "-copy-" + i : id;
+        o.inventory.magazines.push({ id: magazineId, name: values.name, capacity, loaded: 0, loadedAmmoId: "" });
+        setMagazineRounds(o, magazineId, loaded, values.loadedAmmoId);
+      }
+    }
+    return;
+  }
+  if (kind === "weapon") {
+    if ([...o.weapons.melee, ...o.weapons.ranged].some((w) => w !== same && w.name === values.name)) throw new Error("A weapon with this name already exists.");
+    const row2 = { id, name: values.name, accuracy: Number(values.accuracy) || 0, damage: Number(values.damage) || 0 };
+    if (weaponKind === "ranged") {
+      const acceptsMagazines = values.acceptsMagazines !== false;
+      if (same && same.acceptsMagazines !== false !== acceptsMagazines && same.loaded > 0) throw new Error("Empty or detach the current magazine before changing magazine type.");
+      if (acceptsMagazines) {
+        const acceptedMagazineIds = [...new Set(values.acceptedMagazineIds || [])];
+        if (acceptedMagazineIds.some((id2) => !o.inventory.magazines.some((m) => m.id === id2))) throw new Error("Selected magazine no longer exists.");
+        if (same?.magazineId && !magazineCompatible(o, { ...same, acceptedMagazineIds }, o.inventory.magazines.find((m) => m.id === same.magazineId))) throw new Error("Detach the current magazine before removing its compatibility.");
+        Object.assign(row2, { acceptsMagazines: true, acceptedMagazineIds, capacity: same?.magazineId ? same.capacity : 0, ammoIds: same?.magazineId ? same.ammoIds || [] : [], loaded: same?.loaded || 0, loadedAmmoId: same?.loadedAmmoId || "", magazineId: same?.magazineId || "" });
+      } else {
+        const capacity = Number(values.capacity), ammoIds = values.ammoIds || [], loaded = Number(values.loaded ?? same?.loaded ?? 0), loadedAmmoId = String(values.loadedAmmoId ?? same?.loadedAmmoId ?? "");
+        if (!Number.isInteger(capacity) || capacity < 1 || capacity > 999 || !Number.isInteger(loaded) || loaded < 0 || loaded > capacity) throw new Error("Invalid built-in magazine capacity or rounds.");
+        if (loaded && (!ammoIds.includes(loadedAmmoId) || !o.ammunition.some((a) => a.id === loadedAmmoId))) throw new Error("Choose compatible ammunition for loaded rounds.");
+        Object.assign(row2, { acceptsMagazines: false, acceptedMagazineIds: [], capacity, ammoIds, loaded, loadedAmmoId: loaded ? loadedAmmoId : "", magazineId: "" });
+      }
+    }
+    if (same) Object.assign(same, row2);
+    else {
+      if (o.weapons[weaponKind].length >= 20) throw new Error("Weapon limit is 20 per type.");
+      o.weapons[weaponKind].push(row2);
+    }
+    return;
+  }
+  if (same?.equippedPart && !["armor", "shield", "implant"].includes(kind)) unequipItem(tracker, id, true);
+  const row = { ...values, id, quantity: Number(values.quantity) || 0, armor: Number(values.armor) || 0, healCritical: Number(values.healCritical) || 0, criticalMax: Number(values.criticalMax) || 0, criticalDamage: Number(values.criticalDamage) || 0, playerRemovable: values.playerRemovable === true, legacyEquipment: false, equippedPart: same?.equippedPart || "", previousArmor: same?.previousArmor || 0 };
+  if (!["armor", "shield", "implant"].includes(kind)) {
+    row.armor = 0;
+    row.criticalMax = 0;
+    row.criticalDamage = 0;
+  }
+  if (kind === "implant") row.criticalDamage = 0;
+  if (row.equippedPart && row.quantity > 1 && o.inventory.items.length >= 1e3) throw new Error("Inventory is full; cannot separate equipped and spare items.");
+  if (row.criticalDamage > row.criticalMax) throw new Error("Critical damage cannot exceed durability.");
+  if (same?.equippedPart && !equipmentFits(row, same.equippedPart, tracker.body[same.equippedPart])) throw new Error("Unequip before changing the equipment slot.");
+  if (same) Object.assign(same, row);
+  else {
+    if (o.inventory.items.length >= 1e3) throw new Error("Inventory limit is 1000 items.");
+    o.inventory.items.push(row);
+  }
+  reconcileEquipment(tracker);
+}
+
 // ui/characterView.js
 var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 var bonusText = (b) => [...Object.entries(b?.attributes || {}), ...Object.entries(b?.skills || {})].map(([k, v]) => `${k} ${v > 0 ? "+" : ""}${v}`).join(" \xB7 ");
@@ -692,7 +998,7 @@ function effectChips(o, gm) {
 function inventoryView(tracker, gm) {
   const o = tracker.odyssey, inv = o.inventory;
   const edit = (type, id) => gm ? `<button type="button" class="cp-pencil" data-od-action="edit-entry" data-entry-type="${type}" data-id="${esc(id)}" aria-label="Edit item">\u270E</button><button type="button" class="danger cp-pencil" data-od-action="delete-entry" data-entry-type="${type}" data-id="${esc(id)}" aria-label="Remove item">\xD7</button>` : "";
-  const items = inv.items.map((i) => {
+  const renderItem = (i) => {
     const equipment = ["armor", "shield", "implant"].includes(i.kind), broken = i.kind !== "implant" && i.criticalMax > 0 && i.criticalDamage >= i.criticalMax;
     const usable = ["consumable", "medical"].includes(i.kind), subtype = i.kind === "medical" ? "medkit" : i.subtype;
     let controls = "";
@@ -706,7 +1012,9 @@ function inventoryView(tracker, gm) {
       }
     } else if (usable) controls = '<button type="button" data-od-action="use-item" data-id="' + esc(i.id) + '" ' + (!i.quantity || subtype === "grenade" ? "disabled" : "") + ">" + (subtype === "grenade" ? "Grenade \xB7 placeholder" : "Use\u2026") + "</button>";
     return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + edit("item", i.id) + "</div>" + (i.description ? '<p class="cp-muted cp-description">' + esc(i.description) + "</p>" : "") + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
-  }).join("");
+  };
+  const equippedItems = inv.items.filter((i) => i.equippedPart).map(renderItem).join("");
+  const items = inv.items.filter((i) => !i.equippedPart).map(renderItem).join("");
   const ammo = o.ammunition.map((a) => `<article class="cp-card cp-row"><b>${esc(a.name)}</b><span class="cp-pill">Ammo \xD7${a.quantity}</span><span class="cp-muted">DMG ${a.damage} \xB7 AP ${a.penetration}</span>${edit("ammo", a.id)}</article>`).join("");
   const mags = inv.magazines.map((m) => {
     const w = o.weapons.ranged.find((w2) => w2.magazineId === m.id), a = o.ammunition.find((a2) => a2.id === m.loadedAmmoId);
@@ -716,14 +1024,14 @@ function inventoryView(tracker, gm) {
     let controls = "";
     if (gm && kind === "ranged") {
       if (w.acceptsMagazines !== false) {
-        const compatible = inv.magazines.filter((m) => m.id === w.magazineId || !o.weapons.ranged.some((x) => x.magazineId === m.id) && (Array.isArray(w.acceptedMagazineIds) ? w.acceptedMagazineIds.includes(m.id) : m.capacity === w.capacity && (!m.loaded || w.ammoIds.includes(m.loadedAmmoId))));
+        const compatible = inv.magazines.filter((m) => m.id === w.magazineId || !o.weapons.ranged.some((x) => x.magazineId === m.id) && magazineCompatible(o, w, m));
         controls = '<div class="cp-row"><label>Magazine<select data-weapon-mag="' + index + '"><option value="">Detached</option>' + compatible.map((m) => '<option value="' + esc(m.id) + '" ' + (m.id === w.magazineId ? "selected" : "") + ">" + esc(m.name) + " \xB7 " + m.loaded + "/" + m.capacity + "</option>").join("") + '</select></label><button type="button" data-od-action="mount-mag" data-index="' + index + '">Apply magazine</button></div>';
       } else controls = '<div class="cp-row"><label>Ammo<select data-reload-kind="' + index + '">' + o.ammunition.filter((a) => w.ammoIds.includes(a.id)).map((a) => '<option value="' + esc(a.id) + '" ' + (a.id === w.loadedAmmoId ? "selected" : "") + ">" + esc(a.name) + " (" + a.quantity + ")</option>").join("") + '</select></label><button type="button" data-od-action="reload-weapon" data-index="' + index + '">Reload built-in magazine</button></div>';
     }
     return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + kind + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
   }));
   const group = (label, html) => html ? `<div class="cp-section-title">${label}</div><div class="cp-list">${html}</div>` : "";
-  return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button></div>' : ""}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
+  return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button><button type="button" data-od-action="open-item-pool">Campaign item pool</button></div>' : ""}${group("Equipped", equippedItems)}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!equippedItems && !items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
 }
 function templatesView(library, gm) {
   if (!gm) return "";
@@ -733,6 +1041,218 @@ function templatesView(library, gm) {
 // ui/compactHud.js
 function compactHud({ token, tracker, floating, target, targetData, skills, weapons, draft: draft2, parts, ammunition }) {
   return `<section class="od-hud cp-screen"><div class="cp-row"><div><span class="cp-section-title">Character</span><h3>${esc(token.name || "Character")}</h3></div><span class="cp-pill">${Object.entries(tracker.body).filter(([k]) => !["Shield", "Special"].includes(k)).reduce((n2, [, p]) => n2 + p.current, 0)} HP</span><button type="button" data-action="${floating ? "close-character-hud" : "open-character-hud"}" class="secondary">${floating ? "Close HUD" : "Floating HUD"}</button></div><div class="od-hud-grid"><div class="cp-card"><div class="cp-section-title">Weapon & skill</div><label>Weapon<select data-hud-attack-field="weaponName">${weapons}</select></label><label>Skill<select data-hud-attack-field="skill">${skills}</select></label>${ammunition.replaceAll("data-attack-field=", "data-hud-attack-field=")}</div><div class="cp-card"><div class="cp-section-title">Target</div><div class="cp-row"><b>${esc(target?.name || "No target selected")}</b><button type="button" data-action="pick-attack-target">Pick on map</button></div><label>Body zone<select data-hud-attack-field="targetPart">${parts.map(([key, label]) => `<option value="${esc(key)}" ${key === draft2.targetPart ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><p class="cp-muted">${targetData ? "Target selected \xB7 V1 armor, Parry and damage rules" : "Select a visible target to attack."}</p></div><div class="cp-card"><div class="cp-section-title">Action</div><label>Attack bonus<input type="number" value="${Number(draft2.attackBonuses) || 0}" data-hud-attack-field="attackBonuses"></label><label>Attack penalty<input type="number" value="${Number(draft2.attackPenalties) || 0}" data-hud-attack-field="attackPenalties"></label><button type="button" data-action="perform-attack" ${!target ? "disabled" : ""}>Attack</button></div></div><p class="cp-muted" role="status">${esc(tracker.lastRoll?.summary || "No rolls yet.")}</p></section>`;
+}
+
+// itemPool.js
+var ITEM_POOL_PREFIX = "com.codex.body-hp/item-pool/";
+var ITEM_POOL_FORMAT = "odyssey-item-pool";
+var TYPES = /* @__PURE__ */ new Set(["item", "ammo", "magazine", "weapon-melee", "weapon-ranged"]);
+var stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
+var blueprintText = (blueprint) => JSON.stringify(stable(blueprint));
+var ammoDefinition = (a) => ({ name: a.name, damage: a.damage, penetration: a.penetration });
+var sameAmmo = (a, b) => a.name === b.name && a.damage === b.damage && a.penetration === b.penetration;
+var sameMagazine = (a, b) => a.name === b.name && a.capacity === b.capacity;
+function uniqueDefinitions(rows2, project) {
+  return [...new Map(rows2.map((row) => {
+    const value = project(row);
+    return [blueprintText(value), value];
+  })).entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
+}
+function captureBlueprint(tracker, type, id) {
+  const o = tracker.odyssey, entry = findInventoryEntry(tracker, type, id);
+  if (!entry) throw new Error("Item no longer exists.");
+  let values;
+  const dependencies = { ammunition: [], magazines: [] };
+  if (type === "ammo") values = { kind: "ammo", ...ammoDefinition(entry), quantity: 1 };
+  else if (type === "magazine") values = { kind: "magazine", name: entry.name, quantity: 1, capacity: entry.capacity, loaded: 0, loadedAmmoId: "" };
+  else if (type.startsWith("weapon-")) {
+    const kind = type.slice(7);
+    values = { kind: "weapon", weaponKind: kind, name: entry.name, accuracy: entry.accuracy, damage: entry.damage };
+    if (kind === "ranged") {
+      values.acceptsMagazines = entry.acceptsMagazines !== false;
+      values.loaded = 0;
+      values.loadedAmmoId = "";
+      values.magazineId = "";
+      if (values.acceptsMagazines) {
+        let magazines = o.inventory.magazines.filter((m) => m.id === entry.magazineId || magazineCompatible(o, entry, m));
+        if (!magazines.length && entry.capacity) magazines = [{ name: entry.name + " magazine", capacity: entry.capacity }];
+        dependencies.magazines = uniqueDefinitions(magazines, (m) => ({ name: m.name, capacity: m.capacity })).map((m, index) => ({ id: "mag-" + index, ...m }));
+        values.acceptedMagazineIds = dependencies.magazines.map((m) => m.id);
+      } else {
+        dependencies.ammunition = uniqueDefinitions(o.ammunition.filter((a) => entry.ammoIds.includes(a.id)), ammoDefinition).map((a, index) => ({ id: "ammo-" + index, ...a }));
+        values.capacity = entry.capacity;
+        values.ammoIds = dependencies.ammunition.map((a) => a.id);
+      }
+    }
+  } else {
+    values = {};
+    for (const key of ["kind", "name", "description", "armor", "criticalMax", "playerRemovable", "slots", "subtype", "healCritical", "abilities", "bonuses"]) if (entry[key] !== void 0) values[key] = structuredClone(entry[key]);
+    values.quantity = 1;
+    values.criticalDamage = 0;
+    values.slots ?? (values.slots = [entry.slot || "any"]);
+    if (values.bonuses) {
+      const skills = {};
+      for (const [key, value] of Object.entries(values.bonuses.skills || {})) {
+        const label = o.skillLabels[key] || key;
+        skills[label] = (skills[label] || 0) + value;
+      }
+      values.bonuses.skills = skills;
+    }
+    if (values.abilities) values.abilities = values.abilities.map((ability, index) => ({ ...ability, id: "ability-" + index }));
+  }
+  return { format: "odyssey-item-blueprint", version: 1, type, values, dependencies };
+}
+function validateBlueprint(raw) {
+  if (raw?.format !== "odyssey-item-blueprint" || raw.version !== 1 || !TYPES.has(raw.type) || !raw.values || typeof raw.values.name !== "string" || !raw.values.name.trim() || raw.values.name.length > 120) throw new Error("Invalid item pool definition.");
+  if (!["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant", "ammo", "magazine", "weapon"].includes(raw.values.kind)) throw new Error("Invalid item type.");
+  const expected = raw.type.startsWith("weapon-") ? "weapon" : raw.type === "item" ? null : raw.type;
+  if (raw.type === "item" && ["weapon", "ammo", "magazine"].includes(raw.values.kind)) throw new Error("Item type does not match its definition.");
+  if (expected && raw.values.kind !== expected) throw new Error("Item type does not match its definition.");
+  for (const key of ["ammunition", "magazines"]) if (!Array.isArray(raw.dependencies?.[key]) || raw.dependencies[key].length > 200 || raw.dependencies[key].some((d) => !d || typeof d.id !== "string" || typeof d.name !== "string")) throw new Error("Invalid item dependencies.");
+  if (blueprintText(raw).length > 2e5) throw new Error("Item definition is too large.");
+  return structuredClone(raw);
+}
+async function blueprintId(blueprint) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(blueprintText(blueprint)));
+  return [...new Uint8Array(hash)].map((n2) => n2.toString(16).padStart(2, "0")).join("");
+}
+function poolEntries(metadata) {
+  const entries = [];
+  let errors2 = 0;
+  for (const [key, value] of Object.entries(metadata || {})) if (key.startsWith(ITEM_POOL_PREFIX) && value && !value.deleted) {
+    try {
+      entries.push({ id: key.slice(ITEM_POOL_PREFIX.length), blueprint: validateBlueprint(value.blueprint) });
+    } catch {
+      errors2++;
+    }
+  }
+  return { entries: entries.sort((a, b) => a.blueprint.values.name.localeCompare(b.blueprint.values.name)), errors: errors2 };
+}
+function parsePoolJSON(raw) {
+  if (raw?.format !== ITEM_POOL_FORMAT || raw.version !== 1 || !Array.isArray(raw.entries) || raw.entries.length > 2e3) throw new Error("Choose an Odyssey item pool JSON (version 1).");
+  return raw.entries.map(validateBlueprint);
+}
+function exportPool(entries) {
+  return { format: ITEM_POOL_FORMAT, version: 1, entries: entries.map((e) => e.blueprint) };
+}
+function copyBlueprint(tracker, raw, quantity = 1, id = newId()) {
+  const blueprint = validateBlueprint(raw), o = tracker.odyssey, values = structuredClone(blueprint.values), ammoIds = /* @__PURE__ */ new Map(), magazineIds = /* @__PURE__ */ new Map();
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999999) throw new Error("Invalid item quantity.");
+  for (const [index, definition] of blueprint.dependencies.ammunition.entries()) {
+    let ammo = o.ammunition.find((a) => sameAmmo(a, definition));
+    if (!ammo) {
+      if (o.ammunition.length >= 200) throw new Error("Ammunition type limit reached.");
+      ammo = { ...definition, id: id + "-ammo-" + index, quantity: 0 };
+      o.ammunition.push(ammo);
+    }
+    ammoIds.set(definition.id, ammo.id);
+  }
+  for (const [index, definition] of blueprint.dependencies.magazines.entries()) {
+    let matches = o.inventory.magazines.filter((m) => sameMagazine(m, definition));
+    if (!matches.length) {
+      const magazine = { id: id + "-mag-" + index, name: definition.name, capacity: definition.capacity, loaded: 0, loadedAmmoId: "" };
+      if (o.inventory.magazines.length >= 1e3) throw new Error("Magazine inventory is full.");
+      o.inventory.magazines.push(magazine);
+      matches = [magazine];
+    }
+    magazineIds.set(definition.id, matches.map((m) => m.id));
+  }
+  values.equippedPart = "";
+  values.previousArmor = 0;
+  values.legacyEquipment = false;
+  values.criticalDamage = 0;
+  if (blueprint.type.startsWith("weapon-")) values.weaponKind = blueprint.type.slice(7);
+  if (blueprint.type === "magazine" || blueprint.type.startsWith("weapon-")) {
+    values.loaded = 0;
+    values.loadedAmmoId = "";
+    values.magazineId = "";
+  }
+  if (values.ammoIds) values.ammoIds = values.ammoIds.map((key) => ammoIds.get(key)).filter(Boolean);
+  if (values.acceptedMagazineIds) values.acceptedMagazineIds = values.acceptedMagazineIds.flatMap((key) => magazineIds.get(key) || []);
+  if (values.bonuses?.skills) {
+    const skills = {};
+    for (const [label, value] of Object.entries(values.bonuses.skills)) {
+      const key = Object.keys(o.skills).find((key2) => key2.toLowerCase() === label.toLowerCase() || (o.skillLabels[key2] || key2).toLowerCase() === label.toLowerCase()) || label;
+      skills[key] = (skills[key] || 0) + value;
+    }
+    values.bonuses.skills = skills;
+  }
+  if (blueprint.type === "ammo") {
+    const existing = o.ammunition.find((a) => sameAmmo(a, values));
+    if (existing) {
+      if (existing.quantity + quantity > 999999) throw new Error("Ammo reserve is full.");
+      existing.quantity += quantity;
+      return existing.id;
+    }
+  }
+  if (blueprint.type.startsWith("weapon-")) {
+    if (quantity > 20) throw new Error("Weapon limit is 20 per type.");
+    for (let i = 0; i < quantity; i++) {
+      const base = values.name;
+      let name = base, suffix = 2;
+      while ([...o.weapons.melee, ...o.weapons.ranged].some((w) => w.name === name)) name = base + " (" + suffix++ + ")";
+      saveInventoryEntry(tracker, null, { ...values, name, quantity: 1 }, i ? id + "-copy-" + i : id);
+    }
+  } else saveInventoryEntry(tracker, null, { ...values, quantity }, id);
+  return id;
+}
+
+// ui/itemPoolView.js
+function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImport }) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "od-dialog od-pool-dialog";
+  dialog.innerHTML = '<div class="cp-row"><h2>Campaign item pool</h2><button type="button" data-pool-close aria-label="Close item pool">\xD7</button></div><p>Give reusable items to ' + esc(character) + '. The pool is shared across scenes in this Owlbear room. Copied equipment is unequipped; magazines are empty.</p><div class="cp-row"><input type="search" data-pool-search placeholder="Search items" aria-label="Search item pool"><button type="button" data-pool-export>Export item pool</button><button type="button" data-pool-import>Import item pool</button></div><p data-pool-status role="status"></p><div class="cp-list" data-pool-list></div>';
+  document.body.append(dialog);
+  let busy = false;
+  const message = dialog.querySelector("[data-pool-status]");
+  const refresh = () => {
+    const catalog = getCatalog(), search = dialog.querySelector("[data-pool-search]").value.trim().toLowerCase();
+    const entries = catalog.entries.filter((e) => (e.blueprint.values.name + " " + e.blueprint.values.kind).toLowerCase().includes(search));
+    dialog.querySelector("[data-pool-list]").innerHTML = entries.map((e) => {
+      const b = e.blueprint, v = b.values;
+      return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : ""].filter(Boolean).join(" \xB7 ")) + '</span><button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
+    }).join("") || '<p class="cp-muted">No matching items.</p>';
+    if (catalog.errors) message.textContent = "Some catalog entries could not be read. Export a backup before importing changes.";
+  };
+  const run = async (fn) => {
+    if (busy) return;
+    busy = true;
+    refresh();
+    try {
+      const result = await fn();
+      if (result !== false) message.textContent = "Saved.";
+    } catch (e) {
+      message.textContent = e.message;
+    } finally {
+      busy = false;
+      refresh();
+    }
+  };
+  dialog.querySelector("[data-pool-search]").oninput = refresh;
+  dialog.addEventListener("click", (event) => {
+    const node = event.target.closest("button");
+    if (!node) return;
+    if (node.dataset.poolGive) void run(() => onGive(node.dataset.poolGive));
+    if (node.dataset.poolDelete) void run(() => onDelete(node.dataset.poolDelete));
+    if (node.hasAttribute("data-pool-export")) void run(onExport);
+    if (node.hasAttribute("data-pool-import")) void run(onImport);
+  });
+  let finish;
+  const closed = new Promise((resolve) => finish = resolve);
+  const close = () => {
+    if (busy) return;
+    dialog.close();
+    dialog.remove();
+    finish();
+  };
+  dialog.querySelector("[data-pool-close]").onclick = close;
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    close();
+  });
+  refresh();
+  dialog.showModal();
+  return { closed, refresh };
 }
 
 // ui/itemEditor.js
@@ -746,6 +1266,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   const values = { ...existing, kind: type, acceptsMagazines: existing.acceptsMagazines !== false };
   values.slots ?? (values.slots = [existing.slot || "any"]);
   values.acceptedMagazineIds ?? (values.acceptedMagazineIds = existing.id ? magazines.filter((m) => m.id === existing.magazineId || m.capacity === existing.capacity && (!m.loaded || (existing.ammoIds || []).includes(m.loadedAmmoId))).map((m) => m.id) : []);
+  const magazineChoices = [...new Map(magazines.map((m) => [JSON.stringify([m.name, m.capacity]), m])).values()];
   const skillChoices = [...skills];
   for (const key of Object.keys(existing.bonuses?.skills || {})) if (!skillChoices.some(([k]) => k === key)) skillChoices.push([key, key]);
   dialog.innerHTML = `<form><h2>${existing.id ? "Edit item" : "New item"}</h2>${select("kind", "Type", ITEM_TYPES, type)}${field("name", "Name", existing.name || "")}${field("quantity", "Quantity / ammo reserve", existing.quantity ?? 1, "number", 999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description || "")}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
@@ -790,7 +1311,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
       html += select("weaponKind", "Weapon type", [["melee", "Melee"], ["ranged", "Ranged"]], values.weaponKind || "melee") + field("accuracy", "Accuracy", values.accuracy ?? 0, "number");
       if (values.weaponKind === "ranged") {
         html += checkbox("acceptsMagazines", "Accepts detachable magazines", values.acceptsMagazines);
-        if (values.acceptsMagazines) html += "<fieldset><legend>Compatible magazines</legend>" + magazines.map((m) => checkbox("magazineCompatible", m.name + " \xB7 " + m.capacity + " rounds", values.acceptedMagazineIds.includes(m.id)).replace('name="magazineCompatible"', 'name="magazineCompatible" value="' + esc(m.id) + '"')).join("") + (magazines.length ? "" : '<p class="cp-muted">Create a magazine in Items first.</p>') + "</fieldset>";
+        if (values.acceptsMagazines) html += "<fieldset><legend>Compatible magazines</legend>" + magazineChoices.map((m) => checkbox("magazineCompatible", m.name + " \xB7 " + m.capacity + " rounds", values.acceptedMagazineIds.some((id) => magazines.some((reference) => reference.id === id && reference.name === m.name && reference.capacity === m.capacity))).replace('name="magazineCompatible"', 'name="magazineCompatible" value="' + esc(m.id) + '"')).join("") + (magazines.length ? "" : '<p class="cp-muted">Create a magazine in Items first.</p>') + "</fieldset>";
         else html += field("capacity", "Built-in magazine capacity", values.capacity || 6, "number") + field("loaded", "Loaded rounds \xB7 GM correction", values.loaded || 0, "number") + select("loadedAmmoId", "Loaded ammunition", [["", "Empty"], ...ammunition.map((a) => [a.id, a.name])], values.loadedAmmoId || "") + "<fieldset><legend>Compatible ammunition</legend>" + ammunition.map((a) => checkbox("ammoCompatible", a.name, (values.ammoIds || []).includes(a.id)).replace('name="ammoCompatible"', 'name="ammoCompatible" value="' + esc(a.id) + '"')).join("") + "</fieldset>";
       } else html += field("damage", "Damage", values.damage ?? 0, "number");
     }
@@ -801,7 +1322,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     }
     host.innerHTML = html;
     for (const input of host.querySelectorAll('[name^="attr:"],[name^="skill:"]')) input.min = "-999";
-    form.elements.quantity.closest("label").hidden = ["magazine", "weapon"].includes(kind);
+    form.elements.quantity.closest("label").hidden = kind === "weapon" || kind === "magazine" && !!existing.id;
   }
   form.addEventListener("change", (e) => {
     if (["kind", "subtype", "weaponKind", "acceptsMagazines"].includes(e.target.name)) {
@@ -896,290 +1417,6 @@ function skillEditor(o, key) {
     };
     dialog.showModal();
   });
-}
-
-// inventory.js
-var LIMIT = 200;
-var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
-var text = (v, max = 120) => String(v ?? "").trim().slice(0, max);
-var kinds = /* @__PURE__ */ new Set(["item", "consumable", "medical", "tool", "resource", "armor", "shield", "implant"]);
-function newId() {
-  return globalThis.crypto.randomUUID();
-}
-function rows(raw, map) {
-  const seen = /* @__PURE__ */ new Set();
-  return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
-}
-function normalizeInventory(raw, weapons = []) {
-  const items = rows(raw?.items, (r, i) => ({
-    id: text(r.id || `legacy-item-${i}`),
-    name: text(r.name) || "Item",
-    kind: kinds.has(r.kind) ? r.kind : "item",
-    quantity: int(r.quantity ?? 1),
-    description: text(r.description, 2e3),
-    armor: int(r.armor, 999),
-    subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
-    healCritical: int(r.healCritical ?? 1, 999),
-    slots: [...new Set((Array.isArray(r.slots) ? r.slots : [r.slot || "any"]).map((s) => text(s, 40)).filter(Boolean))].slice(0, 100),
-    slot: text(r.slot || "any", 40),
-    criticalMax: int(r.criticalMax, 999),
-    criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
-    playerRemovable: r.playerRemovable === true,
-    bonuses: normalizeBonuses(r.bonuses),
-    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
-    legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
-    equippedPart: text(r.equippedPart, 40),
-    previousArmor: int(r.previousArmor, 999)
-  }));
-  const magazines = rows(raw?.magazines, (r, i) => ({
-    id: text(r.id || `legacy-magazine-${i}`),
-    name: text(r.name) || "Magazine",
-    capacity: int(r.capacity, 999),
-    loadedAmmoId: text(r.loadedAmmoId),
-    loaded: int(r.loaded, int(r.capacity, 999))
-  }));
-  const assigned = /* @__PURE__ */ new Set();
-  for (const [i, weapon] of weapons.entries()) {
-    if (weapon.acceptsMagazines === false) {
-      weapon.magazineId = "";
-      continue;
-    }
-    const requested = text(weapon.magazineId);
-    let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
-    if (!id) {
-      weapon.magazineId = "";
-      weapon.loaded = 0;
-      weapon.loadedAmmoId = "";
-      continue;
-    }
-    if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
-    let mag = magazines.find((m) => m.id === id);
-    if (!mag) {
-      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
-      magazines.push(mag);
-    }
-    weapon.magazineId = id;
-    assigned.add(id);
-    Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
-  }
-  return { version: 4, items, magazines, armorHp: Object.fromEntries(Object.entries(raw?.armorHp || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), { max: int(v?.max, 99999), remaining: int(v?.remaining, 99999) }])), baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
-}
-function magazineWeapon(odyssey, id) {
-  return odyssey.weapons.ranged.find((w) => w.magazineId === id);
-}
-function swapMagazine(odyssey, weaponIndex, magazineId) {
-  const weapon = odyssey.weapons.ranged[weaponIndex];
-  if (!weapon) throw new Error("Weapon no longer exists.");
-  if (weapon.acceptsMagazines === false) throw new Error("This weapon has a built-in magazine.");
-  const current2 = odyssey.inventory.magazines.find((m) => m.id === weapon.magazineId);
-  if (current2) Object.assign(current2, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
-  const next = magazineId ? odyssey.inventory.magazines.find((m) => m.id === magazineId) : null;
-  if (magazineId && !next) throw new Error("Magazine no longer exists.");
-  if (next && magazineWeapon(odyssey, next.id) && weapon.magazineId !== next.id) throw new Error("Magazine is already mounted.");
-  const selectedMagazines = Array.isArray(weapon.acceptedMagazineIds);
-  if (next && selectedMagazines && !weapon.acceptedMagazineIds.includes(next.id)) throw new Error("This magazine is incompatible with the weapon.");
-  if (next && !selectedMagazines && next.capacity !== weapon.capacity) throw new Error("Magazine capacity must match this weapon.");
-  if (next?.loaded && !selectedMagazines && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error("Magazine ammunition is incompatible.");
-  if (selectedMagazines) {
-    weapon.capacity = next?.capacity || 0;
-    weapon.ammoIds = next?.loadedAmmoId ? [next.loadedAmmoId] : [];
-  }
-  weapon.magazineId = next?.id || "";
-  weapon.loaded = next?.loaded || 0;
-  weapon.loadedAmmoId = next?.loadedAmmoId || "";
-}
-function fillMagazine(odyssey, id, ammoId) {
-  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
-  const ammo = odyssey.ammunition.find((a) => a.id === ammoId);
-  if (!mag || !ammo) throw new Error("Choose a magazine and ammunition.");
-  if (magazineWeapon(odyssey, id)) throw new Error("Detach the magazine before filling it, or use weapon reload.");
-  if (mag.loaded && mag.loadedAmmoId !== ammoId) throw new Error("Empty the magazine before changing ammunition.");
-  const count = Math.min(mag.capacity - mag.loaded, ammo.quantity);
-  if (count < 1) throw new Error("Magazine is full or reserve is empty.");
-  mag.loadedAmmoId = ammoId;
-  mag.loaded += count;
-  ammo.quantity -= count;
-}
-function setMagazineRounds(odyssey, id, rounds, ammoId) {
-  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
-  if (!mag) throw new Error("Magazine no longer exists.");
-  if (!Number.isInteger(rounds) || rounds < 0 || rounds > mag.capacity) {
-    throw new Error(`Rounds must be a whole number from 0 to ${mag.capacity}.`);
-  }
-  const selectedAmmoId = String(ammoId ?? mag.loadedAmmoId ?? "");
-  const ammo = odyssey.ammunition.find((a) => a.id === selectedAmmoId);
-  const weapon = magazineWeapon(odyssey, id);
-  if ((rounds > 0 || selectedAmmoId) && !ammo) throw new Error("Choose a valid ammunition type.");
-  if (weapon && !Array.isArray(weapon.acceptedMagazineIds) && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
-    throw new Error("This ammunition is incompatible with the mounted weapon.");
-  }
-  mag.loaded = rounds;
-  mag.loadedAmmoId = selectedAmmoId;
-  if (weapon) {
-    if (Array.isArray(weapon.acceptedMagazineIds)) weapon.ammoIds = selectedAmmoId ? [selectedAmmoId] : [];
-    weapon.loaded = rounds;
-    weapon.loadedAmmoId = selectedAmmoId;
-  }
-}
-function emptyMagazine(odyssey, id) {
-  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
-  if (!mag) throw new Error("Magazine no longer exists.");
-  if (magazineWeapon(odyssey, id)) throw new Error("Detach the magazine first.");
-  const ammo = odyssey.ammunition.find((a) => a.id === mag.loadedAmmoId);
-  if (mag.loaded && !ammo) throw new Error("The loaded ammunition is missing.");
-  if (ammo && ammo.quantity + mag.loaded > 999999) throw new Error("Ammo reserve is full.");
-  if (ammo) ammo.quantity += mag.loaded;
-  mag.loaded = 0;
-  mag.loadedAmmoId = "";
-}
-function equipItem(tracker, id, partName, gm = true) {
-  var _a;
-  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
-  if (!item || !["armor", "shield", "implant"].includes(item.kind)) throw new Error("Choose equipment.");
-  if (item.kind === "implant" && !gm && !item.playerRemovable) throw new Error("Only the GM can equip this implant.");
-  if (item.quantity < 1 || item.equippedPart) throw new Error("Item is unavailable or already equipped.");
-  const part = tracker.body[partName];
-  if (!part) throw new Error("Body part no longer exists.");
-  if (!equipmentFits(item, partName, part)) throw new Error("This item does not fit the selected slot.");
-  if (item.kind !== "implant" && tracker.odyssey.inventory.items.some((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName)) throw new Error("Armor is already equipped on this part.");
-  (_a = tracker.odyssey.inventory).baseArmor ?? (_a.baseArmor = {});
-  if (!Object.hasOwn(tracker.odyssey.inventory.baseArmor, partName)) tracker.odyssey.inventory.baseArmor[partName] = part.armor;
-  item.equippedPart = partName;
-  item.legacyEquipment = false;
-  reconcileEquipment(tracker);
-}
-function unequipItem(tracker, id, gm = true) {
-  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
-  if (!item) throw new Error("Item no longer exists.");
-  if (item.kind === "implant" && !gm && !item.playerRemovable) throw new Error("Only the GM can remove this implant.");
-  const part = tracker.body[item.equippedPart], inv = tracker.odyssey.inventory;
-  if (part && Object.hasOwn(inv.baseArmor || {}, item.equippedPart)) {
-    const expected = inv.baseArmor[item.equippedPart] + inv.items.filter((i) => i.equippedPart === item.equippedPart && ["armor", "shield", "implant"].includes(i.kind) && i.quantity > 0 && (i.kind === "implant" || !i.criticalMax || i.criticalDamage < i.criticalMax)).reduce((sum, i) => sum + i.armor, 0);
-    if (part.armor !== expected) inv.baseArmor[item.equippedPart] = part.armor;
-  }
-  item.equippedPart = "";
-  reconcileEquipment(tracker);
-}
-function consumeItem(tracker, id) {
-  const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
-  if (!item || !["consumable", "medical", "resource"].includes(item.kind) || item.quantity < 1) throw new Error("No usable item available.");
-  item.quantity -= 1;
-}
-function findInventoryEntry(tracker, type, id) {
-  const o = tracker.odyssey;
-  if (type === "ammo") return o.ammunition.find((a) => a.id === id);
-  if (type === "magazine") return o.inventory.magazines.find((m) => m.id === id);
-  if (type?.startsWith("weapon-")) return o.weapons[type.slice(7)]?.find((w, index) => (w.id || String(index)) === id);
-  return o.inventory.items.find((i) => i.id === id);
-}
-function deleteInventoryEntry(tracker, type, id) {
-  const o = tracker.odyssey;
-  if (type === "ammo") {
-    if (o.inventory.magazines.some((m) => m.loadedAmmoId === id && m.loaded) || o.weapons.ranged.some((w) => w.acceptsMagazines === false && w.loadedAmmoId === id && w.loaded)) throw new Error("Empty all magazines using this ammo first.");
-    o.ammunition = o.ammunition.filter((a) => a.id !== id);
-    for (const w of o.weapons.ranged) w.ammoIds = w.ammoIds.filter((a) => a !== id);
-    return;
-  }
-  if (type === "magazine") {
-    const index = o.weapons.ranged.findIndex((w) => w.magazineId === id);
-    if (index >= 0) swapMagazine(o, index, "");
-    emptyMagazine(o, id);
-    o.inventory.magazines = o.inventory.magazines.filter((m) => m.id !== id);
-    for (const w of o.weapons.ranged) if (w.acceptedMagazineIds) w.acceptedMagazineIds = w.acceptedMagazineIds.filter((m) => m !== id);
-    return;
-  }
-  if (type?.startsWith("weapon-")) {
-    const kind = type.slice(7), index = o.weapons[kind].findIndex((w, j) => (w.id || String(j)) === id);
-    if (index < 0) throw new Error("Weapon no longer exists.");
-    if (kind === "ranged") {
-      const w = o.weapons.ranged[index];
-      if (w.acceptsMagazines === false && w.loaded) {
-        const a = o.ammunition.find((a2) => a2.id === w.loadedAmmoId);
-        if (!a || a.quantity + w.loaded > 999999) throw new Error("Cannot return loaded ammunition to reserve.");
-        a.quantity += w.loaded;
-      } else if (w.magazineId) swapMagazine(o, index, "");
-    }
-    o.weapons[kind].splice(index, 1);
-    return;
-  }
-  const item = o.inventory.items.find((i) => i.id === id);
-  if (!item) throw new Error("Item no longer exists.");
-  if (item.equippedPart) unequipItem(tracker, id, true);
-  o.inventory.items = o.inventory.items.filter((i) => i.id !== id);
-}
-function saveInventoryEntry(tracker, origin, values, id) {
-  const o = tracker.odyssey, existing = origin ? findInventoryEntry(tracker, origin.type, origin.id) : null;
-  if (origin && !existing) throw new Error("Item no longer exists.");
-  const kind = values.kind, weaponKind = values.weaponKind === "ranged" ? "ranged" : "melee";
-  const dest = kind === "weapon" ? "weapon-" + weaponKind : kind === "ammo" ? "ammo" : kind === "magazine" ? "magazine" : "item";
-  if (origin && origin.type !== dest) deleteInventoryEntry(tracker, origin.type, origin.id);
-  const same = origin?.type === dest ? existing : null;
-  if (kind === "ammo") {
-    const row2 = { id, name: values.name, damage: Number(values.damage) || 0, penetration: Number(values.penetration) || 0, quantity: Number(values.quantity) || 0 };
-    if (same) Object.assign(same, row2);
-    else {
-      if (o.ammunition.length >= 200) throw new Error("Too many ammo types.");
-      o.ammunition.push(row2);
-    }
-    return;
-  }
-  if (kind === "magazine") {
-    const capacity = Number(values.capacity), loaded = Number(values.loaded);
-    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 999 || !Number.isInteger(loaded) || loaded < 0 || loaded > capacity) throw new Error("Invalid magazine capacity or rounds.");
-    const mounted = same && magazineWeapon(o, same.id);
-    if (mounted && capacity !== mounted.capacity) throw new Error("Detach the magazine before changing its capacity.");
-    if (same) {
-      same.capacity = capacity;
-      same.name = values.name;
-      setMagazineRounds(o, same.id, loaded, values.loadedAmmoId);
-    } else {
-      if (o.inventory.magazines.length >= 200) throw new Error("Too many magazines.");
-      o.inventory.magazines.push({ id, name: values.name, capacity, loaded: 0, loadedAmmoId: "" });
-      setMagazineRounds(o, id, loaded, values.loadedAmmoId);
-    }
-    return;
-  }
-  if (kind === "weapon") {
-    if ([...o.weapons.melee, ...o.weapons.ranged].some((w) => w !== same && w.name === values.name)) throw new Error("A weapon with this name already exists.");
-    const row2 = { id, name: values.name, accuracy: Number(values.accuracy) || 0, damage: Number(values.damage) || 0 };
-    if (weaponKind === "ranged") {
-      const acceptsMagazines = values.acceptsMagazines !== false;
-      if (same && same.acceptsMagazines !== false !== acceptsMagazines && same.loaded > 0) throw new Error("Empty or detach the current magazine before changing magazine type.");
-      if (acceptsMagazines) {
-        const acceptedMagazineIds = [...new Set(values.acceptedMagazineIds || [])];
-        if (acceptedMagazineIds.some((id2) => !o.inventory.magazines.some((m) => m.id === id2))) throw new Error("Selected magazine no longer exists.");
-        if (same?.magazineId && !acceptedMagazineIds.includes(same.magazineId)) throw new Error("Detach the current magazine before removing its compatibility.");
-        Object.assign(row2, { acceptsMagazines: true, acceptedMagazineIds, capacity: same?.magazineId ? same.capacity : 0, ammoIds: same?.magazineId ? same.ammoIds || [] : [], loaded: same?.loaded || 0, loadedAmmoId: same?.loadedAmmoId || "", magazineId: same?.magazineId || "" });
-      } else {
-        const capacity = Number(values.capacity), ammoIds = values.ammoIds || [], loaded = Number(values.loaded ?? same?.loaded ?? 0), loadedAmmoId = String(values.loadedAmmoId ?? same?.loadedAmmoId ?? "");
-        if (!Number.isInteger(capacity) || capacity < 1 || capacity > 999 || !Number.isInteger(loaded) || loaded < 0 || loaded > capacity) throw new Error("Invalid built-in magazine capacity or rounds.");
-        if (loaded && (!ammoIds.includes(loadedAmmoId) || !o.ammunition.some((a) => a.id === loadedAmmoId))) throw new Error("Choose compatible ammunition for loaded rounds.");
-        Object.assign(row2, { acceptsMagazines: false, acceptedMagazineIds: [], capacity, ammoIds, loaded, loadedAmmoId: loaded ? loadedAmmoId : "", magazineId: "" });
-      }
-    }
-    if (same) Object.assign(same, row2);
-    else {
-      if (o.weapons[weaponKind].length >= 20) throw new Error("Weapon limit is 20 per type.");
-      o.weapons[weaponKind].push(row2);
-    }
-    return;
-  }
-  if (same?.equippedPart && !["armor", "shield", "implant"].includes(kind)) unequipItem(tracker, id, true);
-  const row = { ...values, id, quantity: Number(values.quantity) || 0, armor: Number(values.armor) || 0, healCritical: Number(values.healCritical) || 0, criticalMax: Number(values.criticalMax) || 0, criticalDamage: Number(values.criticalDamage) || 0, playerRemovable: values.playerRemovable === true, legacyEquipment: false, equippedPart: same?.equippedPart || "", previousArmor: same?.previousArmor || 0 };
-  if (!["armor", "shield", "implant"].includes(kind)) {
-    row.armor = 0;
-    row.criticalMax = 0;
-    row.criticalDamage = 0;
-  }
-  if (kind === "implant") row.criticalDamage = 0;
-  if (row.criticalDamage > row.criticalMax) throw new Error("Critical damage cannot exceed durability.");
-  if (same?.equippedPart && !equipmentFits(row, same.equippedPart, tracker.body[same.equippedPart])) throw new Error("Unequip before changing the equipment slot.");
-  if (same) Object.assign(same, row);
-  else {
-    if (o.inventory.items.length >= 200) throw new Error("Inventory limit is 200 items.");
-    o.inventory.items.push(row);
-  }
-  reconcileEquipment(tracker);
 }
 
 // ammunition.js
@@ -4997,6 +5234,80 @@ function installCharacterTools(host) {
     library = emptyLibrary();
     storageError = e.message;
   }
+  let poolMetadata = {}, catalog = { entries: [], errors: 0 }, poolDialog = null, scanTimer = null, scanRunning = false, scanAgain = false, scanFingerprint = "";
+  const knownBlueprintIds = /* @__PURE__ */ new Map();
+  const refreshPool = (metadata) => {
+    poolMetadata = metadata || {};
+    catalog = poolEntries(poolMetadata);
+    poolDialog?.refresh();
+    render2();
+  };
+  const requirePoolGM = async () => {
+    if (getRole() !== "GM" || await OBR2.player.getRole() !== "GM") throw new Error("Only the GM can edit the campaign item pool.");
+  };
+  const putBlueprints = async (blueprints, automatic = false) => {
+    await requirePoolGM();
+    const metadata = await OBR2.room.getMetadata(), patch = {};
+    let count = Object.entries(metadata).filter(([key, value]) => key.startsWith(ITEM_POOL_PREFIX) && value && !value.deleted).length;
+    for (const blueprint of blueprints) {
+      validateBlueprint(blueprint);
+      const text2 = blueprintText(blueprint);
+      let id = knownBlueprintIds.get(text2);
+      if (!id) {
+        id = await blueprintId(blueprint);
+        knownBlueprintIds.set(text2, id);
+      }
+      const key = ITEM_POOL_PREFIX + id;
+      if (metadata[key] && (automatic || !metadata[key].deleted)) continue;
+      if (Object.hasOwn(patch, key)) continue;
+      if ((!metadata[key] || metadata[key].deleted) && ++count > 2e3) throw new Error("Campaign item pool is full. Export a backup and remove unused definitions.");
+      patch[key] = { blueprint };
+    }
+    await requirePoolGM();
+    if (Object.keys(patch).length) await OBR2.room.setMetadata(patch);
+    refreshPool({ ...metadata, ...patch });
+  };
+  const scanPool = async () => {
+    if (getRole() !== "GM") return;
+    if (scanRunning) {
+      scanAgain = true;
+      return;
+    }
+    scanRunning = true;
+    try {
+      const candidates = /* @__PURE__ */ new Map();
+      for (const token of host.getTokens()) {
+        const t = host.tracker(token), o = t.odyssey;
+        const entries = [...o.inventory.items.map((i) => ["item", i.id]), ...o.inventory.magazines.map((i) => ["magazine", i.id]), ...o.ammunition.map((i) => ["ammo", i.id]), ...["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((i) => ["weapon-" + kind, i.id]))];
+        for (const [type, id] of entries) {
+          const blueprint = captureBlueprint(t, type, id);
+          candidates.set(blueprintText(blueprint), blueprint);
+        }
+      }
+      const fingerprint = [...candidates.keys()].sort().join("\n");
+      if (fingerprint === scanFingerprint) return;
+      scanFingerprint = fingerprint;
+      await putBlueprints([...candidates.values()], true);
+    } catch (e) {
+      scanFingerprint = "";
+      status("Item pool: " + e.message, "error");
+    } finally {
+      scanRunning = false;
+      if (scanAgain) {
+        scanAgain = false;
+        schedulePoolScan();
+      }
+    }
+  };
+  const schedulePoolScan = () => {
+    if (getRole() !== "GM" || scanTimer) return;
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      void scanPool();
+    }, 400);
+  };
+  void OBR2.room.getMetadata().then(refreshPool).catch((e) => status("Item pool: " + e.message, "error"));
+  OBR2.room.onMetadataChange(refreshPool);
   let busy = false;
   const saveLibrary = (next) => {
     if (getRole() !== "GM") throw new Error("Only the GM can edit templates.");
@@ -5026,6 +5337,7 @@ function installCharacterTools(host) {
     const token = check();
     const tokenId = token.id, panel = node.closest("#selectedTokenPanel"), id = node.dataset.id;
     const gmActions = ["add-item", "edit-item", "delete-item", "add-mag", "fill-mag", "set-mag-rounds", "empty-mag", "delete-mag", "mount-mag", "apply-template"];
+    if (action === "open-item-pool") check(tokenId, true);
     if (gmActions.includes(action) || action.includes("template") || action.includes("library") || action.startsWith("account-")) check(tokenId, true);
     if (action === "add-item" || action === "edit-entry") {
       check(tokenId, true);
@@ -5035,7 +5347,74 @@ function installCharacterTools(host) {
       const kind = type.startsWith("weapon-") ? "weapon" : type === "item" ? ["item", "tool"].includes(existing?.kind) ? "resource" : existing?.kind === "medical" ? "consumable" : existing?.kind || "resource" : type;
       const values = await itemEditor({ existing: { ...existing, ...type.startsWith("weapon-") ? { weaponKind: type.slice(7) } : {} }, type: kind, skills: Object.entries(o.skills).map(([k]) => [k, o.skillLabels[k] || k]), parts: Object.entries(t.body).map(([k, p]) => [k, p.label || k]), ammunition: o.ammunition, magazines: o.inventory.magazines });
       if (!values) return;
-      await mutate(tokenId, (t2) => saveInventoryEntry(t2, existing ? { type, id } : null, values, existing?.id || newId()), true);
+      const entryId = existing?.id || newId(), entryType = values.kind === "weapon" ? "weapon-" + values.weaponKind : ["ammo", "magazine"].includes(values.kind) ? values.kind : "item";
+      let blueprint;
+      await mutate(tokenId, (t2) => {
+        saveInventoryEntry(t2, existing ? { type, id } : null, values, entryId);
+        blueprint = captureBlueprint(sanitize(t2), entryType, entryId);
+      }, true);
+      try {
+        await putBlueprints([blueprint]);
+      } catch (e) {
+        throw new Error("Item saved on character; campaign pool was not updated: " + e.message);
+      }
+    } else if (action === "open-item-pool") {
+      await requirePoolGM();
+      refreshPool(await OBR2.room.getMetadata());
+      await scanPool();
+      poolDialog = showItemPool({
+        getCatalog: () => catalog,
+        character: token.name || "Character",
+        onGive: async (entryId) => {
+          const entry = catalog.entries.find((e) => e.id === entryId);
+          if (!entry) throw new Error("Item definition no longer exists.");
+          const value = await formDialog("Give " + entry.blueprint.values.name, [{ name: "quantity", label: "Quantity", type: "number", min: 1, max: entry.blueprint.type === "ammo" ? 999999 : entry.blueprint.type.startsWith("weapon-") ? 20 : 1e3, value: 1 }]);
+          if (!value) return false;
+          const copyId = newId();
+          await mutate(tokenId, (t) => copyBlueprint(t, entry.blueprint, Number(value.quantity), copyId), true);
+          return true;
+        },
+        onDelete: async (entryId) => {
+          if (!await formDialog("Remove from campaign pool?", [], { danger: true, message: "Existing items on characters are kept." })) return false;
+          await requirePoolGM();
+          await OBR2.room.setMetadata({ [ITEM_POOL_PREFIX + entryId]: { deleted: true } });
+          refreshPool(await OBR2.room.getMetadata());
+          return true;
+        },
+        onExport: async () => {
+          await requirePoolGM();
+          download("odyssey-item-pool.json", JSON.stringify(exportPool(catalog.entries), null, 2));
+        },
+        onImport: () => new Promise((resolve, reject) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".json,application/json";
+          input.addEventListener("cancel", () => resolve(false));
+          input.onchange = async () => {
+            try {
+              const file = input.files?.[0];
+              if (!file) {
+                resolve(false);
+                return;
+              }
+              if (file.size > 4 * 1024 * 1024) throw new Error("Item pool JSON must be under 4 MB.");
+              await requirePoolGM();
+              const blueprints = parsePoolJSON(JSON.parse(await file.text())).map((raw) => {
+                const t = sanitize({}), id2 = newId();
+                copyBlueprint(t, raw, 1, id2);
+                return captureBlueprint(sanitize(t), raw.type, id2);
+              });
+              await putBlueprints(blueprints);
+              resolve(true);
+            } catch (e) {
+              reject(e);
+            }
+          };
+          input.click();
+        })
+      });
+      await poolDialog.closed;
+      poolDialog = null;
     } else if (action === "delete-entry") {
       check(tokenId, true);
       if (!await formDialog("Remove item?", [], { danger: true, message: "Remove this item from this token?" })) return;
@@ -5243,7 +5622,7 @@ function installCharacterTools(host) {
     if (event.key === LIBRARY_STORAGE_KEY) reload();
   });
   const disabledWhileBusy = (html) => busy ? html.replaceAll("<button ", "<button disabled ").replaceAll("<select ", "<select disabled ").replaceAll("<input ", "<input disabled ") : html;
-  return { isBusy: () => busy, renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => getRole() !== "GM" ? "" : disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
+  return { syncPool: schedulePoolScan, isBusy: () => busy, renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => getRole() !== "GM" ? "" : disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
 }
 
 // shared.js
@@ -6725,6 +7104,7 @@ async function pushDebugEntry(title, body, kind = "info") {
   const nextEntries = mergeDebugEntries([entry], metadata?.[DEBUG_LOG_KEY], debugEntries);
   debugEntries = nextEntries;
   renderDebugConsole();
+  characterTools?.syncPool();
   pendingLocalDebugEntryIds.add(entry.id);
   await lib_default.broadcast.sendMessage(
     DEBUG_BROADCAST_CHANNEL,

@@ -1,4 +1,4 @@
-import { normalizeBonuses, reconcileEquipment } from "./characterRules.js";
+import { normalizeBonuses, reconcileEquipment, equipmentFits } from "./characterRules.js";
 // Token-owned inventory. Equipped magazines mirror the V1 weapon fields so
 // attacks/reloads keep using ammunition.js without a second source of damage math.
 const LIMIT = 200;
@@ -17,7 +17,7 @@ export function normalizeInventory(raw, weapons = []) {
     kind: kinds.has(r.kind) ? r.kind : 'item', quantity: int(r.quantity ?? 1),
     description: text(r.description, 2000), armor: int(r.armor, 999),
     subtype: ['grenade','medkit','repairkit','stim'].includes(r.subtype)?r.subtype:r.kind==='medical'?'medkit':'grenade',
-    healCritical: int(r.healCritical ?? 1,999), slot: text(r.slot||'any',40),
+    healCritical: int(r.healCritical ?? 1,999), slots:[...new Set((Array.isArray(r.slots)?r.slots:[r.slot||'any']).map(s=>text(s,40)).filter(Boolean))].slice(0,100), slot: text(r.slot||'any',40),
     criticalMax:int(r.criticalMax,999), criticalDamage:int(r.criticalDamage,int(r.criticalMax,999)),
     playerRemovable:r.playerRemovable===true, bonuses:normalizeBonuses(r.bonuses),
     abilities:(Array.isArray(r.abilities)?r.abilities:[]).slice(0,20).map((a,j)=>({id:text(a.id||'ability-'+j),name:text(a.name)||'Ability',level:int(a.level,10),description:text(a.description,2000)})),
@@ -45,7 +45,7 @@ export function normalizeInventory(raw, weapons = []) {
     // after consumeAmmo/reloadMagazine, including external snapshot imports.
     Object.assign(mag, {capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId});
   }
-  return {version:3,items,magazines,baseMax:Object.fromEntries(Object.entries(raw?.baseMax||{}).filter(([k])=>!['__proto__','constructor','prototype'].includes(k)).map(([k,v])=>[text(k,40),int(v,99999)])),baseArmor:Object.fromEntries(Object.entries(raw?.baseArmor||{}).filter(([k])=>!['__proto__','constructor','prototype'].includes(k)).map(([k,v])=>[text(k,40),int(v,999)]))};
+  return {version:4,items,magazines,armorHp:Object.fromEntries(Object.entries(raw?.armorHp||{}).filter(([k])=>!['__proto__','constructor','prototype'].includes(k)).map(([k,v])=>[text(k,40),{max:int(v?.max,99999),remaining:int(v?.remaining,99999)}])),baseMax:Object.fromEntries(Object.entries(raw?.baseMax||{}).filter(([k])=>!['__proto__','constructor','prototype'].includes(k)).map(([k,v])=>[text(k,40),int(v,99999)])),baseArmor:Object.fromEntries(Object.entries(raw?.baseArmor||{}).filter(([k])=>!['__proto__','constructor','prototype'].includes(k)).map(([k,v])=>[text(k,40),int(v,999)]))};
 }
 export function magazineWeapon(odyssey, id) {
   return odyssey.weapons.ranged.find(w => w.magazineId === id);
@@ -111,13 +111,14 @@ export function emptyMagazine(odyssey, id) {
   if (ammo) ammo.quantity += mag.loaded;
   mag.loaded = 0; mag.loadedAmmoId = '';
 }
-export function equipItem(tracker,id,partName) {
+export function equipItem(tracker,id,partName,gm=true) {
   const item=tracker.odyssey.inventory.items.find(i=>i.id===id);
   if(!item||!['armor','shield','implant'].includes(item.kind))throw new Error('Choose equipment.');
+  if(item.kind==='implant'&&!gm&&!item.playerRemovable)throw new Error('Only the GM can equip this implant.');
   if(item.quantity<1||item.equippedPart)throw new Error('Item is unavailable or already equipped.');
   const part=tracker.body[partName];if(!part)throw new Error('Body part no longer exists.');
-  if(item.slot && item.slot!=='any' && item.slot!==partName && item.slot!==(part.slot||''))throw new Error('This item does not fit the selected slot.');
-  if(item.kind!=='implant'&&tracker.odyssey.inventory.items.some(i=>i.kind!=='implant'&&i.equippedPart===partName))throw new Error('Armor is already equipped on this part.');
+  if(!equipmentFits(item,partName,part))throw new Error('This item does not fit the selected slot.');
+  if(item.kind!=='implant'&&tracker.odyssey.inventory.items.some(i=>['armor','shield'].includes(i.kind)&&i.equippedPart===partName))throw new Error('Armor is already equipped on this part.');
   tracker.odyssey.inventory.baseArmor??={};
   if(!Object.hasOwn(tracker.odyssey.inventory.baseArmor,partName))tracker.odyssey.inventory.baseArmor[partName]=part.armor;
   item.equippedPart=partName;item.legacyEquipment=false;reconcileEquipment(tracker);
@@ -207,6 +208,6 @@ export function saveInventoryEntry(tracker,origin,values,id) {
   if(!['armor','shield','implant'].includes(kind)){row.armor=0;row.criticalMax=0;row.criticalDamage=0;}
   if(kind==='implant')row.criticalDamage=0;
   if(row.criticalDamage>row.criticalMax)throw new Error('Critical damage cannot exceed durability.');
-  if(same?.equippedPart&&row.slot!=='any'&&row.slot!==same.equippedPart&&row.slot!==tracker.body[same.equippedPart]?.slot)throw new Error('Unequip before changing the equipment slot.');
+  if(same?.equippedPart&&!equipmentFits(row,same.equippedPart,tracker.body[same.equippedPart]))throw new Error('Unequip before changing the equipment slot.');
   if(same)Object.assign(same,row);else{if(o.inventory.items.length>=200)throw new Error('Inventory limit is 200 items.');o.inventory.items.push(row);}reconcileEquipment(tracker);
 }

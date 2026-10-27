@@ -1,6 +1,6 @@
 import {arrangeCombatPanels} from './ui/combatLayout.js';
 import {installCompactButtons} from './ui/compactButtons.js';
-import {ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical} from './characterRules.js';
+import {ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical,setCombinedPartHp,setCombinedPartMax,reconcileEquipment} from './characterRules.js';
 import { compactHud } from "./ui/compactHud.js";
 import { attributeCards, skillCards, effectChips } from "./ui/characterView.js";
 import { installCharacterTools } from "./ui/characterTools.js";
@@ -1962,6 +1962,7 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
           <button type="button" class="secondary" data-action="open-token-import" ${disabledAttr}>Import Token Data</button>
         </div>
         <input type="file" accept=".json,.txt,.odyssey-token.json" data-token-import-input hidden>
+        ${isEditable()&&characterTools?characterTools.renderTemplates():""}
       </div>
     `,
     false,
@@ -3335,7 +3336,7 @@ function renderSelectedToken() {
       ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
       ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${canUseToken(token) && characterTools ? renderCollapsibleSection("Items", characterTools.renderInventory(data), false) : ""}
-      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Character Templates", characterTools.renderTemplates(), false) : ""}
+
 
 
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
@@ -3574,7 +3575,7 @@ async function healLimbs() {
     for (const partName of getBodyPartNames(next)) {
       const part = next.body?.[partName];
       if (!part) continue;
-      part.current = part.max;
+      setCombinedPartHp(next,partName,part.max);
       part.minor = 0;
       part.serious = 0;
     }
@@ -3601,9 +3602,9 @@ async function changeBodyField(partName, field, delta) {
     if (!part) return next;
 
     if (field === "current") {
-      part.current = clamp(part.current + delta, 0, part.max);
+      setCombinedPartHp(next,partName,part.current+delta);
     } else if (field === "max") {
-      part.max = clamp(part.max + delta, 0, 999);
+      setCombinedPartMax(next,partName,part.max+delta);
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
       part.armor = clamp(part.armor + delta, 0, 999);
@@ -3632,11 +3633,9 @@ async function setBodyField(partName, field, value) {
 
     const numericValue = clamp(Number(value) || 0, 0, 999);
     if (field === "current") {
-      part.current = clamp(numericValue, 0, part.max);
+      setCombinedPartHp(next,partName,numericValue);
     } else if (field === "max") {
-      const inv=next.odyssey.inventory;
-      if(Object.hasOwn(inv.baseMax||{},partName))inv.baseMax[partName]=Math.max(0,numericValue-(part.max-inv.baseMax[partName]));
-      part.max = numericValue;
+      setCombinedPartMax(next,partName,numericValue);
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
       const inv=next.odyssey.inventory;
@@ -4099,9 +4098,9 @@ async function autosaveDraftField(draft) {
       if (!part) return next;
       const numericValue = clamp(Number(draft.value) || 0, 0, 999);
       if (draft.field === "current") {
-        part.current = clamp(numericValue, 0, part.max);
+        setCombinedPartHp(next,draft.partName,numericValue);
       } else if (draft.field === "max") {
-        part.max = numericValue;
+        setCombinedPartMax(next,draft.partName,numericValue);
         part.current = clamp(part.current, 0, part.max);
       } else if (draft.field === "armor") {
         part.armor = numericValue;
@@ -4357,8 +4356,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const equipmentCrit=projectedPartState.critApplied||0;
   if(target&&result.hit&&equipmentCrit) {
     const preview=getTrackerData(target),equipment=absorbEquipmentCritical(preview,result.targetPart,equipmentCrit);
-    projectedPartState.current=Math.max(0,(targetPartState.current||0)-equipment.remaining);
-    projectedPartState.critApplied=equipment.remaining;
+    projectedPartState.current=Math.max(0,(targetPartState.current||0)-equipmentCrit);
   }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = target ? (projectedPartState.current ?? beforeHp) : null;
@@ -4400,7 +4398,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     await updateTrackerData(target.id, (current) => {
       const next = structuredClone(current);
       if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
-        next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
+        setCombinedPartHp(next,SPECIAL_PART_NAME,projectedSpecialState.current);
         next.body[SPECIAL_PART_NAME].minor = projectedSpecialState.minor;
         next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
       }

@@ -7,6 +7,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
   const select=(name,label,options,value)=>`<label>${esc(label)}<select name="${name}">${options.map(([k,l])=>`<option value="${esc(k)}" ${k===value?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
   const checkbox=(name,label,checked)=>`<label class="od-check"><input name="${name}" type="checkbox" ${checked?'checked':''}>${esc(label)}</label>`;
   const values={...existing,kind:type,acceptsMagazines:existing.acceptsMagazines!==false};
+  values.slots??=[existing.slot||'any'];
   values.acceptedMagazineIds??=existing.id?magazines.filter(m=>m.id===existing.magazineId||(m.capacity===existing.capacity&&(!m.loaded||(existing.ammoIds||[]).includes(m.loadedAmmoId)))).map(m=>m.id):[];
   const skillChoices=[...skills];
   for(const key of Object.keys(existing.bonuses?.skills||{}))if(!skillChoices.some(([k])=>k===key))skillChoices.push([key,key]);
@@ -20,6 +21,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     const data=Object.fromEntries(new FormData(form));Object.assign(values,data);
     if(form.elements.acceptsMagazines)values.acceptsMagazines=form.elements.acceptsMagazines.checked;
     if(form.querySelector('[name="magazineCompatible"]'))values.acceptedMagazineIds=[...form.querySelectorAll('[name="magazineCompatible"]:checked')].map(e=>e.value);
+    if(form.querySelector('[data-equipment-slots]'))values.slots=[...form.querySelectorAll('[name="equipmentSlot"]:checked')].map(e=>e.value);
     values.playerRemovable=!!form.elements.playerRemovable?.checked;
     const bonuses={attributes:{},skills:{}};
     for(const input of form.querySelectorAll('[name^="attr:"],[name^="skill:"]')) {
@@ -51,9 +53,9 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
       else html+=field('damage','Damage',values.damage??0,'number');
     }
     if(['armor','shield','implant'].includes(kind)) {
-      html+=field('armor','Armor',values.armor??0,'number')+field('criticalMax',kind==='implant'?'Body part HP bonus':'Critical durability',values.criticalMax??1,'number')+(kind==='implant'?'':field('criticalDamage','Critical damage taken',values.criticalDamage??0,'number'))+select('slot','Equipment slot',[['any','Any part'],...parts],values.slot||'any');
+      html+=field('armor','Armor',values.armor??0,'number')+field('criticalMax',kind==='implant'?'Body part HP bonus':'Critical durability',values.criticalMax??1,'number')+(kind==='implant'?'':field('criticalDamage','Critical damage taken',values.criticalDamage??0,'number'))+'<fieldset data-equipment-slots class="od-equipment-slots"><legend>Equipment slots · choose allowed parts</legend>'+[['any','Any part'],...parts,...values.slots.filter(key=>key!=='any'&&!parts.some(([k])=>k===key)).map(key=>[key,key])].map(([key,label])=>checkbox('equipmentSlot',label,values.slots.includes(key)).replace('name="equipmentSlot"','name="equipmentSlot" value="'+esc(key)+'"')).join('')+'</fieldset>';
       if(kind==='implant')html+='<p class="cp-muted">Adds maximum body-part HP. Equipping does not heal wounds.</p>';
-      if(kind==='implant')html+=checkbox('playerRemovable','Player may remove this implant',values.playerRemovable)+bonusEditor(values.bonuses)+`<fieldset><legend>Granted abilities · available only while equipped</legend><div data-abilities>${(values.abilities||[]).map(abilityRow).join('')}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
+      if(kind==='implant')html+=checkbox('playerRemovable','Player may equip / remove this implant',values.playerRemovable)+bonusEditor(values.bonuses)+`<fieldset><legend>Granted abilities · available only while equipped</legend><div data-abilities>${(values.abilities||[]).map(abilityRow).join('')}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
     }
     host.innerHTML=html;
     // Bonus inputs accept signed modifiers.
@@ -71,7 +73,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
   return new Promise(resolve=>{
     const finish=v=>{dialog.close();dialog.remove();resolve(v);};
     form.querySelector('[data-cancel]').onclick=()=>finish(null);dialog.addEventListener('cancel',e=>{e.preventDefault();finish(null);});
-    form.addEventListener('submit',e=>{e.preventDefault();collect();if(!values.name.trim()){form.elements.name.setCustomValidity('Enter a name.');form.elements.name.reportValidity();form.elements.name.oninput=()=>form.elements.name.setCustomValidity('');return;}finish(values);});dialog.showModal();
+    form.addEventListener('submit',e=>{e.preventDefault();collect();if(['armor','shield','implant'].includes(values.kind)&&!values.slots.length){host.querySelector('[data-equipment-slots]').insertAdjacentHTML('beforeend','<p class="cp-muted">Choose at least one allowed slot.</p>');return;}if(!values.name.trim()){form.elements.name.setCustomValidity('Enter a name.');form.elements.name.reportValidity();form.elements.name.oninput=()=>form.elements.name.setCustomValidity('');return;}finish(values);});dialog.showModal();
   });
 }
 export function skillEditor(o,key) {

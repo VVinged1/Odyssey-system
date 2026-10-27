@@ -503,6 +503,10 @@ function normalizeEffects(raw) {
   const seen = /* @__PURE__ */ new Set();
   return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
 }
+function equipmentFits(item, partName, part) {
+  const slots = Array.isArray(item.slots) ? item.slots : [item.slot || "any"];
+  return slots.includes("any") || slots.includes(partName) || slots.includes(part?.slot);
+}
 function itemActive(item) {
   return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
 }
@@ -560,13 +564,20 @@ function reconcileEquipment(tracker) {
   inv.baseMax ?? (inv.baseMax = {});
   for (const [partName, part] of Object.entries(tracker.body)) {
     const equipped = inv.items.filter((i) => ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart === partName);
-    const hpBonus = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    const implantHp = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    const armor = equipped.filter((i) => ["armor", "shield"].includes(i.kind) && i.quantity > 0);
+    const pool = { max: armor.reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0), remaining: armor.reduce((sum, i) => sum + Math.max(0, (Number(i.criticalMax) || 0) - (Number(i.criticalDamage) || 0)), 0) };
+    inv.armorHp ?? (inv.armorHp = {});
+    const previous = inv.armorHp[partName]?.remaining || 0;
+    const hpBonus = implantHp + pool.max;
     if (hpBonus && !Object.hasOwn(inv.baseMax, partName)) inv.baseMax[partName] = part.max;
     if (Object.hasOwn(inv.baseMax, partName)) {
       part.max = Math.min(999, inv.baseMax[partName] + hpBonus);
-      part.current = Math.min(part.current, part.max);
+      part.current = Math.max(0, Math.min(part.current + pool.remaining - previous, part.max));
       if (!hpBonus) delete inv.baseMax[partName];
     }
+    if (pool.max) inv.armorHp[partName] = pool;
+    else delete inv.armorHp[partName];
     if (!equipped.length) {
       if (Object.hasOwn(inv.baseArmor, partName)) {
         part.armor = inv.baseArmor[partName];
@@ -595,6 +606,36 @@ function absorbEquipmentCritical(tracker, partName, critical) {
   reconcileEquipment(tracker);
   return { remaining, absorbed };
 }
+function armorHealth(tracker, partName) {
+  const gear = tracker.odyssey.inventory.items.filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName && i.quantity > 0);
+  return { max: gear.reduce((sum, i) => sum + i.criticalMax, 0), remaining: gear.reduce((sum, i) => sum + i.criticalMax - i.criticalDamage, 0) };
+}
+function setCombinedPartMax(tracker, partName, value) {
+  const part = tracker.body[partName];
+  if (!part) return;
+  const inv = tracker.odyssey.inventory, goal = Math.max(0, Math.min(999, Number(value) || 0));
+  if (Object.hasOwn(inv.baseMax || {}, partName)) inv.baseMax[partName] = Math.max(0, goal - (part.max - inv.baseMax[partName]));
+  part.max = goal;
+  part.current = Math.min(part.current, part.max);
+  reconcileEquipment(tracker);
+}
+function setCombinedPartHp(tracker, partName, value) {
+  const part = tracker.body[partName];
+  if (!part) return;
+  const goal = Math.max(0, Math.min(Number(value) || 0, part.max)), delta = goal - part.current;
+  if (delta < 0) absorbEquipmentCritical(tracker, partName, -delta);
+  if (delta > 0) {
+    const pool = armorHealth(tracker, partName), bodyCurrent = Math.max(0, part.current - pool.remaining), bodyMax = Math.max(0, part.max - pool.max);
+    let repair = Math.max(0, delta - Math.max(0, bodyMax - bodyCurrent));
+    for (const i of tracker.odyssey.inventory.items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.quantity > 0)) {
+      const heal = Math.min(repair, i.criticalDamage);
+      i.criticalDamage -= heal;
+      repair -= heal;
+    }
+    reconcileEquipment(tracker);
+  }
+  part.current = goal;
+}
 function useItemOnTracker(target, item, partName, effectId) {
   var _a;
   if (item.subtype === "grenade") throw new Error("Grenades are a placeholder; no action is performed.");
@@ -607,12 +648,13 @@ function useItemOnTracker(target, item, partName, effectId) {
   const part = target.body[partName];
   if (!part) throw new Error("Choose a body part.");
   if (item.subtype === "medkit") {
-    if (!item.healCritical || part.current >= part.max) throw new Error("No critical wounds to heal on this part.");
-    part.current = Math.min(part.max, part.current + item.healCritical);
+    const pool = armorHealth(target, partName), missing = Math.max(0, part.max - pool.max - Math.max(0, part.current - pool.remaining));
+    if (!item.healCritical || !missing) throw new Error("No critical wounds to heal on this part.");
+    part.current += Math.min(missing, item.healCritical);
     return;
   }
   if (item.subtype === "repairkit") {
-    const gear = target.odyssey.inventory.items.filter((i) => i.equippedPart === partName && ["armor", "shield"].includes(i.kind) && i.criticalDamage > 0);
+    const gear = target.odyssey.inventory.items.filter((i) => i.equippedPart === partName && ["armor", "shield"].includes(i.kind) && i.quantity > 0 && i.criticalDamage > 0);
     if (!gear.length) throw new Error("No damaged armor is equipped on this part.");
     if (!item.healCritical) throw new Error("Repair amount must be greater than zero.");
     let remaining = item.healCritical;
@@ -637,7 +679,7 @@ function attributeCards(o, fields, editable) {
   }).join("")}</div></div>`;
 }
 function skillCards(o, groups, editable) {
-  const passives = Object.entries(ARMOR_TRAINING).filter(([k]) => Object.hasOwn(o.skills, k));
+  const passives = Object.entries(ARMOR_TRAINING).filter(([k]) => Object.hasOwn(o.skills, k) && (editable || o.skills[k] === 1));
   return `<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="skill" aria-label="Skill roll modifier"></label><button type="button" class="secondary" data-action="profile-random-skill">d100 vs d100</button>${editable ? '<button type="button" class="secondary" data-od-action="add-skill">+ Skill</button>' : ""}</div>${groups.filter(([, entries]) => entries.length).map(([label, entries]) => `<div class="cp-section-title">${esc(label)}</div><div class="cp-list">${entries.map(([k, value]) => {
     const name = o.skillLabels[k] || k, perks = o.skillPerks[k] || [], mod = o.modifiers?.skills?.[k] || 0;
     return `<div class="cp-skill-row"><button class="cp-card cp-skill-card" type="button" data-action="profile-roll-skill" data-skill="${esc(k)}" aria-label="Roll ${esc(name)}"><span><b>${esc(name)}</b>${o.skillStrengthBonuses[k] ? '<span class="cp-pill">STR</span>' : ""}<span class="cp-perks">${perks.map((p) => `<span class="cp-pill">${esc(p)}</span>`).join("")}</span></span><span class="cp-skill-level"><span class="cp-pips">${Array.from({ length: 10 }, (_, i) => `<i class="cp-pip ${i < value ? "on" : ""}"></i>`).join("")}</span><strong>${value}/10</strong>${mod ? `<span class="cp-mod ${mod > 0 ? "good" : "bad"}">${mod > 0 ? "+" : ""}${mod}</span>` : ""}</span></button>${editable && !o.grantedSkills?.[k] ? `<button type="button" class="cp-pencil" data-od-action="edit-skill" data-skill="${esc(k)}" aria-label="Edit ${esc(name)}">\u270E</button>` : ""}</div>`;
@@ -653,7 +695,17 @@ function inventoryView(tracker, gm) {
   const items = inv.items.map((i) => {
     const equipment = ["armor", "shield", "implant"].includes(i.kind), broken = i.kind !== "implant" && i.criticalMax > 0 && i.criticalDamage >= i.criticalMax;
     const usable = ["consumable", "medical"].includes(i.kind), subtype = i.kind === "medical" ? "medkit" : i.subtype;
-    return `<article class="cp-card"><div class="cp-row"><b>${esc(i.name)}</b><span class="cp-pill">${esc(usable ? subtype : i.kind)}</span><span class="cp-pill">\xD7${i.quantity}</span>${i.armor ? `<span class="cp-pill">Armor ${i.armor}</span>` : ""}${i.kind === "implant" && i.criticalMax ? `<span class="cp-pill">Body HP +${i.criticalMax}</span>` : i.criticalMax ? `<span class="cp-pill ${broken ? "bad" : ""}">Durability ${i.criticalMax - i.criticalDamage}/${i.criticalMax}</span>` : ""}${edit("item", i.id)}</div>${i.description ? `<p class="cp-muted cp-description">${esc(i.description)}</p>` : ""}${bonusText(i.bonuses) ? `<p class="cp-muted">${esc(bonusText(i.bonuses))}</p>` : ""}<div class="cp-row">${equipment ? i.equippedPart ? `<span class="cp-muted">${esc(tracker.body[i.equippedPart]?.label || i.equippedPart)}</span>${gm || i.kind !== "implant" || i.playerRemovable ? `<button type="button" data-od-action="unequip" data-id="${esc(i.id)}">Unequip</button>` : '<span class="cp-pill">GM removal only</span>'}` : `<label>Slot <select data-equip-part="${esc(i.id)}">${Object.entries(tracker.body).filter(([k, p]) => (gm || !p.hidden) && (i.slot === "any" || i.slot === k || i.slot === p.slot)).map(([k, p]) => `<option value="${esc(k)}">${esc(p.label || k)}</option>`).join("")}</select></label><button type="button" data-od-action="equip" data-id="${esc(i.id)}" ${!i.quantity ? "disabled" : ""}>Equip</button>` : usable ? `<button type="button" data-od-action="use-item" data-id="${esc(i.id)}" ${!i.quantity || subtype === "grenade" ? "disabled" : ""}>${subtype === "grenade" ? "Grenade \xB7 placeholder" : "Use\u2026"}</button>` : ""}</div></article>`;
+    let controls = "";
+    if (equipment) {
+      const label = i.equippedPart ? '<span class="cp-muted">' + esc(tracker.body[i.equippedPart]?.label || i.equippedPart) + "</span>" : "";
+      if (!gm && i.kind === "implant" && !i.playerRemovable) controls = label + '<span class="cp-pill">GM installation / removal only</span>';
+      else if (i.equippedPart) controls = label + '<button type="button" data-od-action="unequip" data-id="' + esc(i.id) + '">Unequip</button>';
+      else {
+        const options = Object.entries(tracker.body).filter(([key, p]) => (gm || !p.hidden) && equipmentFits(i, key, p) && (i.kind === "implant" || !inv.items.some((other) => ["armor", "shield"].includes(other.kind) && other.equippedPart === key)));
+        controls = '<label>Slot <select data-equip-part="' + esc(i.id) + '">' + options.map(([key, p]) => '<option value="' + esc(key) + '">' + esc(p.label || key) + "</option>").join("") + '</select></label><button type="button" data-od-action="equip" data-id="' + esc(i.id) + '" ' + (!i.quantity || !options.length ? "disabled" : "") + ">Equip</button>";
+      }
+    } else if (usable) controls = '<button type="button" data-od-action="use-item" data-id="' + esc(i.id) + '" ' + (!i.quantity || subtype === "grenade" ? "disabled" : "") + ">" + (subtype === "grenade" ? "Grenade \xB7 placeholder" : "Use\u2026") + "</button>";
+    return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + edit("item", i.id) + "</div>" + (i.description ? '<p class="cp-muted cp-description">' + esc(i.description) + "</p>" : "") + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
   }).join("");
   const ammo = o.ammunition.map((a) => `<article class="cp-card cp-row"><b>${esc(a.name)}</b><span class="cp-pill">Ammo \xD7${a.quantity}</span><span class="cp-muted">DMG ${a.damage} \xB7 AP ${a.penetration}</span>${edit("ammo", a.id)}</article>`).join("");
   const mags = inv.magazines.map((m) => {
@@ -674,7 +726,8 @@ function inventoryView(tracker, gm) {
   return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button></div>' : ""}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
 }
 function templatesView(library, gm) {
-  return `<div class="cp-screen"><p class="cp-muted">Templates are saved in this browser. Export JSON for backup, or save a library scene to your Owlbear account. Account save opens the Assets folder picker; it creates a snapshot.</p><div class="cp-row"><button type="button" data-od-action="save-template">Save character as template</button><button type="button" data-od-action="export-library">Export JSON</button><button type="button" data-od-action="import-library">Import JSON</button><button type="button" data-od-action="account-save">Save to account</button><button type="button" data-od-action="account-load">Load from account</button></div><div class="cp-list">${library.templates.map((t) => `<article class="cp-card cp-row"><b>${esc(t.name)}</b>${gm ? `<button type="button" data-od-action="apply-template" data-id="${esc(t.id)}">Apply to token\u2026</button>` : ""}<button type="button" class="secondary" data-od-action="rename-template" data-id="${esc(t.id)}">Rename</button><button type="button" class="secondary" data-od-action="duplicate-template" data-id="${esc(t.id)}">Duplicate</button><button type="button" class="danger" data-od-action="delete-template" data-id="${esc(t.id)}">Remove</button></article>`).join("") || '<p class="cp-muted">No templates saved.</p>'}</div></div>`;
+  if (!gm) return "";
+  return `<div class="cp-screen cp-templates"><div class="cp-section-title">Character Templates</div><p class="cp-muted">Templates are saved in this browser. Export JSON for backup, or save a library scene to your Owlbear account. Account save opens the Assets folder picker; it creates a snapshot.</p><div class="cp-row"><button type="button" data-od-action="save-template">Save character as template</button><button type="button" data-od-action="export-library">Export JSON</button><button type="button" data-od-action="import-library">Import JSON</button><button type="button" data-od-action="account-save">Save to account</button><button type="button" data-od-action="account-load">Load from account</button></div><div class="cp-list">${library.templates.map((t) => `<article class="cp-card cp-row"><b>${esc(t.name)}</b>${gm ? `<button type="button" data-od-action="apply-template" data-id="${esc(t.id)}">Apply to token\u2026</button>` : ""}<button type="button" class="secondary" data-od-action="rename-template" data-id="${esc(t.id)}">Rename</button><button type="button" class="secondary" data-od-action="duplicate-template" data-id="${esc(t.id)}">Duplicate</button><button type="button" class="danger" data-od-action="delete-template" data-id="${esc(t.id)}">Remove</button></article>`).join("") || '<p class="cp-muted">No templates saved.</p>'}</div></div>`;
 }
 
 // ui/compactHud.js
@@ -691,6 +744,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   const select = (name, label, options, value) => `<label>${esc(label)}<select name="${name}">${options.map(([k, l]) => `<option value="${esc(k)}" ${k === value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
   const checkbox = (name, label, checked) => `<label class="od-check"><input name="${name}" type="checkbox" ${checked ? "checked" : ""}>${esc(label)}</label>`;
   const values = { ...existing, kind: type, acceptsMagazines: existing.acceptsMagazines !== false };
+  values.slots ?? (values.slots = [existing.slot || "any"]);
   values.acceptedMagazineIds ?? (values.acceptedMagazineIds = existing.id ? magazines.filter((m) => m.id === existing.magazineId || m.capacity === existing.capacity && (!m.loaded || (existing.ammoIds || []).includes(m.loadedAmmoId))).map((m) => m.id) : []);
   const skillChoices = [...skills];
   for (const key of Object.keys(existing.bonuses?.skills || {})) if (!skillChoices.some(([k]) => k === key)) skillChoices.push([key, key]);
@@ -707,6 +761,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     Object.assign(values, data);
     if (form.elements.acceptsMagazines) values.acceptsMagazines = form.elements.acceptsMagazines.checked;
     if (form.querySelector('[name="magazineCompatible"]')) values.acceptedMagazineIds = [...form.querySelectorAll('[name="magazineCompatible"]:checked')].map((e) => e.value);
+    if (form.querySelector("[data-equipment-slots]")) values.slots = [...form.querySelectorAll('[name="equipmentSlot"]:checked')].map((e) => e.value);
     values.playerRemovable = !!form.elements.playerRemovable?.checked;
     const bonuses = { attributes: {}, skills: {} };
     for (const input of form.querySelectorAll('[name^="attr:"],[name^="skill:"]')) {
@@ -740,9 +795,9 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
       } else html += field("damage", "Damage", values.damage ?? 0, "number");
     }
     if (["armor", "shield", "implant"].includes(kind)) {
-      html += field("armor", "Armor", values.armor ?? 0, "number") + field("criticalMax", kind === "implant" ? "Body part HP bonus" : "Critical durability", values.criticalMax ?? 1, "number") + (kind === "implant" ? "" : field("criticalDamage", "Critical damage taken", values.criticalDamage ?? 0, "number")) + select("slot", "Equipment slot", [["any", "Any part"], ...parts], values.slot || "any");
+      html += field("armor", "Armor", values.armor ?? 0, "number") + field("criticalMax", kind === "implant" ? "Body part HP bonus" : "Critical durability", values.criticalMax ?? 1, "number") + (kind === "implant" ? "" : field("criticalDamage", "Critical damage taken", values.criticalDamage ?? 0, "number")) + '<fieldset data-equipment-slots class="od-equipment-slots"><legend>Equipment slots \xB7 choose allowed parts</legend>' + [["any", "Any part"], ...parts, ...values.slots.filter((key) => key !== "any" && !parts.some(([k]) => k === key)).map((key) => [key, key])].map(([key, label]) => checkbox("equipmentSlot", label, values.slots.includes(key)).replace('name="equipmentSlot"', 'name="equipmentSlot" value="' + esc(key) + '"')).join("") + "</fieldset>";
       if (kind === "implant") html += '<p class="cp-muted">Adds maximum body-part HP. Equipping does not heal wounds.</p>';
-      if (kind === "implant") html += checkbox("playerRemovable", "Player may remove this implant", values.playerRemovable) + bonusEditor(values.bonuses) + `<fieldset><legend>Granted abilities \xB7 available only while equipped</legend><div data-abilities>${(values.abilities || []).map(abilityRow).join("")}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
+      if (kind === "implant") html += checkbox("playerRemovable", "Player may equip / remove this implant", values.playerRemovable) + bonusEditor(values.bonuses) + `<fieldset><legend>Granted abilities \xB7 available only while equipped</legend><div data-abilities>${(values.abilities || []).map(abilityRow).join("")}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
     }
     host.innerHTML = html;
     for (const input of host.querySelectorAll('[name^="attr:"],[name^="skill:"]')) input.min = "-999";
@@ -794,6 +849,10 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       collect();
+      if (["armor", "shield", "implant"].includes(values.kind) && !values.slots.length) {
+        host.querySelector("[data-equipment-slots]").insertAdjacentHTML("beforeend", '<p class="cp-muted">Choose at least one allowed slot.</p>');
+        return;
+      }
       if (!values.name.trim()) {
         form.elements.name.setCustomValidity("Enter a name.");
         form.elements.name.reportValidity();
@@ -861,6 +920,7 @@ function normalizeInventory(raw, weapons = []) {
     armor: int(r.armor, 999),
     subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
     healCritical: int(r.healCritical ?? 1, 999),
+    slots: [...new Set((Array.isArray(r.slots) ? r.slots : [r.slot || "any"]).map((s) => text(s, 40)).filter(Boolean))].slice(0, 100),
     slot: text(r.slot || "any", 40),
     criticalMax: int(r.criticalMax, 999),
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
@@ -902,7 +962,7 @@ function normalizeInventory(raw, weapons = []) {
     assigned.add(id);
     Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
   }
-  return { version: 3, items, magazines, baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
+  return { version: 4, items, magazines, armorHp: Object.fromEntries(Object.entries(raw?.armorHp || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), { max: int(v?.max, 99999), remaining: int(v?.remaining, 99999) }])), baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
 }
 function magazineWeapon(odyssey, id) {
   return odyssey.weapons.ranged.find((w) => w.magazineId === id);
@@ -972,15 +1032,16 @@ function emptyMagazine(odyssey, id) {
   mag.loaded = 0;
   mag.loadedAmmoId = "";
 }
-function equipItem(tracker, id, partName) {
+function equipItem(tracker, id, partName, gm = true) {
   var _a;
   const item = tracker.odyssey.inventory.items.find((i) => i.id === id);
   if (!item || !["armor", "shield", "implant"].includes(item.kind)) throw new Error("Choose equipment.");
+  if (item.kind === "implant" && !gm && !item.playerRemovable) throw new Error("Only the GM can equip this implant.");
   if (item.quantity < 1 || item.equippedPart) throw new Error("Item is unavailable or already equipped.");
   const part = tracker.body[partName];
   if (!part) throw new Error("Body part no longer exists.");
-  if (item.slot && item.slot !== "any" && item.slot !== partName && item.slot !== (part.slot || "")) throw new Error("This item does not fit the selected slot.");
-  if (item.kind !== "implant" && tracker.odyssey.inventory.items.some((i) => i.kind !== "implant" && i.equippedPart === partName)) throw new Error("Armor is already equipped on this part.");
+  if (!equipmentFits(item, partName, part)) throw new Error("This item does not fit the selected slot.");
+  if (item.kind !== "implant" && tracker.odyssey.inventory.items.some((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName)) throw new Error("Armor is already equipped on this part.");
   (_a = tracker.odyssey.inventory).baseArmor ?? (_a.baseArmor = {});
   if (!Object.hasOwn(tracker.odyssey.inventory.baseArmor, partName)) tracker.odyssey.inventory.baseArmor[partName] = part.armor;
   item.equippedPart = partName;
@@ -1112,7 +1173,7 @@ function saveInventoryEntry(tracker, origin, values, id) {
   }
   if (kind === "implant") row.criticalDamage = 0;
   if (row.criticalDamage > row.criticalMax) throw new Error("Critical damage cannot exceed durability.");
-  if (same?.equippedPart && row.slot !== "any" && row.slot !== same.equippedPart && row.slot !== tracker.body[same.equippedPart]?.slot) throw new Error("Unequip before changing the equipment slot.");
+  if (same?.equippedPart && !equipmentFits(row, same.equippedPart, tracker.body[same.equippedPart])) throw new Error("Unequip before changing the equipment slot.");
   if (same) Object.assign(same, row);
   else {
     if (o.inventory.items.length >= 200) throw new Error("Inventory limit is 200 items.");
@@ -4824,6 +4885,7 @@ function makeTemplate(name, tracker) {
   data.minor = 0;
   data.serious = 0;
   for (const item of data.odyssey.inventory.items) item.criticalDamage = 0;
+  reconcileEquipment(data);
   for (const part of Object.values(data.body)) {
     part.current = part.max;
     part.minor = 0;
@@ -4937,6 +4999,7 @@ function installCharacterTools(host) {
   }
   let busy = false;
   const saveLibrary = (next) => {
+    if (getRole() !== "GM") throw new Error("Only the GM can edit templates.");
     writeLibrary(window.localStorage, next);
     library = next;
     storageError = "";
@@ -4963,7 +5026,7 @@ function installCharacterTools(host) {
     const token = check();
     const tokenId = token.id, panel = node.closest("#selectedTokenPanel"), id = node.dataset.id;
     const gmActions = ["add-item", "edit-item", "delete-item", "add-mag", "fill-mag", "set-mag-rounds", "empty-mag", "delete-mag", "mount-mag", "apply-template"];
-    if (gmActions.includes(action)) check(tokenId, true);
+    if (gmActions.includes(action) || action.includes("template") || action.includes("library") || action.startsWith("account-")) check(tokenId, true);
     if (action === "add-item" || action === "edit-entry") {
       check(tokenId, true);
       const t = host.tracker(token), o = t.odyssey, type = node.dataset.entryType || "item";
@@ -5039,7 +5102,7 @@ function installCharacterTools(host) {
     } else if (action === "consume") await mutate(tokenId, (t) => consumeItem(t, id));
     else if (action === "equip") {
       const part = readSelect(panel, "data-equip-part", id);
-      await mutate(tokenId, (t) => equipItem(t, id, part));
+      await mutate(tokenId, (t) => equipItem(t, id, part, getRole() === "GM"));
     } else if (action === "unequip") await mutate(tokenId, (t) => unequipItem(t, id, getRole() === "GM"));
     else if (action === "add-mag") {
       const value = await formDialog("New magazine", [{ name: "name", label: "Name", required: true, value: "Magazine" }, { name: "capacity", label: "Capacity", type: "number", min: 1, max: 999, value: 6 }]);
@@ -5180,7 +5243,7 @@ function installCharacterTools(host) {
     if (event.key === LIBRARY_STORAGE_KEY) reload();
   });
   const disabledWhileBusy = (html) => busy ? html.replaceAll("<button ", "<button disabled ").replaceAll("<select ", "<select disabled ").replaceAll("<input ", "<input disabled ") : html;
-  return { isBusy: () => busy, renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
+  return { isBusy: () => busy, renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => getRole() !== "GM" ? "" : disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
 }
 
 // shared.js
@@ -7739,6 +7802,7 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
           <button type="button" class="secondary" data-action="open-token-import" ${disabledAttr}>Import Token Data</button>
         </div>
         <input type="file" accept=".json,.txt,.odyssey-token.json" data-token-import-input hidden>
+        ${isEditable() && characterTools ? characterTools.renderTemplates() : ""}
       </div>
     `,
     false
@@ -8160,7 +8224,7 @@ function renderSelectedToken() {
       ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
       ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
       ${canUseToken(token) && characterTools ? renderCollapsibleSection("Items", characterTools.renderInventory(data), false) : ""}
-      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Character Templates", characterTools.renderTemplates(), false) : ""}
+
 
 
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
@@ -8311,7 +8375,7 @@ async function healLimbs() {
     for (const partName of getBodyPartNames(next)) {
       const part = next.body?.[partName];
       if (!part) continue;
-      part.current = part.max;
+      setCombinedPartHp(next, partName, part.max);
       part.minor = 0;
       part.serious = 0;
     }
@@ -8335,9 +8399,9 @@ async function changeBodyField(partName, field, delta) {
     const part = next.body[partName];
     if (!part) return next;
     if (field === "current") {
-      part.current = clamp(part.current + delta, 0, part.max);
+      setCombinedPartHp(next, partName, part.current + delta);
     } else if (field === "max") {
-      part.max = clamp(part.max + delta, 0, 999);
+      setCombinedPartMax(next, partName, part.max + delta);
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
       part.armor = clamp(part.armor + delta, 0, 999);
@@ -8362,11 +8426,9 @@ async function setBodyField(partName, field, value) {
     if (!part) return next;
     const numericValue = clamp(Number(value) || 0, 0, 999);
     if (field === "current") {
-      part.current = clamp(numericValue, 0, part.max);
+      setCombinedPartHp(next, partName, numericValue);
     } else if (field === "max") {
-      const inv = next.odyssey.inventory;
-      if (Object.hasOwn(inv.baseMax || {}, partName)) inv.baseMax[partName] = Math.max(0, numericValue - (part.max - inv.baseMax[partName]));
-      part.max = numericValue;
+      setCombinedPartMax(next, partName, numericValue);
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
       const inv = next.odyssey.inventory;
@@ -8777,9 +8839,9 @@ async function autosaveDraftField(draft2) {
       if (!part) return next;
       const numericValue = clamp(Number(draft2.value) || 0, 0, 999);
       if (draft2.field === "current") {
-        part.current = clamp(numericValue, 0, part.max);
+        setCombinedPartHp(next, draft2.partName, numericValue);
       } else if (draft2.field === "max") {
-        part.max = numericValue;
+        setCombinedPartMax(next, draft2.partName, numericValue);
         part.current = clamp(part.current, 0, part.max);
       } else if (draft2.field === "armor") {
         part.armor = numericValue;
@@ -8983,8 +9045,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const equipmentCrit = projectedPartState.critApplied || 0;
   if (target && result.hit && equipmentCrit) {
     const preview = getTrackerData(target), equipment = absorbEquipmentCritical(preview, result.targetPart, equipmentCrit);
-    projectedPartState.current = Math.max(0, (targetPartState.current || 0) - equipment.remaining);
-    projectedPartState.critApplied = equipment.remaining;
+    projectedPartState.current = Math.max(0, (targetPartState.current || 0) - equipmentCrit);
   }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = target ? projectedPartState.current ?? beforeHp : null;
@@ -9017,7 +9078,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     await updateTrackerData2(target.id, (current2) => {
       const next = structuredClone(current2);
       if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
-        next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
+        setCombinedPartHp(next, SPECIAL_PART_NAME, projectedSpecialState.current);
         next.body[SPECIAL_PART_NAME].minor = projectedSpecialState.minor;
         next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
       }

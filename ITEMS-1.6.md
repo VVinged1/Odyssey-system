@@ -21,3 +21,11 @@ Passive bonus editors can add missing skills. Such skills exist while their gran
 Ranged weapons choose detachable magazines or a built-in magazine. Detachable weapons store compatible magazine IDs and take capacity/ammunition from the mounted magazine. Built-in weapons store compatible ammo, capacity and rounds directly; no physical magazine is synthesized. Legacy weapons retain their previous magazine state. Switching magazine type requires emptying or detaching loaded rounds first.
 
 Validation: 19 integration checks, ammunition suite and browser tests cover both magazine modes, missing-skill rolls, targeted/manual/environment attacks and layout.
+
+## 1.6.2
+
+Players see only armor training skills at level one. Equipment slot checkboxes list allowed locations; equipping still selects a single body part. Each part permits one armor/shield item and multiple implants. The implant player permission now governs both installation and removal. Templates are GM-only and share the Ownership Import / Export area.
+
+Armor durability is included in body-part HP/Max: maximum durability increases Max, remaining durability increases HP. Damage is retained on the armor when removed and restored to the display when re-equipped. Critical hits consume armor HP first; medkits heal only body HP and repair kits heal only armor HP. Manual HP edits and bridge HP deltas use the same pool. Existing V3 tokens migrate without repeatedly adding durability.
+
+Validation: ammunition suite, 23 integration checks and browser tests, including 100 implants on one limb, armor slot conflicts, migration, template health, healing/repair separation, player permissions and combined HP display.

@@ -26,7 +26,7 @@ export function installCharacterTools(host) {
   let library, storageError='';
   try { library=readLibrary(window.localStorage,sanitize); } catch(e) { library=emptyLibrary();storageError=e.message; }
   let busy=false;
-  const saveLibrary=next=>{writeLibrary(window.localStorage,next);library=next;storageError='';render();};
+  const saveLibrary=next=>{if(getRole()!=='GM')throw new Error('Only the GM can edit templates.');writeLibrary(window.localStorage,next);library=next;storageError='';render();};
   const check=(id,gm=false)=>{
     const token=getToken(id);
     if(!token||!canControl(token)||(gm&&getRole()!=='GM')) throw new Error(gm?'Only the GM can perform this action.':'You cannot control this character.');
@@ -41,7 +41,7 @@ export function installCharacterTools(host) {
   async function handle(action,node) {
     const token=check(); const tokenId=token.id, panel=node.closest('#selectedTokenPanel'), id=node.dataset.id;
     const gmActions=['add-item','edit-item','delete-item','add-mag','fill-mag','set-mag-rounds','empty-mag','delete-mag','mount-mag','apply-template'];
-    if(gmActions.includes(action)) check(tokenId,true);
+    if(gmActions.includes(action)||action.includes('template')||action.includes('library')||action.startsWith('account-')) check(tokenId,true);
     if(action==='add-item'||action==='edit-entry') {
       check(tokenId,true);const t=host.tracker(token),o=t.odyssey,type=node.dataset.entryType||'item';
       const existing=action==='edit-entry'?findInventoryEntry(t,type,id):null;
@@ -84,7 +84,7 @@ export function installCharacterTools(host) {
       const yes=await formDialog('Remove item?',[],{danger:true,message:'This removes the item from this token.'});if(!yes)return;
       await mutate(tokenId,t=>{unequipItem(t,id);t.odyssey.inventory.items=t.odyssey.inventory.items.filter(i=>i.id!==id);},true);
     } else if(action==='consume') await mutate(tokenId,t=>consumeItem(t,id));
-    else if(action==='equip') {const part=readSelect(panel,'data-equip-part',id);await mutate(tokenId,t=>equipItem(t,id,part));}
+    else if(action==='equip') {const part=readSelect(panel,'data-equip-part',id);await mutate(tokenId,t=>equipItem(t,id,part,getRole()==='GM'));}
     else if(action==='unequip') await mutate(tokenId,t=>unequipItem(t,id,getRole()==='GM'));
     else if(action==='add-mag') {
       const value=await formDialog('New magazine',[{name:'name',label:'Name',required:true,value:'Magazine'},{name:'capacity',label:'Capacity',type:'number',min:1,max:999,value:6}]);if(!value)return;
@@ -152,5 +152,5 @@ export function installCharacterTools(host) {
   const reload=()=>{try {library=readLibrary(window.localStorage,sanitize);storageError='';render();}catch(e){storageError=e.message;render();}};
   window.addEventListener('storage',event=>{if(event.key===LIBRARY_STORAGE_KEY)reload();});
   const disabledWhileBusy=html=>busy?html.replaceAll('<button ', '<button disabled ').replaceAll('<select ', '<select disabled ').replaceAll('<input ', '<input disabled '):html;
-  return {isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
+  return {isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>getRole()!=='GM'?'':disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
 }

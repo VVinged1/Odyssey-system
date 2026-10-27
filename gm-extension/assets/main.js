@@ -560,13 +560,20 @@ function reconcileEquipment(tracker) {
   inv.baseMax ?? (inv.baseMax = {});
   for (const [partName, part] of Object.entries(tracker.body)) {
     const equipped = inv.items.filter((i) => ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart === partName);
-    const hpBonus = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    const implantHp = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    const armor = equipped.filter((i) => ["armor", "shield"].includes(i.kind) && i.quantity > 0);
+    const pool = { max: armor.reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0), remaining: armor.reduce((sum, i) => sum + Math.max(0, (Number(i.criticalMax) || 0) - (Number(i.criticalDamage) || 0)), 0) };
+    inv.armorHp ?? (inv.armorHp = {});
+    const previous = inv.armorHp[partName]?.remaining || 0;
+    const hpBonus = implantHp + pool.max;
     if (hpBonus && !Object.hasOwn(inv.baseMax, partName)) inv.baseMax[partName] = part.max;
     if (Object.hasOwn(inv.baseMax, partName)) {
       part.max = Math.min(999, inv.baseMax[partName] + hpBonus);
-      part.current = Math.min(part.current, part.max);
+      part.current = Math.max(0, Math.min(part.current + pool.remaining - previous, part.max));
       if (!hpBonus) delete inv.baseMax[partName];
     }
+    if (pool.max) inv.armorHp[partName] = pool;
+    else delete inv.armorHp[partName];
     if (!equipped.length) {
       if (Object.hasOwn(inv.baseArmor, partName)) {
         part.armor = inv.baseArmor[partName];
@@ -595,6 +602,27 @@ function absorbEquipmentCritical(tracker, partName, critical) {
   reconcileEquipment(tracker);
   return { remaining, absorbed };
 }
+function armorHealth(tracker, partName) {
+  const gear = tracker.odyssey.inventory.items.filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName && i.quantity > 0);
+  return { max: gear.reduce((sum, i) => sum + i.criticalMax, 0), remaining: gear.reduce((sum, i) => sum + i.criticalMax - i.criticalDamage, 0) };
+}
+function setCombinedPartHp(tracker, partName, value) {
+  const part = tracker.body[partName];
+  if (!part) return;
+  const goal = Math.max(0, Math.min(Number(value) || 0, part.max)), delta = goal - part.current;
+  if (delta < 0) absorbEquipmentCritical(tracker, partName, -delta);
+  if (delta > 0) {
+    const pool = armorHealth(tracker, partName), bodyCurrent = Math.max(0, part.current - pool.remaining), bodyMax = Math.max(0, part.max - pool.max);
+    let repair = Math.max(0, delta - Math.max(0, bodyMax - bodyCurrent));
+    for (const i of tracker.odyssey.inventory.items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.quantity > 0)) {
+      const heal = Math.min(repair, i.criticalDamage);
+      i.criticalDamage -= heal;
+      repair -= heal;
+    }
+    reconcileEquipment(tracker);
+  }
+  part.current = goal;
+}
 
 // ui/characterView.js
 var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -618,6 +646,7 @@ function normalizeInventory(raw, weapons = []) {
     armor: int(r.armor, 999),
     subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
     healCritical: int(r.healCritical ?? 1, 999),
+    slots: [...new Set((Array.isArray(r.slots) ? r.slots : [r.slot || "any"]).map((s) => text(s, 40)).filter(Boolean))].slice(0, 100),
     slot: text(r.slot || "any", 40),
     criticalMax: int(r.criticalMax, 999),
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
@@ -659,7 +688,7 @@ function normalizeInventory(raw, weapons = []) {
     assigned.add(id);
     Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
   }
-  return { version: 3, items, magazines, baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
+  return { version: 4, items, magazines, armorHp: Object.fromEntries(Object.entries(raw?.armorHp || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), { max: int(v?.max, 99999), remaining: int(v?.remaining, 99999) }])), baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
 }
 
 // node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
@@ -5531,8 +5560,7 @@ async function performEnvironmentAttack() {
   const equipmentCrit = projectedPartState.critApplied || 0;
   if (target && result.hit && equipmentCrit) {
     const preview = getTrackerData(target), equipment = absorbEquipmentCritical(preview, result.targetPart, equipmentCrit);
-    projectedPartState.current = Math.max(0, (targetPartState.current || 0) - equipment.remaining);
-    projectedPartState.critApplied = equipment.remaining;
+    projectedPartState.current = Math.max(0, (targetPartState.current || 0) - equipmentCrit);
   }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = projectedPartState.current ?? beforeHp;
@@ -5541,7 +5569,7 @@ async function performEnvironmentAttack() {
   await updateTrackerData(target.id, (current2) => {
     const next = structuredClone(current2);
     if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
-      next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
+      setCombinedPartHp(next, SPECIAL_PART_NAME, projectedSpecialState.current);
       next.body[SPECIAL_PART_NAME].minor = projectedSpecialState.minor;
       next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
     }

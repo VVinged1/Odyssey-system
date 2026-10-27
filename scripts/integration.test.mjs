@@ -1,4 +1,4 @@
-import {normalizeEffects,effectiveOdyssey,reconcileEquipment,ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical} from '../characterRules.js';
+import {normalizeEffects,effectiveOdyssey,reconcileEquipment,ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical,setCombinedPartHp,setCombinedPartMax} from '../characterRules.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -7,7 +7,7 @@ import { sanitizeAmmunition, sanitizeMagazine, reloadMagazine, getAmmoShot, cons
 import { makeTemplate, instantiateTemplate, profileData, normalizeLibrary, emptyLibrary, mergeLibraries, readLibrary, writeLibrary, libraryFromScenes, LIBRARY_ITEM_KEY, LIBRARY_STORAGE_KEY } from '../profiles.js';
 import { attributeCards, skillCards, inventoryView } from '../ui/characterView.js';
 const source=readFileSync(new URL('../shared.js',import.meta.url),'utf8').replace(/^import .*;\r?$/gm,'').replace(/^export \{ OBR \};\r?$/gm,'').replace(/^export /gm,'');
-const ctx=vm.createContext({structuredClone,normalizeEffects,effectiveOdyssey,reconcileEquipment,ARMOR_TRAINING,normalizeInventory,sanitizeAmmunition,sanitizeMagazine,OBR:{},console});
+const ctx=vm.createContext({structuredClone,normalizeEffects,effectiveOdyssey,reconcileEquipment,setCombinedPartHp,setCombinedPartMax,ARMOR_TRAINING,normalizeInventory,sanitizeAmmunition,sanitizeMagazine,OBR:{},console});
 vm.runInContext(source+'\nthis.sanitize=sanitizeTrackerData; this.canControl=canPlayerControlToken;',ctx);
 const sanitize=ctx.sanitize;
 const legacy=()=>({enabled:true,body:{Torso:{current:2,max:3,armor:6,minor:3,serious:1},'Tail & claw':{current:1,max:4,armor:2,slot:'other',attackPenalty:7,hidden:true,label:'Tail'}},identity:{playerId:'discord-id',characterId:'external-id'},history:[{summary:'Past roll'}],odyssey:{owner:{playerId:'owner',playerName:'Owner'},skills:{Shoot:9,Melee:4,Parry:3},skillCategories:{Shoot:'combat'},skillLabels:{Shoot:'Custom Shot'},skillPerks:{Shoot:['Accurate']},skillStrengthBonuses:{Shoot:true},attributes:{Strength:15,Magic:11},weapons:{melee:[],ranged:[{id:'gun',name:'Rifle',capacity:6,loaded:4,loadedAmmoId:'ball',ammoIds:['ball','ap']}]},ammunition:[{id:'ball',name:'Ball',quantity:10,damage:12,penetration:5},{id:'ap',name:'AP',quantity:8,damage:8,penetration:20}]}});
@@ -137,7 +137,7 @@ test('Armor absorbs critical wounds; medkits heal body, repair kits heal armor',
  let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'armor',name:'Vest',quantity:1,armor:12,criticalMax:2,slot:'any'},'vest');t=sanitize(t);equipItem(t,'vest','Torso');
  assert.deepEqual(absorbEquipmentCritical(t,'Torso',3),{remaining:1,absorbed:2});assert.equal(t.body.Torso.armor,6);
  useItemOnTracker(t,{subtype:'medkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,3);assert.equal(t.odyssey.inventory.items[0].criticalDamage,2);assert.equal(t.body.Torso.minor,3);
- useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,3);assert.equal(t.odyssey.inventory.items[0].criticalDamage,1);assert.equal(t.body.Torso.armor,18);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,4);assert.equal(t.odyssey.inventory.items[0].criticalDamage,1);assert.equal(t.body.Torso.armor,18);
  assert.throws(()=>useItemOnTracker(t,{subtype:'grenade'},'Torso'),/placeholder/);
 });
 test('Type conversion restores body stats; loaded ammo cannot disappear',()=>{
@@ -169,6 +169,35 @@ test('Detachable weapons accept chosen magazines with their own capacity and amm
  assert.equal(inventoryAmmoTotal(t.odyssey),total-3);assert.equal(t.odyssey.inventory.magazines.find(m=>m.id==='large').loaded,4);
  assert.throws(()=>saveInventoryEntry(t,{type:'weapon-ranged',id:'modular'},{kind:'weapon',weaponKind:'ranged',name:'Modular',acceptsMagazines:false,capacity:12,loaded:0,ammoIds:['ap']},'modular'),/Empty or detach/);
  swapMagazine(t.odyssey,index,'');assert.equal(t.odyssey.weapons.ranged[index].capacity,0);assert.equal(t.odyssey.inventory.magazines.find(m=>m.id==='large').loaded,4);
+});
+
+
+
+test('Players see armor training only at level one; templates are GM only',()=>{
+ const o=sanitize(legacy()).odyssey;assert.ok(!skillCards(o,[],false).includes('Armor training'));assert.ok(skillCards(o,[],true).includes('Light Armor 0'));
+ o.skills.light_armor=1;const html=skillCards(o,[],false);assert.ok(html.includes('Light Armor 1'));assert.ok(!html.includes('Medium Armor'));
+});
+test('Several allowed slots, one armor per part and one hundred implants per part',()=>{
+ let t=sanitize(legacy());t.body.Arm={...t.body.Torso,slot:'left-arm',current:3,max:3};
+ saveInventoryEntry(t,null,{kind:'armor',name:'Vest',quantity:1,slots:['Torso','Arm'],criticalMax:2,armor:5},'armor1');saveInventoryEntry(t,null,{kind:'armor',name:'Second',quantity:1,slots:['Torso','Arm'],criticalMax:2,armor:5},'armor2');t=sanitize(t);
+ assert.throws(()=>equipItem(t,'armor1','Tail & claw'),/does not fit/);equipItem(t,'armor1','Arm');assert.throws(()=>equipItem(t,'armor2','Arm'),/already equipped/);
+ for(let i=0;i<100;i++){saveInventoryEntry(t,null,{kind:'implant',name:'Implant '+i,quantity:1,slots:['Arm'],criticalMax:1,armor:0,playerRemovable:true},'impl'+i);equipItem(t,'impl'+i,'Arm',false);}
+ t=sanitize(sanitize(t));assert.equal(t.body.Arm.max,105);assert.equal(t.body.Arm.current,5);assert.equal(t.odyssey.inventory.items.filter(i=>i.equippedPart==='Arm').length,101);
+ t.odyssey.inventory.items.find(i=>i.id==='impl0').playerRemovable=false;unequipItem(t,'impl0',true);assert.throws(()=>equipItem(t,'impl0','Arm',false),/Only the GM/);
+});
+test('Armor adds HP and Max, retains damage, and keeps healing and repair separate',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'armor',name:'Vest',quantity:1,slots:['Torso'],criticalMax:4,armor:12},'vest');t=sanitize(t);equipItem(t,'vest','Torso');
+ assert.equal(t.body.Torso.current,6);assert.equal(t.body.Torso.max,7);t=sanitize(sanitize(t));assert.equal(t.body.Torso.current,6);
+ setCombinedPartHp(t,'Torso',2);assert.equal(t.odyssey.inventory.items[0].criticalDamage,4);assert.equal(t.body.Torso.current,2);
+ useItemOnTracker(t,{subtype:'medkit',healCritical:5},'Torso');assert.equal(t.body.Torso.current,3);assert.throws(()=>useItemOnTracker(t,{subtype:'medkit',healCritical:1},'Torso'),/No critical wounds/);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:2},'Torso');assert.equal(t.body.Torso.current,5);unequipItem(t,'vest');assert.equal(t.body.Torso.current,3);assert.equal(t.body.Torso.max,3);
+ equipItem(t,'vest','Torso');assert.equal(t.body.Torso.current,5);assert.equal(t.body.Torso.max,7);assert.equal(t.odyssey.inventory.items[0].criticalDamage,2);
+ setCombinedPartMax(t,'Torso',10);t=sanitize(t);assert.equal(t.body.Torso.max,10);unequipItem(t,'vest');assert.equal(t.body.Torso.max,6);
+});
+test('Already equipped V3 armor migrates once; healthy templates preserve the combined pool',()=>{
+ const raw=legacy();raw.odyssey.inventory={version:3,items:[{id:'vest',kind:'armor',name:'Vest',quantity:1,armor:12,criticalMax:3,criticalDamage:1,equippedPart:'Torso',previousArmor:6,legacyEquipment:false}],baseArmor:{Torso:6},baseMax:{},magazines:[]};
+ let t=sanitize(raw);assert.equal(t.body.Torso.current,4);assert.equal(t.body.Torso.max,6);t=sanitize(t);assert.equal(t.body.Torso.current,4);assert.equal(t.body.Torso.max,6);
+ const template=makeTemplate('Armored',t),fresh=instantiateTemplate(t,template,sanitize);assert.equal(fresh.body.Torso.current,6);assert.equal(fresh.body.Torso.max,6);assert.equal(fresh.odyssey.inventory.items[0].criticalDamage,0);
 });
 
 console.log(`${count} integration checks passed.`);

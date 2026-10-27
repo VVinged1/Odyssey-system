@@ -21,6 +21,7 @@ try{
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));
  await page.waitForFunction(()=>!document.querySelector('[data-action="set-odyssey-attribute"]'));
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
+ assert.equal(await page.locator('.cp-passives').count(),0);assert.equal(await page.locator('[data-od-action="save-template"]').count(),0);
  console.log('Owner view'); let before=(await data()).history?.length||0;
  await page.locator('[data-action="profile-roll-char"]').first().click();await page.waitForFunction(n=>window.odysseyTest.data().history?.length===n+1,before);
  before=(await data()).history.length;
@@ -62,12 +63,12 @@ try{
  await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>document.querySelector('#statusBox').textContent.includes('Only the GM'));
  assert.equal((await data()).odyssey.weapons.ranged[0].loaded,1);
  assert.equal(await page.locator('[data-od-action="set-mag-rounds"]').count(),0);
- await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-od-action="add-item"]').click();await page.locator('dialog input[name="name"]').fill('Armor <script>');await page.locator('dialog select[name="kind"]').selectOption('armor');await page.locator('dialog input[name="armor"]').fill('12');await page.locator('dialog button[type="submit"]').click();
+ await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-od-action="add-item"]').click();await page.locator('dialog input[name="name"]').fill('Armor <script>');await page.locator('dialog select[name="kind"]').selectOption('armor');await page.locator('dialog input[name="armor"]').fill('12');await page.locator('[name="equipmentSlot"][value="any"]').uncheck();await page.locator('[name="equipmentSlot"][value="Torso"]').check();await page.locator('[name="equipmentSlot"][value="Head"]').check();await page.locator('dialog button[type="submit"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data().odyssey.inventory?.items.length===1);
  assert.equal(await page.locator('script').count(),1);
- await page.locator('[data-od-action="equip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===18);
+ await page.locator('[data-od-action="equip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===18);assert.equal((await data()).body.Torso.current,4);assert.equal((await data()).body.Torso.max,4);await page.waitForFunction(()=>document.querySelector('[data-action="set-field"][data-part="Torso"][data-field="current"]')?.value==='4');assert.deepEqual((await data()).odyssey.inventory.items[0].slots,['Torso','Head']);
  await page.locator('[data-od-action="unequip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===6);
- console.log('Equipment passed'); await openSection('Character Templates');await page.locator('[data-od-action="save-template"]').click();await page.locator('dialog input[name="name"]').fill('Ranger template');await page.locator('dialog button[type="submit"]').click();await page.locator('[data-od-action="apply-template"]').waitFor();
+ console.log('Equipment passed'); await openSection('Ownership');await page.locator('[data-od-action="save-template"]').click();await page.locator('dialog input[name="name"]').fill('Ranger template');await page.locator('dialog button[type="submit"]').click();await page.locator('[data-od-action="apply-template"]').waitFor();
  await page.locator('[data-od-action="account-save"]').click();await page.waitForFunction(()=>window.odysseyTest.state.accountScenes.length===1);
  assert.equal(await page.evaluate(()=>window.odysseyTest.state.accountScenes[0].items.length),1);
  await page.locator('[data-od-action="account-load"]').click();await page.waitForFunction(()=>!document.querySelector('[data-od-action="account-load"]').disabled);
@@ -102,8 +103,8 @@ try{
  console.log('Parry persisted');
  const stim=await addTyped('Focus stim','consumable',async()=>{await page.locator('dialog [name="subtype"]').selectOption('stim');await page.locator('dialog [name="attr:Agility"]').fill('2');await page.locator('dialog [name="attr:Willpower"]').fill('1');assert.equal(await page.locator('dialog [name="armor"]').count(),0);});
  const implant=await addTyped('Reflex frame','implant',async()=>{await page.locator('dialog [name="criticalMax"]').fill('4');await page.locator('dialog [name="armor"]').fill('10');assert.equal(await page.locator('dialog [name="criticalDamage"]').count(),0);await page.locator('dialog [name="attr:Reaction"]').fill('2');await page.locator('[data-add-ability]').click();await page.locator('dialog [name="abilityName"]').fill('Night vision');});
- await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));
- await page.locator('[data-od-action="equip"][data-id="'+implant+'"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.max===7);
+ await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));await page.waitForFunction(()=>!document.querySelector('[data-action="set-odyssey-attribute"]'));
+ assert.equal(await page.locator('[data-od-action="equip"][data-id="'+implant+'"]').count(),0);await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-od-action="equip"][data-id="'+implant+'"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.max===7);await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));await page.waitForFunction(()=>!document.querySelector('[data-od-action="unequip"]'));
  assert.equal((await data()).body.Torso.current,3);assert.equal(await page.locator('[data-od-action="unequip"][data-id="'+implant+'"]').count(),0);
  await page.locator('[data-od-action="use-item"][data-id="'+stim+'"]').click();await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>window.odysseyTest.data().odyssey.effects?.length===1);
  assert.equal((await data()).odyssey.attributes.Agility,12);await page.waitForFunction(()=>document.querySelector('[data-action="profile-roll-char"][data-attribute="Agility"] .cp-attr-val')?.textContent==='14');
@@ -138,7 +139,8 @@ try{
  await page.locator('#publicDicePrivate').check();await page.locator('#publicDiceBtn').click();
  await page.waitForFunction(()=>window.odysseyTest.state.room['com.codex.body-hp/debugLog']?.length===1);
  await page.locator('#pickTargetBtn').click();await page.evaluate(async()=>{await window.odysseyTest.state.targetMode.onToolClick({}, {target:window.odysseyTest.state.items.find(i=>i.id==='enemy')});});
- await page.locator('#attackSkill').fill('10');await page.locator('#weaponDamage').fill('60');await page.evaluate(()=>Math.random=()=>.5);await page.locator('#environmentAttackBtn').click();await page.waitForFunction(()=>window.odysseyTest.data('enemy').body.Torso.current<3);
+ await page.evaluate(()=>{window.odysseyTest.data('enemy').odyssey.inventory={version:4,items:[{id:'test-vest',name:'Vest',kind:'armor',quantity:1,equippedPart:'Torso',criticalMax:2,criticalDamage:0,armor:0}],magazines:[]};window.odysseyTest.refresh();});
+ await page.locator('#attackSkill').fill('10');await page.locator('#weaponDamage').fill('30');await page.evaluate(()=>Math.random=()=>.5);await page.locator('#environmentAttackBtn').click();await page.waitForFunction(()=>window.odysseyTest.data('enemy').odyssey.inventory.items[0].criticalDamage===2);assert.equal(await page.evaluate(()=>window.odysseyTest.data('enemy').body.Torso.current),1);assert.equal(await page.evaluate(()=>window.odysseyTest.data('enemy').body.Torso.max),5);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
  if(shots){await page.setViewportSize({width:1000,height:1100});await page.screenshot({path:path.join(shots,'odyssey-gm-attack.png'),fullPage:true});}
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));await page.locator('#gmOnlyNotice').waitFor();assert.equal(await page.locator('#gmContent').isVisible(),false);

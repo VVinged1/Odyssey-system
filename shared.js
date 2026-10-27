@@ -1,4 +1,4 @@
-import { normalizeEffects, effectiveOdyssey, reconcileEquipment, ARMOR_TRAINING } from "./characterRules.js";
+import { normalizeEffects, effectiveOdyssey, reconcileEquipment, setCombinedPartHp, setCombinedPartMax, ARMOR_TRAINING } from "./characterRules.js";
 import { normalizeInventory } from "./inventory.js";
 import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
@@ -1034,7 +1034,8 @@ function svgToDataUrl(svg) {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-function applyBodyEffects(body, bodyEffects) {
+function applyBodyEffects(next, bodyEffects) {
+  const body=next.body;
   if (!bodyEffects || typeof bodyEffects !== "object") return;
 
   for (const partName of Object.keys(body ?? {})) {
@@ -1045,14 +1046,14 @@ function applyBodyEffects(body, bodyEffects) {
     if (patch.max != null || patch.max_delta != null) {
       const baseMax = patch.max != null ? Number(patch.max) || 0 : part.max;
       const deltaMax = Number(patch.max_delta) || 0;
-      part.max = clamp(baseMax + deltaMax, 0, 999);
+      setCombinedPartMax(next,partName,baseMax+deltaMax);
     }
 
     if (patch.current != null || patch.current_delta != null) {
       const baseCurrent =
         patch.current != null ? Number(patch.current) || 0 : part.current;
       const deltaCurrent = Number(patch.current_delta) || 0;
-      part.current = clamp(baseCurrent + deltaCurrent, 0, part.max);
+      setCombinedPartHp(next,partName,baseCurrent+deltaCurrent);
     } else {
       part.current = clamp(part.current, 0, part.max);
     }
@@ -1107,7 +1108,7 @@ export function applyRollEventToData(current, event) {
     2,
   );
 
-  applyBodyEffects(next.body, effects.body);
+  applyBodyEffects(next, effects.body);
 
   if (effects.identity && typeof effects.identity === "object") {
     next.identity.playerId = String(

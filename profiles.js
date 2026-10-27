@@ -1,3 +1,4 @@
+import {reconcileEquipment} from './characterRules.js';
 import { newId } from './inventory.js';
 export const LIBRARY_FORMAT = 'odyssey-template-library';
 export const TEMPLATE_FORMAT = 'odyssey-character-template';
@@ -12,6 +13,7 @@ export function makeTemplate(name, tracker) {
   const data = profileData(tracker);
   data.minor = 0; data.serious = 0;
   for(const item of data.odyssey.inventory.items)item.criticalDamage=0;
+  reconcileEquipment(data);
   for (const part of Object.values(data.body)) { part.current = part.max; part.minor = 0; part.serious = 0; }
   return {format:TEMPLATE_FORMAT, version:1, id:newId(), name:String(name || 'Character').trim().slice(0,120), updatedAt:new Date().toISOString(), data};
 }

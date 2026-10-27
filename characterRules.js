@@ -9,6 +9,10 @@ export function normalizeBonuses(raw) {
 export function normalizeEffects(raw) {
   const seen=new Set();return (Array.isArray(raw)?raw:[]).slice(0,100).filter(e=>e&&typeof e.id==='string'&&!seen.has(e.id)&&seen.add(e.id)).map(e=>({id:e.id.slice(0,120),name:String(e.name||'Effect').slice(0,120),bonuses:normalizeBonuses(e.bonuses)}));
 }
+export function equipmentFits(item,partName,part) {
+  const slots=Array.isArray(item.slots)?item.slots:[item.slot||'any'];
+  return slots.includes('any')||slots.includes(partName)||slots.includes(part?.slot);
+}
 export function itemActive(item) { return item.quantity>0 && (item.kind==='implant' || !item.criticalMax || item.criticalDamage<item.criticalMax); }
 export function armorSummary(o) {
   const total=(o.inventory?.items||[]).filter(i=>['armor','shield'].includes(i.kind)&&i.equippedPart&&itemActive(i)).reduce((sum,i)=>sum+i.armor,0);
@@ -47,12 +51,17 @@ export function reconcileEquipment(tracker) {
   inv.baseArmor??={}; inv.baseMax??={};
   for(const [partName,part] of Object.entries(tracker.body)) {
     const equipped=inv.items.filter(i=>['armor','shield','implant'].includes(i.kind)&&i.equippedPart===partName);
-    const hpBonus=equipped.filter(i=>i.kind==='implant'&&itemActive(i)).reduce((sum,i)=>sum+(Number(i.criticalMax)||0),0);
+    const implantHp=equipped.filter(i=>i.kind==='implant'&&itemActive(i)).reduce((sum,i)=>sum+(Number(i.criticalMax)||0),0);
+    const armor=equipped.filter(i=>['armor','shield'].includes(i.kind)&&i.quantity>0);
+    const pool={max:armor.reduce((sum,i)=>sum+(Number(i.criticalMax)||0),0),remaining:armor.reduce((sum,i)=>sum+Math.max(0,(Number(i.criticalMax)||0)-(Number(i.criticalDamage)||0)),0)};
+    inv.armorHp??={};const previous=inv.armorHp[partName]?.remaining||0;
+    const hpBonus=implantHp+pool.max;
     if(hpBonus&&!Object.hasOwn(inv.baseMax,partName))inv.baseMax[partName]=part.max;
     if(Object.hasOwn(inv.baseMax,partName)) {
-      part.max=Math.min(999,inv.baseMax[partName]+hpBonus);part.current=Math.min(part.current,part.max);
+      part.max=Math.min(999,inv.baseMax[partName]+hpBonus);part.current=Math.max(0,Math.min(part.current+pool.remaining-previous,part.max));
       if(!hpBonus)delete inv.baseMax[partName];
     }
+    if(pool.max)inv.armorHp[partName]=pool;else delete inv.armorHp[partName];
     if(!equipped.length) {
       if(Object.hasOwn(inv.baseArmor,partName)){part.armor=inv.baseArmor[partName];delete inv.baseArmor[partName];}
       continue;
@@ -75,13 +84,42 @@ export function absorbEquipmentCritical(tracker,partName,critical) {
   }
   reconcileEquipment(tracker);return {remaining,absorbed};
 }
+export function armorHealth(tracker,partName) {
+  const gear=tracker.odyssey.inventory.items.filter(i=>['armor','shield'].includes(i.kind)&&i.equippedPart===partName&&i.quantity>0);
+  return {max:gear.reduce((sum,i)=>sum+i.criticalMax,0),remaining:gear.reduce((sum,i)=>sum+i.criticalMax-i.criticalDamage,0)};
+}
+// Manual HP edits and external HP deltas use the same combined pool as attacks.
+export function setCombinedPartMax(tracker,partName,value) {
+  const part=tracker.body[partName];if(!part)return;
+  const inv=tracker.odyssey.inventory,goal=Math.max(0,Math.min(999,Number(value)||0));
+  if(Object.hasOwn(inv.baseMax||{},partName))inv.baseMax[partName]=Math.max(0,goal-(part.max-inv.baseMax[partName]));
+  part.max=goal;part.current=Math.min(part.current,part.max);reconcileEquipment(tracker);
+}
+export function setCombinedPartHp(tracker,partName,value) {
+  const part=tracker.body[partName];if(!part)return;
+  const goal=Math.max(0,Math.min(Number(value)||0,part.max)),delta=goal-part.current;
+  if(delta<0)absorbEquipmentCritical(tracker,partName,-delta);
+  if(delta>0) {
+    const pool=armorHealth(tracker,partName),bodyCurrent=Math.max(0,part.current-pool.remaining),bodyMax=Math.max(0,part.max-pool.max);
+    let repair=Math.max(0,delta-Math.max(0,bodyMax-bodyCurrent));
+    for(const i of tracker.odyssey.inventory.items.filter(i=>['armor','shield'].includes(i.kind)&&i.equippedPart===partName&&i.quantity>0)) {
+      const heal=Math.min(repair,i.criticalDamage);i.criticalDamage-=heal;repair-=heal;
+    }
+    reconcileEquipment(tracker);
+  }
+  part.current=goal;
+}
 export function useItemOnTracker(target,item,partName,effectId) {
   if(item.subtype==='grenade')throw new Error('Grenades are a placeholder; no action is performed.');
   if(item.subtype==='stim'){target.odyssey.effects??=[];if(target.odyssey.effects.length>=100)throw new Error('Too many active effects.');target.odyssey.effects.push({id:effectId,name:item.name,bonuses:normalizeBonuses(item.bonuses)});return;}
   const part=target.body[partName];if(!part)throw new Error('Choose a body part.');
-  if(item.subtype==='medkit'){if(!item.healCritical||part.current>=part.max)throw new Error('No critical wounds to heal on this part.');part.current=Math.min(part.max,part.current+item.healCritical);return;}
+  if(item.subtype==='medkit') {
+    const pool=armorHealth(target,partName),missing=Math.max(0,part.max-pool.max-Math.max(0,part.current-pool.remaining));
+    if(!item.healCritical||!missing)throw new Error('No critical wounds to heal on this part.');
+    part.current+=Math.min(missing,item.healCritical);return;
+  }
   if(item.subtype==='repairkit') {
-    const gear=target.odyssey.inventory.items.filter(i=>i.equippedPart===partName&&['armor','shield'].includes(i.kind)&&i.criticalDamage>0);
+    const gear=target.odyssey.inventory.items.filter(i=>i.equippedPart===partName&&['armor','shield'].includes(i.kind)&&i.quantity>0&&i.criticalDamage>0);
     if(!gear.length)throw new Error('No damaged armor is equipped on this part.');
     if(!item.healCritical)throw new Error('Repair amount must be greater than zero.');
     let remaining=item.healCritical;for(const i of gear){const heal=Math.min(remaining,i.criticalDamage);i.criticalDamage-=heal;remaining-=heal;}

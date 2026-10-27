@@ -1,6 +1,6 @@
 import {arrangeCombatPanels} from '../ui/combatLayout.js';
 import {installCompactButtons} from '../ui/compactButtons.js';
-import {absorbEquipmentCritical} from '../characterRules.js';
+import {absorbEquipmentCritical,setCombinedPartHp} from '../characterRules.js';
 import {esc} from '../ui/characterView.js';
 import {
   BODY_ORDER,
@@ -693,8 +693,7 @@ async function performEnvironmentAttack() {
   const equipmentCrit=projectedPartState.critApplied||0;
   if(target&&result.hit&&equipmentCrit) {
     const preview=getTrackerData(target),equipment=absorbEquipmentCritical(preview,result.targetPart,equipmentCrit);
-    projectedPartState.current=Math.max(0,(targetPartState.current||0)-equipment.remaining);
-    projectedPartState.critApplied=equipment.remaining;
+    projectedPartState.current=Math.max(0,(targetPartState.current||0)-equipmentCrit);
   }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = projectedPartState.current ?? beforeHp;
@@ -709,7 +708,7 @@ async function performEnvironmentAttack() {
   await updateTrackerData(target.id, (current) => {
     const next = structuredClone(current);
     if (specialResolution.specialActive && next.body[SPECIAL_PART_NAME]) {
-      next.body[SPECIAL_PART_NAME].current = projectedSpecialState.current;
+      setCombinedPartHp(next,SPECIAL_PART_NAME,projectedSpecialState.current);
       next.body[SPECIAL_PART_NAME].minor = projectedSpecialState.minor;
       next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
     }

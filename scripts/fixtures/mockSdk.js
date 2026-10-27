@@ -8,12 +8,12 @@ const emit=(callbacks,value)=>callbacks.forEach(fn=>fn(structuredClone(value)));
 const subscribe=list=>fn=>{list.push(fn);return()=>list.splice(list.indexOf(fn),1);};
 const noop=async()=>{};
 const player=()=>({role:state.role,id:state.id,name:state.name,color:state.color,selection:state.selection});
-function collection(key,callbacks){return {getItems:async()=>structuredClone(state[key]),onChange:subscribe(callbacks),getItemBounds:async()=>({width:100,height:100,center:{x:100,y:100},min:{x:50,y:50},max:{x:150,y:150}}),updateItems:async(ids,updater)=>{const items=state[key].filter(i=>ids.includes(i.id));updater(items);state.writes++;queueMicrotask(()=>emit(callbacks,state[key]));},addItems:async items=>{state[key].push(...structuredClone(items));queueMicrotask(()=>emit(callbacks,state[key]));},deleteItems:async ids=>{state[key]=state[key].filter(i=>!ids.includes(i.id));queueMicrotask(()=>emit(callbacks,state[key]));}};}
+function collection(key,callbacks){return {getItems:async()=>structuredClone(state[key]),onChange:subscribe(callbacks),getItemBounds:async ids=>{const point=state[key].find(i=>ids.includes(i.id))?.position||{x:100,y:100};return {width:100,height:100,center:point,min:{x:point.x-50,y:point.y-50},max:{x:point.x+50,y:point.y+50}};},updateItems:async(ids,updater)=>{const items=state[key].filter(i=>ids.includes(i.id));updater(items);state.writes++;queueMicrotask(()=>emit(callbacks,state[key]));},addItems:async items=>{state[key].push(...structuredClone(items));queueMicrotask(()=>emit(callbacks,state[key]));},deleteItems:async ids=>{state[key]=state[key].filter(i=>!ids.includes(i.id));queueMicrotask(()=>emit(callbacks,state[key]));}};}
 const OBR={isReady:true,isAvailable:true,onReady:fn=>{setTimeout(fn,0);return()=>{};},
  player:{getRole:async()=>state.role,getId:async()=>state.id,getName:async()=>state.name,getColor:async()=>state.color,getSelection:async()=>state.selection,onChange:subscribe(state.playerCallbacks),select:async ids=>{state.selection=ids;emit(state.playerCallbacks,player());}},
  party:{getPlayers:async()=>[{id:'owner',name:'Alex'},{id:'other',name:'Other'}],onChange:()=>()=>{}},
  room:{id:'room',getMetadata:async()=>state.room,setMetadata:async patch=>{Object.assign(state.room,patch);emit(state.roomCallbacks,state.room);},onMetadataChange:subscribe(state.roomCallbacks)},
- scene:{id:'scene',isReady:async()=>true,onReadyChange:()=>()=>{},items:collection('items',state.itemCallbacks),local:collection('local',state.localCallbacks),grid:{getDpi:async()=>100,getScale:async()=>({parsed:{multiplier:1,unit:'m'}})}},
+ scene:{id:'scene',isReady:async()=>true,onReadyChange:()=>()=>{},items:collection('items',state.itemCallbacks),local:collection('local',state.localCallbacks),grid:{getDpi:async()=>100,getScale:async()=>({parsed:{multiplier:1,unit:'m',digits:0}}),getDistance:async(a,b)=>Math.max(Math.abs(a.x-b.x),Math.abs(a.y-b.y))/100,onChange:()=>()=>{}}},
  action:{setWidth:noop,setHeight:noop,setBadgeText:noop},contextMenu:{remove:noop,create:noop},
  broadcast:{sendMessage:noop,onMessage:()=>()=>{}},tool:{remove:noop,removeMode:noop,create:noop,createMode:async mode=>{state.targetMode=mode;},getActiveTool:async()=>'move',getActiveToolMode:async()=>'default',activateTool:noop,activateMode:noop},
  popover:{close:noop,open:async v=>state.popovers.push(v)},
@@ -22,6 +22,7 @@ const OBR={isReady:true,isAvailable:true,onReady:fn=>{setTimeout(fn,0);return()=
 function builder(type){const data={id:crypto.randomUUID(),type,metadata:{},position:{x:0,y:0},layer:'DRAWING'};const proxy=new Proxy({},{get(_,key){if(key==='build')return()=>structuredClone(data);return value=>{data[key]=value;return proxy;};}});return proxy;}
 export const buildText=()=>builder('TEXT');
 export const buildPath=()=>builder('PATH');
+export const buildRuler=()=>builder('RULER');
 export const buildImage=()=>builder('IMAGE');
 export function buildSceneUpload(){const data={name:'',items:[]};const proxy=new Proxy({},{get(_,key){if(key==='build')return()=>structuredClone(data);return value=>{data[key]=value;return proxy;};}});return proxy;}
 export const Command={MOVE:'MOVE',LINE:'LINE',CLOSE:'CLOSE',QUAD:'QUAD',CUBIC:'CUBIC'};

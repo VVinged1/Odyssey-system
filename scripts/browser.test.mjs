@@ -15,6 +15,7 @@ try{
  const page=await browser.newPage({viewport:{width:1000,height:1100}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('[data-action="profile-roll-char"]').first().waitFor();
  assert.equal(await page.locator('.od-hud').count(),0);assert.equal(await page.locator('[data-combat-layout="attack"] .od-combat-card').count(),3);assert.equal(await page.locator('[data-combat-layout="manual"] .od-combat-card').count(),3);
+ const footer=page.locator('[data-combat-layout="attack"] .od-combat-footer');assert.equal(await footer.locator('button').count(),2);const footerButtons=await footer.locator('button').all();const widths=await Promise.all(footerButtons.map(b=>b.boundingBox()));assert.ok(Math.abs(widths[0].width-widths[1].width)<1);assert.equal(await footerButtons[0].textContent(),'Attack');assert.equal(await footerButtons[0].evaluate(e=>e.classList.contains('od-icon-button')),false);
  console.log('UI mounted'); const data=()=>page.evaluate(()=>window.odysseyTest.data());
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
  assert.ok(await page.locator('[data-action="set-odyssey-attribute"]').count());
@@ -29,8 +30,9 @@ try{
  assert.equal((await data()).odyssey.skills.Shoot,9);
  await page.locator('[data-attack-field="weaponName"]').selectOption('ranged:rifle');
  await page.locator('[data-combat-layout="attack"] [data-action="pick-attack-target"]').click();
+ await page.evaluate(()=>window.odysseyTest.state.targetMode.onToolMove({}, {target:window.odysseyTest.state.items.find(i=>i.id==='enemy'),pointerPosition:{x:300,y:100}}));await page.waitForFunction(()=>window.odysseyTest.state.local.some(i=>i.type==='RULER'&&i.measurement==='2 cells · 2m'));
  await page.evaluate(async()=>{await window.odysseyTest.state.targetMode.onToolClick({}, {target:window.odysseyTest.state.items.find(i=>i.id==='enemy')});});
- await page.waitForFunction(()=>window.odysseyTest.data().odyssey.attackDraft.targetTokenId==='enemy');
+ await page.waitForFunction(()=>window.odysseyTest.data().odyssey.attackDraft.targetTokenId==='enemy');await page.waitForFunction(()=>!window.odysseyTest.state.local.some(i=>i.type==='RULER'));await page.waitForFunction(()=>document.querySelector('[data-target-distance]')?.textContent==='2 cells · 2m');
  await page.locator('[data-combat-layout="attack"] [data-action="perform-attack"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data().odyssey.weapons.ranged[0].loaded===3);
  assert.equal((await data()).odyssey.inventory.magazines[0].loaded,3);
@@ -68,6 +70,7 @@ try{
  assert.equal(await page.locator('script').count(),1);
  await page.locator('[data-od-action="equip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===18);assert.equal((await data()).body.Torso.current,4);assert.equal((await data()).body.Torso.max,4);await page.waitForFunction(()=>document.querySelector('[data-action="set-field"][data-part="Torso"][data-field="current"]')?.value==='4');assert.deepEqual((await data()).odyssey.inventory.items[0].slots,['Torso','Head']);
  await page.locator('[data-od-action="unequip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===6);
+ assert.equal(await page.locator('[data-action="export-token-data"],[data-action="open-token-import"]').count(),0);
  console.log('Equipment passed'); await openSection('Ownership');await page.locator('[data-od-action="save-template"]').click();await page.locator('dialog input[name="name"]').fill('Ranger template');await page.locator('dialog button[type="submit"]').click();await page.locator('[data-od-action="apply-template"]').waitFor();
  await page.locator('[data-od-action="account-save"]').click();await page.waitForFunction(()=>window.odysseyTest.state.accountScenes.length===1);
  assert.equal(await page.evaluate(()=>window.odysseyTest.state.accountScenes[0].items.length),1);
@@ -142,7 +145,7 @@ try{
    window.odysseyTest.state.items=[token];window.odysseyTest.refresh();window.odysseyTest.select('new-character');
  });
  await page.waitForFunction(()=>document.querySelector('#selectedTokenPanel').dataset.tokenId==='new-character');await openSection('Items');
- await page.locator('[data-od-action="open-item-pool"]').click();await page.locator('[data-pool-search]').fill('Campaign vest');
+ await page.locator('[data-od-action="open-item-pool"]').click();assert.ok(await page.locator('details[data-pool-category]').count());await page.locator('[data-pool-collapse]').click();assert.equal(await page.locator('details[data-pool-category][open]').count(),0);await page.evaluate(()=>{for(const callback of window.odysseyTest.state.roomCallbacks)callback(structuredClone(window.odysseyTest.state.room));});assert.equal(await page.locator('details[data-pool-category][open]').count(),0);await page.locator('[data-pool-expand]').click();await page.locator('[data-pool-search]').fill('Campaign vest');
  await page.locator('[data-pool-give]').click();await page.locator('dialog input[name="quantity"]').fill('2');await page.locator('dialog button[type="submit"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data('new-character').odyssey.inventory.items.some(i=>i.name==='Campaign vest'&&i.quantity===2&&!i.equippedPart));
  await page.locator('[data-pool-search]').fill('Campaign magazine');await page.locator('[data-pool-give]').click();await page.locator('dialog input[name="quantity"]').fill('3');await page.locator('dialog button[type="submit"]').click();

@@ -393,6 +393,118 @@ var require_events = __commonJS({
   }
 });
 
+// targetDistance.js
+function distanceLabel(cells, scale) {
+  if (!Number.isFinite(cells) || cells < 0) throw new Error("Distance is unavailable.");
+  const digits = Math.max(0, Math.min(5, Number(scale?.parsed?.digits) || 0)), multiplier = Number(scale?.parsed?.multiplier) || 1;
+  const format = (n2, d, min = 0) => Number(n2.toFixed(d)).toLocaleString("en-US", { minimumFractionDigits: min, maximumFractionDigits: d, useGrouping: false });
+  const unit = String(scale?.parsed?.unit || "");
+  return format(cells, 2) + " cells" + (unit ? " \xB7 " + format(cells * multiplier, digits, digits) + unit : "");
+}
+function createTargetDistance({ OBR: OBR2, buildRuler: buildRuler2, onRead, context = "main" }) {
+  const key = "com.codex.body-hp/target-distance", id = crypto.randomUUID();
+  let request = 0, generation = 0, timer = null, latest2 = null, added = false, chain = Promise.resolve(), scalePromise = null;
+  const cache = /* @__PURE__ */ new Map();
+  const initialize = OBR2.scene.local.getItems().then((items) => {
+    const ids = items.filter((i) => i.metadata?.[key] === context).map((i) => i.id);
+    if (ids.length) return OBR2.scene.local.deleteItems(ids);
+  }).catch(() => {
+  });
+  const center = async (target) => target.id ? (await OBR2.scene.items.getItemBounds([target.id])).center : target;
+  async function read(source, target) {
+    const cacheKey = JSON.stringify([source.id, source.position, source.scale, source.rotation, source.grid, source.image?.width, source.image?.height, target.id, target.position || target, target.scale, target.rotation, target.grid, target.image?.width, target.image?.height]);
+    if (!cache.has(cacheKey)) {
+      if (cache.size >= 32) cache.clear();
+      const promise = (async () => {
+        const [from, to, scale] = await Promise.all([center(source), center(target), scalePromise ?? (scalePromise = OBR2.scene.grid.getScale())]);
+        const cells = await OBR2.scene.grid.getDistance(from, to);
+        return { sourceId: source.id, targetId: target.id || "", from, to, cells, label: distanceLabel(cells, scale) };
+      })();
+      cache.set(cacheKey, promise);
+      promise.catch(() => {
+        if (cache.get(cacheKey) === promise) cache.delete(cacheKey);
+      });
+    }
+    return cache.get(cacheKey);
+  }
+  const publish = async (source, target, preview, epoch) => {
+    const current2 = ++request;
+    try {
+      const reading = await read(source, target);
+      if (epoch !== generation || current2 !== request) return preview ? null : reading;
+      onRead(reading);
+      if (preview) {
+        chain = chain.catch(() => {
+        }).then(async () => {
+          await initialize;
+          if (epoch !== generation || current2 !== request) return;
+          if (!added) {
+            const ruler = buildRuler2().id(id).name("Odyssey target distance").startPosition(reading.from).endPosition(reading.to).measurement(reading.label).variant("DASHED").layer("RULER").locked(true).disableHit(true).metadata({ [key]: context }).build();
+            await OBR2.scene.local.addItems([ruler]);
+            added = true;
+          } else await OBR2.scene.local.updateItems([id], (items) => {
+            if (epoch === generation && current2 === request && items[0]) {
+              items[0].startPosition = reading.from;
+              items[0].endPosition = reading.to;
+              items[0].measurement = reading.label;
+            }
+          }, true);
+        });
+        await chain;
+      }
+      return reading;
+    } catch {
+      if (epoch === generation && current2 === request) onRead(null);
+      return null;
+    }
+  };
+  return {
+    preview(source, target) {
+      latest2 = { source, target };
+      if (timer) return;
+      const epoch = generation;
+      timer = setTimeout(() => {
+        timer = null;
+        const next = latest2;
+        if (next) void publish(next.source, next.target, true, epoch);
+      }, 80);
+    },
+    measure(source, target) {
+      return publish(source, target, false, generation);
+    },
+    invalidate() {
+      generation++;
+      request++;
+      cache.clear();
+      scalePromise = null;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (latest2) this.preview(latest2.source, latest2.target);
+    },
+    async clear() {
+      generation++;
+      request++;
+      latest2 = null;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      chain = chain.catch(() => {
+      }).then(async () => {
+        await initialize;
+        if (added) {
+          await OBR2.scene.local.deleteItems([id]);
+          added = false;
+        }
+      });
+      await chain.catch(() => {
+      });
+    }
+  };
+}
+
 // ui/combatLayout.js
 function arrangeCombatPanels(root = document) {
   for (const panel of root.querySelectorAll("[data-combat-layout]:not([data-combat-arranged])")) {
@@ -428,9 +540,27 @@ function arrangeCombatPanels(root = document) {
       details2.append(summary, ...notes);
       cards[2].append(details2);
     }
-    for (const action of [...panel.querySelectorAll(".combat-action,:scope > .row")]) cards[2].append(action);
+    const footer = document.createElement("div");
+    footer.className = "od-combat-footer";
+    const attack = panel.querySelector('[data-action="perform-attack"],[data-action="perform-manual-attack"],#environmentAttackBtn');
+    const pick = cards[1].querySelector('[data-action="pick-attack-target"],#pickTargetBtn');
+    const wide = (button, label) => {
+      button.classList.remove("od-icon-button");
+      button.classList.add("od-wide-action");
+      button.textContent = label;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      footer.append(button);
+    };
+    if (attack) wide(attack, kind === "manual" ? "No Target Attack" : "Attack");
+    if (pick) {
+      const field = pick.closest("label");
+      wide(pick, /cancel/i.test(pick.textContent || pick.title) ? "Cancel Target Pick" : "Pick Target On Map");
+      field?.remove();
+    }
+    for (const obsolete of [...panel.querySelectorAll(":scope > .combat-action,:scope > .row")]) obsolete.remove();
     for (const obsolete of [...panel.querySelectorAll(":scope > .combat-form-grid,:scope > .combat-modifiers")]) obsolete.remove();
-    panel.append(grid);
+    panel.append(grid, footer);
     panel.classList.add("od-combat-panel");
   }
 }
@@ -479,7 +609,7 @@ function iconFor(text2) {
 function installCompactButtons() {
   const enhance = () => {
     for (const button of document.querySelectorAll("button")) {
-      if (button.matches(".cp-attr,.cp-skill-card,.list-item") || button.querySelector("[data-compact-icon]")) continue;
+      if (button.matches(".cp-attr,.cp-skill-card,.list-item,.od-wide-action") || button.querySelector("[data-compact-icon]")) continue;
       const text2 = button.textContent.trim();
       if (!text2 || text2.length <= 2) continue;
       button.title = text2;
@@ -1206,21 +1336,79 @@ function copyBlueprint(tracker, raw, quantity = 1, id = newId()) {
   return id;
 }
 
+// poolCategories.js
+var ARMOR_POOL_TIERS = ["Light Armor", "Medium Armor", "Heavy Armor", "Superheavy Armor", "Outside listed ranges"];
+var SLOTS = { Torso: ["Torso", true], torso: ["Torso", true], Head: ["Head", false], head: ["Head", false], "L.Arm": ["Left Arm", false], "left-arm": ["Left Arm", false], "R.Arm": ["Right Arm", false], "right-arm": ["Right Arm", false], "L.Leg": ["Left Leg", false], "left-leg": ["Left Leg", false], "R.Leg": ["Right Leg", false], "right-leg": ["Right Leg", false], Shield: ["Shield", false], Special: ["Special", false], other: ["Other parts", false] };
+function armorPoolTier(armor, torso = false) {
+  const limits = torso ? [20, 40, 60, 100] : [10, 20, 40, 60];
+  const index = limits.findIndex((max) => Number(armor || 0) <= max);
+  return ARMOR_POOL_TIERS[index < 0 ? 4 : index];
+}
+function poolCategoryPaths(blueprint) {
+  const v = blueprint.values;
+  if (v.kind === "armor" || v.kind === "shield" || v.kind === "implant") {
+    let slots = Array.isArray(v.slots) ? v.slots : [v.slot || "any"];
+    if (slots.includes("any")) slots = ["Torso", "Head", "L.Arm", "R.Arm", "L.Leg", "R.Leg", "other"];
+    const parts = [...new Map(slots.map((key) => {
+      const value = SLOTS[key] || [key, false];
+      return [value[0], value];
+    })).values()];
+    return parts.map(([label, torso]) => v.kind === "implant" ? ["Implants", label] : ["Armor", armorPoolTier(v.armor, torso), label]);
+  }
+  if (v.kind === "consumable" || v.kind === "medical") return [["Usables", { grenade: "Grenades", medkit: "Medkits", repairkit: "Repair kits", stim: "Stims" }[v.subtype] || "Other usables"]];
+  if (v.kind === "weapon") return [["Weapons", v.weaponKind === "ranged" ? "Ranged" : "Melee"]];
+  return [[{ ammo: "Ammunition", magazine: "Magazines", resource: "Resources", tool: "Tools" }[v.kind] || "Other items"]];
+}
+function groupPoolEntries(entries) {
+  const root = { children: /* @__PURE__ */ new Map(), entries: /* @__PURE__ */ new Map() };
+  for (const entry of entries) for (const path of poolCategoryPaths(entry.blueprint)) {
+    let node = root;
+    for (const label of path) {
+      if (!node.children.has(label)) node.children.set(label, { label, children: /* @__PURE__ */ new Map(), entries: /* @__PURE__ */ new Map(), all: /* @__PURE__ */ new Set() });
+      node = node.children.get(label);
+      node.all.add(entry.id);
+    }
+    node.entries.set(entry.id, entry);
+  }
+  const order = ["Usables", "Resources", "Ammunition", "Magazines", "Weapons", "Armor", "Implants", "Tools", "Other items", ...ARMOR_POOL_TIERS, "Torso", "Head", "Left Arm", "Right Arm", "Left Leg", "Right Leg", "Shield", "Special", "Other parts"];
+  const result = (node) => [...node.children.values()].sort((a, b) => {
+    const ai = order.indexOf(a.label), bi = order.indexOf(b.label);
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.label.localeCompare(b.label);
+  }).map((child) => ({ label: child.label, count: child.all.size, entries: [...child.entries.values()], children: result(child) }));
+  return result(root);
+}
+
 // ui/itemPoolView.js
 function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImport }) {
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog od-pool-dialog";
-  dialog.innerHTML = '<div class="cp-row"><h2>Campaign item pool</h2><button type="button" data-pool-close aria-label="Close item pool">\xD7</button></div><p>Give reusable items to ' + esc(character) + '. The pool is shared across scenes in this Owlbear room. Copied equipment is unequipped; magazines are empty.</p><div class="cp-row"><input type="search" data-pool-search placeholder="Search items" aria-label="Search item pool"><button type="button" data-pool-export>Export item pool</button><button type="button" data-pool-import>Import item pool</button></div><p data-pool-status role="status"></p><div class="cp-list" data-pool-list></div>';
+  dialog.innerHTML = '<div class="cp-row"><h2>Campaign item pool</h2><button type="button" data-pool-close aria-label="Close item pool">\xD7</button></div><p>Give reusable items to ' + esc(character) + '. The pool is shared across scenes in this Owlbear room. Copied equipment is unequipped; magazines are empty.</p><div class="cp-row"><input type="search" data-pool-search placeholder="Search items" aria-label="Search item pool"><button type="button" data-pool-export>Export item pool</button><button type="button" data-pool-import>Import item pool</button></div><div class="cp-row"><button type="button" data-pool-expand title="Expand categories" aria-label="Expand categories">\u25BE</button><button type="button" data-pool-collapse title="Collapse categories" aria-label="Collapse categories">\u25B8</button></div><p data-pool-status role="status"></p><div class="cp-list" data-pool-list></div>';
   document.body.append(dialog);
   let busy = false;
+  const expanded = /* @__PURE__ */ new Map();
   const message = dialog.querySelector("[data-pool-status]");
   const refresh = () => {
     const catalog = getCatalog(), search = dialog.querySelector("[data-pool-search]").value.trim().toLowerCase();
-    const entries = catalog.entries.filter((e) => (e.blueprint.values.name + " " + e.blueprint.values.kind).toLowerCase().includes(search));
-    dialog.querySelector("[data-pool-list]").innerHTML = entries.map((e) => {
+    const list = dialog.querySelector("[data-pool-list]");
+    for (const details2 of list.querySelectorAll("details[data-pool-category]")) expanded.set(details2.dataset.poolCategory, details2.open);
+    const row = (e) => {
       const b = e.blueprint, v = b.values;
       return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : ""].filter(Boolean).join(" \xB7 ")) + '</span><button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
-    }).join("") || '<p class="cp-muted">No matching items.</p>';
+    };
+    if (search) {
+      const words = search.split(/\s+/);
+      const matches = catalog.entries.filter((e) => {
+        const text2 = [e.blueprint.values.name, e.blueprint.values.kind, e.blueprint.values.description || "", ...poolCategoryPaths(e.blueprint).flat()].join(" ").toLowerCase();
+        return words.every((word) => text2.includes(word));
+      });
+      list.innerHTML = matches.map(row).join("") || '<p class="cp-muted">No matching items.</p>';
+    } else {
+      const group = (node, path = [], level = 0) => {
+        const key = JSON.stringify([...path, node.label]), open = expanded.get(key) ?? level === 0;
+        return '<details class="od-pool-category" data-pool-category="' + esc(key) + '" ' + (open ? "open" : "") + "><summary>" + esc(node.label) + ' <span class="cp-pill">' + node.count + '</span></summary><div class="od-pool-category-body">' + node.entries.map(row).join("") + node.children.map((child) => group(child, [...path, node.label], level + 1)).join("") + "</div></details>";
+      };
+      list.innerHTML = groupPoolEntries(catalog.entries).map((node) => group(node)).join("") || '<p class="cp-muted">The campaign item pool is empty.</p>';
+    }
     if (catalog.errors) message.textContent = "Some catalog entries could not be read. Export a backup before importing changes.";
   };
   const run = async (fn) => {
@@ -1238,9 +1426,19 @@ function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImp
     }
   };
   dialog.querySelector("[data-pool-search]").oninput = refresh;
+  dialog.addEventListener("toggle", (event) => {
+    if (event.target instanceof HTMLDetailsElement && event.target.isConnected && event.target.dataset.poolCategory) expanded.set(event.target.dataset.poolCategory, event.target.open);
+  }, true);
   dialog.addEventListener("click", (event) => {
     const node = event.target.closest("button");
     if (!node) return;
+    if (node.hasAttribute("data-pool-expand") || node.hasAttribute("data-pool-collapse")) {
+      const open = node.hasAttribute("data-pool-expand");
+      for (const details2 of dialog.querySelectorAll("details[data-pool-category]")) {
+        details2.open = open;
+        expanded.set(details2.dataset.poolCategory, open);
+      }
+    }
     if (node.dataset.poolGive) void run(() => onGive(node.dataset.poolGive));
     if (node.dataset.poolDelete) void run(() => onDelete(node.dataset.poolDelete));
     if (node.hasAttribute("data-pool-export")) void run(onExport);
@@ -4699,6 +4897,40 @@ var ImageBuilder = class extends GenericItemBuilder {
   }
 };
 
+// node_modules/@owlbear-rodeo/sdk/lib/builders/RulerBuilder.js
+var RulerBuilder = class extends GenericItemBuilder {
+  constructor(player) {
+    super(player);
+    this._startPosition = { x: 0, y: 0 };
+    this._endPosition = { x: 0, y: 0 };
+    this._measurement = "";
+    this._item.layer = "RULER";
+    this._item.name = "Ruler";
+    this._style = {
+      variant: "FILLED"
+    };
+  }
+  startPosition(startPosition) {
+    this._startPosition = startPosition;
+    return this.self();
+  }
+  endPosition(endPosition) {
+    this._endPosition = endPosition;
+    return this.self();
+  }
+  measurement(measurement) {
+    this._measurement = measurement;
+    return this.self();
+  }
+  variant(variant) {
+    this._style.variant = variant;
+    return this.self();
+  }
+  build() {
+    return Object.assign(Object.assign({}, this._item), { type: "RULER", startPosition: this._startPosition, endPosition: this._endPosition, measurement: this._measurement, style: this._style });
+  }
+};
+
 // node_modules/@owlbear-rodeo/sdk/lib/builders/TextBuilder.js
 var TextBuilder = class extends GenericItemBuilder {
   constructor(player) {
@@ -5099,6 +5331,9 @@ var OBR = {
 };
 function buildImage(image, grid) {
   return new ImageBuilder(playerApi, image, grid);
+}
+function buildRuler() {
+  return new RulerBuilder(playerApi);
 }
 function buildText() {
   return new TextBuilder(playerApi);
@@ -6700,6 +6935,24 @@ var TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   </svg>`
 )}") 16 16, crosshair`;
 var HUD_MODE = new URLSearchParams(window.location.search).get("hud") === "1";
+var measuredTargetDistance = null;
+var targetDistance = null;
+function paintTargetDistance(reading) {
+  measuredTargetDistance = reading;
+  for (const node of document.querySelectorAll("[data-target-distance]")) node.textContent = reading?.sourceId === activeTokenId ? reading.label : "\u2014";
+}
+function refreshTargetDistance() {
+  if (!targetDistance) return;
+  if (targetPickState.active) {
+    const source2 = getCharacterById(targetPickState.attackerTokenId);
+    if (!source2 || !canUseToken(source2) || source2.id !== activeTokenId) void stopTargetPick();
+    return;
+  }
+  const source = getCharacterById(activeTokenId), targetId = source ? getOdysseyData(source).attackDraft.targetTokenId : "";
+  const target = getCharacterById(targetId);
+  if (source && target && target.visible !== false && canUseToken(source)) void targetDistance.measure(source, target);
+  else paintTargetDistance(null);
+}
 document.documentElement.classList.toggle("od-hud-mode", HUD_MODE);
 var CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 var ATTACK_ONLY_EXCLUDED_SKILLS = /* @__PURE__ */ new Set([PARRY_SKILL_NAME]);
@@ -7208,6 +7461,7 @@ function startSelectionPolling() {
   }, 1500);
 }
 function formatAttackDebug({
+  distance,
   attackerName,
   targetName,
   targetPart,
@@ -7272,6 +7526,7 @@ function formatAttackDebug({
     ["Manual Attack Penalty", manualAttackPenalties],
     ["Auto Target Penalty", automaticTargetPenalty],
     ["Parry Mode", getParryModeLabel(parryMode)],
+    ...distance ? [["Target distance", distance.label]] : [],
     ["Base Parry", baseTargetParry],
     ["Effective Parry", targetParry],
     ["Armor", targetArmor]
@@ -7991,6 +8246,7 @@ async function stopTargetPick(statusMessage = "", statusKind = "info") {
   const wasActive = targetPickState.active;
   targetPickState.active = false;
   targetPickState.attackerTokenId = null;
+  await targetDistance?.clear();
   scheduleRender();
   if (wasActive) {
     await restorePreviousTool();
@@ -8013,6 +8269,14 @@ async function ensureTargetPickerTool() {
     id: TARGET_PICK_MODE_ID,
     icons: [{ icon: EXTENSION_ICON_URL, label: "Pick Attack Target" }],
     cursors: [{ cursor: TARGET_PICK_CURSOR }],
+    onToolMove: (_context, event) => {
+      if (!targetPickState.active || !targetDistance) return;
+      const source = getCharacterById(targetPickState.attackerTokenId);
+      if (!source || !canUseToken(source)) return;
+      const hovered = event.target && isCharacterToken(event.target) && event.target.visible !== false ? getCharacterById(event.target.id) || event.target : null;
+      const target = hovered || event.pointerPosition;
+      if (target) targetDistance.preview(source, target);
+    },
     onToolClick: async (_context, event) => {
       if (!targetPickState.active) return false;
       const attacker = getCharacterById(targetPickState.attackerTokenId);
@@ -8081,6 +8345,7 @@ async function startTargetPick() {
   targetPickState.previousModeId = await lib_default.tool.getActiveToolMode();
   targetPickState.attackerTokenId = attacker.id;
   targetPickState.active = true;
+  measuredTargetDistance = null;
   await ensureTargetPickerTool();
   await lib_default.tool.activateTool(TARGET_PICK_TOOL_ID);
   await lib_default.tool.activateMode(TARGET_PICK_TOOL_ID, TARGET_PICK_MODE_ID);
@@ -8185,11 +8450,6 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
         </label>
       </div>
       <div class="ownership-transfer">
-        <div class="field-label">Import / Export</div>
-        <div class="row row-gap">
-          <button type="button" class="secondary" data-action="export-token-data" ${disabledAttr}>Export Token Data</button>
-          <button type="button" class="secondary" data-action="open-token-import" ${disabledAttr}>Import Token Data</button>
-        </div>
         <input type="file" accept=".json,.txt,.odyssey-token.json" data-token-import-input hidden>
         ${isEditable() && characterTools ? characterTools.renderTemplates() : ""}
       </div>
@@ -8373,6 +8633,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Current Target</span>
           <div class="combat-value">${escapeHtml(targetName)}</div>
+          <span class="od-target-distance" data-target-distance title="Distance between token centres">${measuredTargetDistance?.sourceId === token.id ? escapeHtml(measuredTargetDistance.label) : "\u2014"}</span>
         </label>
         <label class="field-stack">
           <span class="field-label">Pick On Map</span>
@@ -8671,6 +8932,7 @@ function renderSelectedToken() {
     if (e instanceof HTMLButtonElement) e.disabled = true;
   });
   arrangeCombatPanels(ui.selectedTokenPanel);
+  refreshTargetDistance();
   restoreSelectedPanelState(panelState);
 }
 function render() {
@@ -9497,6 +9759,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   await pushDebugEntry(
     `${getAttackOutcomeIcon(result.outcome)} ${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
+      distance: target && targetDistance ? await targetDistance.measure(attacker, target) : null,
       attackerName: getCharacterName(attacker),
       targetName: resolvedTargetName,
       targetPart,
@@ -10362,6 +10625,14 @@ lib_default.onReady(async () => {
           }
         }
       }
+    });
+    targetDistance = createTargetDistance({ OBR: lib_default, buildRuler, onRead: paintTargetDistance, context: HUD_MODE ? "hud" : "main" });
+    lib_default.scene.grid.onChange(() => {
+      targetDistance.invalidate();
+      refreshTargetDistance();
+    });
+    window.addEventListener("beforeunload", () => {
+      void targetDistance.clear();
     });
     bindUiEvents();
     await removeAttackTargetContextMenu();

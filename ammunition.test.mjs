@@ -48,7 +48,7 @@ for (const manualDefense of [false, true]) {
   let resolved;
   let calls = 0;
   const context = vm.createContext({
-    structuredClone, activeTokenId: token.id, playerName: "Player", SPECIAL_PART_NAME: "Special", PARRY_SKILL_NAME: "Parry",
+    structuredClone, targetDistance:null, activeTokenId: token.id, playerName: "Player", SPECIAL_PART_NAME: "Special", PARRY_SKILL_NAME: "Parry",
     getCharacterById: (id) => id === token.id ? token : target,
     canUseToken: () => true, isEditable: () => true,
     getOdysseyData: () => state.odyssey,

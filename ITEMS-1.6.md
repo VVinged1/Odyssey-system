@@ -41,3 +41,13 @@ Equipping one unit from a gear stack separates that unit from the spare quantity
 Validation: ammunition suite, 23 character integration checks, 7 item-pool/instance checks, and browser scenarios for scene changes, new-character issuance, JSON catalog restoration, independent quantities and compact field widths.
 
 Magazine compatibility follows the selected magazine design (name and capacity), so all identical physical copies fit the weapon while retaining separate IDs and round counts.
+
+## 1.8.0
+
+Attack cards align to a stable height and have a footer with equal-width Attack and Pick Target buttons. Manual attacks keep one full-width action. GM environment attacks use the same footer. The duplicate raw token Import / Export controls were removed from Ownership, retaining the template library.
+
+The item pool has collapsible type categories, with armor grouped by automatic per-piece class and allowed body part, and implants by allowed body part. Torso limits are 20/40/60/100; other-part limits are 10/20/40/60 for light/medium/heavy/superheavy. Values beyond the supplied ranges stay visible under Outside listed ranges. Search returns unique matching definitions and also searches category/part labels. Category expansion survives room updates. Character armor-training thresholds are unchanged.
+
+Character target picking previews a private local ruler, measuring token centres with OBR.scene.grid.getDistance and the scene grid scale. The panel and attack detail log show cells and map units. Escape, cancellation or target confirmation removes the preview; selected-target distance updates when tokens move. No range penalties are inferred. SDK reference: https://docs.owlbear.rodeo/extensions/apis/scene/grid/
+
+Validation: ammunition suite, 23 character checks, 10 pool/category/distance checks and browser scenarios covering equal action buttons, removed duplicate exports, category collapse persistence, SDK-driven distance readout and ruler cleanup.

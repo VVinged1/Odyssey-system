@@ -1,3 +1,5 @@
+import {armorPoolTier,poolCategoryPaths,groupPoolEntries} from '../poolCategories.js';
+import {distanceLabel,createTargetDistance} from '../targetDistance.js';
 import assert from 'node:assert/strict';
 import {captureBlueprint,blueprintId,copyBlueprint,poolEntries,exportPool,parsePoolJSON,ITEM_POOL_PREFIX} from '../itemPool.js';
 import {saveInventoryEntry,normalizeInventory,equipItem,unequipItem,setMagazineRounds,swapMagazine} from '../inventory.js';
@@ -35,4 +37,25 @@ await test('Room catalog survives missing scene items; JSON and tombstones prese
  const entries=poolEntries(metadata).entries;assert.equal(entries.length,1);const imported=parsePoolJSON(JSON.parse(JSON.stringify(exportPool(entries))));const target=character();copyBlueprint(target,imported[0],3,'copies');assert.equal(target.odyssey.inventory.magazines.length,3);assert.ok(target.odyssey.inventory.magazines.every(m=>m.loaded===0));
  metadata[ITEM_POOL_PREFIX+id]={deleted:true};assert.equal(poolEntries(metadata).entries.length,0);assert.throws(()=>parsePoolJSON({format:'other',version:1,entries:[]}),/Choose/);
 });
-console.log(count+' item pool and instance checks passed.');
+
+await test('Armor pool categories use per-part boundaries and keep unique parent counts',()=>{
+ for(const [value,expected]of [[20,'Light Armor'],[21,'Medium Armor'],[40,'Medium Armor'],[41,'Heavy Armor'],[60,'Heavy Armor'],[61,'Superheavy Armor'],[100,'Superheavy Armor'],[101,'Outside listed ranges']])assert.equal(armorPoolTier(value,true),expected);
+ for(const [value,expected]of [[10,'Light Armor'],[11,'Medium Armor'],[20,'Medium Armor'],[21,'Heavy Armor'],[40,'Heavy Armor'],[41,'Superheavy Armor'],[60,'Superheavy Armor'],[61,'Outside listed ranges']])assert.equal(armorPoolTier(value,false),expected);
+ const blueprint={values:{kind:'armor',armor:20,slots:['Torso','L.Arm']}};assert.deepEqual(poolCategoryPaths(blueprint),[['Armor','Light Armor','Torso'],['Armor','Medium Armor','Left Arm']]);assert.equal(groupPoolEntries([{id:'one',blueprint}])[0].count,1);
+ assert.deepEqual(poolCategoryPaths({values:{kind:'implant',slots:['Head','R.Arm']}}),[['Implants','Head'],['Implants','Right Arm']]);
+});
+await test('Distance uses SDK grid output and scene precision, including local ruler cleanup',async()=>{
+ const items=[],calls=[],reads=[];const points={source:{x:100,y:100},target:{x:400,y:300}};
+ const OBR={scene:{items:{getItemBounds:async ids=>({center:points[ids[0]]})},grid:{getScale:async()=>({parsed:{multiplier:5,unit:'ft',digits:1}}),getDistance:async(from,to)=>{calls.push([from,to]);return 2.5;}},local:{getItems:async()=>items,addItems:async rows=>items.push(...rows),updateItems:async(ids,fn)=>fn(items.filter(i=>ids.includes(i.id))),deleteItems:async ids=>{for(let i=items.length-1;i>=0;i--)if(ids.includes(items[i].id))items.splice(i,1);}}}};
+ const buildRuler=()=>{const data={type:'RULER'},proxy=new Proxy({},{get:(_,key)=>key==='build'?()=>({...data}):value=>{data[key]=value;return proxy;}});return proxy;};
+ const ruler=createTargetDistance({OBR,buildRuler,onRead:value=>reads.push(value)}),source={id:'source',position:points.source},target={id:'target',position:points.target};
+ const reading=await ruler.measure(source,target);assert.equal(reading.label,'2.5 cells · 12.5ft');assert.deepEqual(calls[0],[points.source,points.target]);await ruler.measure(source,target);assert.equal(calls.length,1);
+ ruler.preview(source,target);await new Promise(resolve=>setTimeout(resolve,120));assert.equal(items.length,1);assert.equal(items[0].measurement,reading.label);assert.equal(items[0].disableHit,true);
+ await ruler.clear();assert.equal(items.length,0);ruler.invalidate();await ruler.measure(source,target);assert.equal(calls.length,2);assert.equal(distanceLabel(2,{parsed:{multiplier:5,unit:'m',digits:2}}),'2 cells · 10.00m');
+});
+await test('Cancelling an in-flight ruler calculation cannot leave a local artifact',async()=>{
+ const items=[];let release;const delayed=new Promise(resolve=>release=resolve);
+ const OBR={scene:{items:{getItemBounds:async()=>({center:{x:0,y:0}})},grid:{getScale:async()=>({parsed:{multiplier:1,unit:'m'}}),getDistance:async()=>delayed},local:{getItems:async()=>[],addItems:async rows=>items.push(...rows),deleteItems:async()=>{items.length=0;}}}};
+ const ruler=createTargetDistance({OBR,buildRuler:()=>{throw new Error('Cancelled ruler must not be built.');},onRead:()=>{}});ruler.preview({id:'source'},{x:100,y:100});await new Promise(resolve=>setTimeout(resolve,90));await ruler.clear();release(1);await new Promise(resolve=>setTimeout(resolve,0));assert.equal(items.length,0);
+});
+console.log(count+' item pool, category, instance and distance checks passed.');

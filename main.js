@@ -1,3 +1,4 @@
+import {createTargetDistance} from './targetDistance.js';
 import {arrangeCombatPanels} from './ui/combatLayout.js';
 import {installCompactButtons} from './ui/compactButtons.js';
 import {ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical,setCombinedPartHp,setCombinedPartMax,reconcileEquipment} from './characterRules.js';
@@ -6,7 +7,7 @@ import { attributeCards, skillCards, effectChips } from "./ui/characterView.js";
 import { installCharacterTools } from "./ui/characterTools.js";
 import { profileData } from "./profiles.js";
 import { swapMagazine } from "./inventory.js";
-import { Command, buildImage, buildPath } from "@owlbear-rodeo/sdk";
+import { Command, buildImage, buildPath, buildRuler } from "@owlbear-rodeo/sdk";
 import { reloadMagazine, getAmmoShot, consumeAmmo, effectiveArmor } from "./ammunition.js";
 import {
   ABILITIES_SKILL_CATEGORY,
@@ -71,6 +72,19 @@ const TARGET_PICK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   </svg>`,
 )}") 16 16, crosshair`;
 const HUD_MODE = new URLSearchParams(window.location.search).get("hud") === "1";
+let measuredTargetDistance=null,targetDistance=null;
+function paintTargetDistance(reading) {
+  measuredTargetDistance=reading;
+  for(const node of document.querySelectorAll('[data-target-distance]'))node.textContent=reading?.sourceId===activeTokenId?reading.label:'—';
+}
+function refreshTargetDistance() {
+  if(!targetDistance)return;
+  if(targetPickState.active){const source=getCharacterById(targetPickState.attackerTokenId);if(!source||!canUseToken(source)||source.id!==activeTokenId)void stopTargetPick();return;}
+  const source=getCharacterById(activeTokenId),targetId=source?getOdysseyData(source).attackDraft.targetTokenId:'';
+  const target=getCharacterById(targetId);
+  if(source&&target&&target.visible!==false&&canUseToken(source))void targetDistance.measure(source,target);else paintTargetDistance(null);
+}
+
 document.documentElement.classList.toggle("od-hud-mode", HUD_MODE);
 const CORE_COMBAT_SKILLS = Object.keys(DEFAULT_ODYSSEY_SKILLS);
 const ATTACK_ONLY_EXCLUDED_SKILLS = new Set([PARRY_SKILL_NAME]);
@@ -743,6 +757,7 @@ function startSelectionPolling() {
 }
 
 function formatAttackDebug({
+  distance,
   attackerName,
   targetName,
   targetPart,
@@ -808,6 +823,7 @@ function formatAttackDebug({
     ["Manual Attack Penalty", manualAttackPenalties],
     ["Auto Target Penalty", automaticTargetPenalty],
     ["Parry Mode", getParryModeLabel(parryMode)],
+    ...(distance?[["Target distance",distance.label]]:[]),
     ["Base Parry", baseTargetParry],
     ["Effective Parry", targetParry],
     ["Armor", targetArmor],
@@ -1725,6 +1741,7 @@ async function stopTargetPick(statusMessage = "", statusKind = "info") {
   const wasActive = targetPickState.active;
   targetPickState.active = false;
   targetPickState.attackerTokenId = null;
+  await targetDistance?.clear();
   scheduleRender();
 
   if (wasActive) {
@@ -1754,6 +1771,12 @@ async function ensureTargetPickerTool() {
     id: TARGET_PICK_MODE_ID,
     icons: [{ icon: EXTENSION_ICON_URL, label: "Pick Attack Target" }],
     cursors: [{ cursor: TARGET_PICK_CURSOR }],
+    onToolMove: (_context,event)=>{
+      if(!targetPickState.active||!targetDistance)return;
+      const source=getCharacterById(targetPickState.attackerTokenId);if(!source||!canUseToken(source))return;
+      const hovered=event.target&&isCharacterToken(event.target)&&event.target.visible!==false?getCharacterById(event.target.id)||event.target:null;
+      const target=hovered||event.pointerPosition;if(target)targetDistance.preview(source,target);
+    },
     onToolClick: async (_context, event) => {
       if (!targetPickState.active) return false;
 
@@ -1835,6 +1858,7 @@ async function startTargetPick() {
   targetPickState.previousModeId = await OBR.tool.getActiveToolMode();
   targetPickState.attackerTokenId = attacker.id;
   targetPickState.active = true;
+  measuredTargetDistance=null;
 
   await ensureTargetPickerTool();
   await OBR.tool.activateTool(TARGET_PICK_TOOL_ID);
@@ -1957,11 +1981,6 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
         </label>
       </div>
       <div class="ownership-transfer">
-        <div class="field-label">Import / Export</div>
-        <div class="row row-gap">
-          <button type="button" class="secondary" data-action="export-token-data" ${disabledAttr}>Export Token Data</button>
-          <button type="button" class="secondary" data-action="open-token-import" ${disabledAttr}>Import Token Data</button>
-        </div>
         <input type="file" accept=".json,.txt,.odyssey-token.json" data-token-import-input hidden>
         ${isEditable()&&characterTools?characterTools.renderTemplates():""}
       </div>
@@ -3011,6 +3030,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Current Target</span>
           <div class="combat-value">${escapeHtml(targetName)}</div>
+          <span class="od-target-distance" data-target-distance title="Distance between token centres">${measuredTargetDistance?.sourceId===token.id?escapeHtml(measuredTargetDistance.label):"—"}</span>
         </label>
         <label class="field-stack">
           <span class="field-label">Pick On Map</span>
@@ -3406,6 +3426,7 @@ function renderSelectedToken() {
 
   if(characterTools?.isBusy())ui.selectedTokenPanel.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
   arrangeCombatPanels(ui.selectedTokenPanel);
+  refreshTargetDistance();
   restoreSelectedPanelState(panelState);
 }
 
@@ -4430,6 +4451,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   await pushDebugEntry(
     `${getAttackOutcomeIcon(result.outcome)} ${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
+      distance: target&&targetDistance?await targetDistance.measure(attacker,target):null,
       attackerName: getCharacterName(attacker),
       targetName: resolvedTargetName,
       targetPart,
@@ -5363,6 +5385,9 @@ OBR.onReady(async () => {
       render:scheduleRender, status:setStatus, download:downloadTextFile,
       resetDraft:id => { attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },
     });
+    targetDistance=createTargetDistance({OBR,buildRuler,onRead:paintTargetDistance,context:HUD_MODE?'hud':'main'});
+    OBR.scene.grid.onChange(()=>{targetDistance.invalidate();refreshTargetDistance();});
+    window.addEventListener('beforeunload',()=>{void targetDistance.clear();});
     bindUiEvents();
     await removeAttackTargetContextMenu();
     await Promise.all([

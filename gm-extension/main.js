@@ -320,6 +320,7 @@ function renderTargetState() {
   const isPicking = targetPickState.active;
   ui.targetName.textContent = target ? getCharacterName(target) : "No target selected";
   ui.pickTargetBtn.textContent = isPicking ? "Cancel Target Pick" : "Pick Target On Map";
+  ui.pickTargetBtn.title=ui.pickTargetBtn.textContent;ui.pickTargetBtn.setAttribute("aria-label",ui.pickTargetBtn.textContent);
   ui.pickTargetBtn.disabled = playerRole !== "GM" || !getCharacters().length;
   ui.clearTargetBtn.disabled = playerRole !== "GM" || !target;
   ui.environmentAttackBtn.disabled = playerRole !== "GM" || !target;

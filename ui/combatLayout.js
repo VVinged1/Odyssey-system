@@ -22,8 +22,14 @@ export function arrangeCombatPanels(root=document) {
       const details=document.createElement('details');details.className='combat-notes';
       const summary=document.createElement('summary');summary.textContent='Attack rules';details.append(summary,...notes);cards[2].append(details);
     }
-    for(const action of [...panel.querySelectorAll('.combat-action,:scope > .row')])cards[2].append(action);
+    const footer=document.createElement('div');footer.className='od-combat-footer';
+    const attack=panel.querySelector('[data-action="perform-attack"],[data-action="perform-manual-attack"],#environmentAttackBtn');
+    const pick=cards[1].querySelector('[data-action="pick-attack-target"],#pickTargetBtn');
+    const wide=(button,label)=>{button.classList.remove('od-icon-button');button.classList.add('od-wide-action');button.textContent=label;button.title=label;button.setAttribute('aria-label',label);footer.append(button);};
+    if(attack)wide(attack,kind==='manual'?'No Target Attack':'Attack');
+    if(pick){const field=pick.closest('label');wide(pick,/cancel/i.test(pick.textContent||pick.title)?'Cancel Target Pick':'Pick Target On Map');field?.remove();}
+    for(const obsolete of [...panel.querySelectorAll(':scope > .combat-action,:scope > .row')])obsolete.remove();
     for(const obsolete of [...panel.querySelectorAll(':scope > .combat-form-grid,:scope > .combat-modifiers')])obsolete.remove();
-    panel.append(grid);panel.classList.add('od-combat-panel');
+    panel.append(grid,footer);panel.classList.add('od-combat-panel');
   }
 }

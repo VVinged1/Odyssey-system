@@ -428,9 +428,27 @@ function arrangeCombatPanels(root = document) {
       details2.append(summary, ...notes);
       cards[2].append(details2);
     }
-    for (const action of [...panel.querySelectorAll(".combat-action,:scope > .row")]) cards[2].append(action);
+    const footer = document.createElement("div");
+    footer.className = "od-combat-footer";
+    const attack = panel.querySelector('[data-action="perform-attack"],[data-action="perform-manual-attack"],#environmentAttackBtn');
+    const pick = cards[1].querySelector('[data-action="pick-attack-target"],#pickTargetBtn');
+    const wide = (button, label) => {
+      button.classList.remove("od-icon-button");
+      button.classList.add("od-wide-action");
+      button.textContent = label;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      footer.append(button);
+    };
+    if (attack) wide(attack, kind === "manual" ? "No Target Attack" : "Attack");
+    if (pick) {
+      const field = pick.closest("label");
+      wide(pick, /cancel/i.test(pick.textContent || pick.title) ? "Cancel Target Pick" : "Pick Target On Map");
+      field?.remove();
+    }
+    for (const obsolete of [...panel.querySelectorAll(":scope > .combat-action,:scope > .row")]) obsolete.remove();
     for (const obsolete of [...panel.querySelectorAll(":scope > .combat-form-grid,:scope > .combat-modifiers")]) obsolete.remove();
-    panel.append(grid);
+    panel.append(grid, footer);
     panel.classList.add("od-combat-panel");
   }
 }
@@ -479,7 +497,7 @@ function iconFor(text2) {
 function installCompactButtons() {
   const enhance = () => {
     for (const button of document.querySelectorAll("button")) {
-      if (button.matches(".cp-attr,.cp-skill-card,.list-item") || button.querySelector("[data-compact-icon]")) continue;
+      if (button.matches(".cp-attr,.cp-skill-card,.list-item,.od-wide-action") || button.querySelector("[data-compact-icon]")) continue;
       const text2 = button.textContent.trim();
       if (!text2 || text2.length <= 2) continue;
       button.title = text2;
@@ -5261,6 +5279,8 @@ function renderTargetState() {
   const isPicking = targetPickState.active;
   ui.targetName.textContent = target ? getCharacterName(target) : "No target selected";
   ui.pickTargetBtn.textContent = isPicking ? "Cancel Target Pick" : "Pick Target On Map";
+  ui.pickTargetBtn.title = ui.pickTargetBtn.textContent;
+  ui.pickTargetBtn.setAttribute("aria-label", ui.pickTargetBtn.textContent);
   ui.pickTargetBtn.disabled = playerRole !== "GM" || !getCharacters().length;
   ui.clearTargetBtn.disabled = playerRole !== "GM" || !target;
   ui.environmentAttackBtn.disabled = playerRole !== "GM" || !target;

@@ -693,6 +693,7 @@ function normalizeInventory(raw, weapons = []) {
     armor: int(r.armor, 999),
     subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
     healCritical: int(r.healCritical ?? 1, 999),
+    useSkill: text(r.useSkill, 80),
     slots: [...new Set((Array.isArray(r.slots) ? r.slots : [r.slot || "any"]).map((s) => text(s, 40)).filter(Boolean))].slice(0, 100),
     slot: text(r.slot || "any", 40),
     criticalMax: int(r.criticalMax, 999),

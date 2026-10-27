@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node ammunition.test.mjs && node scripts/integration.test.mjs && node scripts/itemPool.test.mjs && node scripts/range.test.mjs && node scripts/fieldDrafts.test.mjs && node scripts/campaignPoolStore.test.mjs",
-    "test:ui": "node scripts/browser.test.mjs && node scripts/concurrency.test.mjs && node scripts/poolPersistence.test.mjs"
+    "test": "node ammunition.test.mjs && node scripts/integration.test.mjs && node scripts/itemPool.test.mjs && node scripts/range.test.mjs && node scripts/fieldDrafts.test.mjs && node scripts/campaignPoolStore.test.mjs && node scripts/itemUse.test.mjs",
+    "test:ui": "node scripts/browser.test.mjs && node scripts/concurrency.test.mjs && node scripts/poolPersistence.test.mjs && node scripts/itemUse.browser.test.mjs"
   },
   "dependencies": {
     "@owlbear-rodeo/sdk": "3.1.0"

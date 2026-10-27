@@ -1,3 +1,4 @@
+import {applyCheckedItemUse,itemUseSummary} from './itemUse.js';
 import {createFieldDrafts,createTokenWriteQueue} from './fieldDrafts.js';
 import {rangeAdjustment,rangeAdjustmentLabel} from './rangeRules.js';
 import {createTargetDistance} from './targetDistance.js';
@@ -4701,20 +4702,27 @@ async function performRollCharOnce(options = {}) {
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 
-async function useCharacterItem(sourceId,itemId,targetId,partName) {
-  const effectId=crypto.randomUUID();
-  await OBR.scene.items.updateItems([...new Set([sourceId,targetId])],items=>{
+async function useCharacterItem(sourceId,itemId,targetId,partName,attribute='') {
+  const effectId=crypto.randomUUID();let result,actorName;
+  await queueTrackerWrite(sourceId,()=>OBR.scene.items.updateItems([...new Set([sourceId,targetId])],items=>{
     const source=items.find(t=>t.id===sourceId),target=items.find(t=>t.id===targetId);
     if(!source||!target||!canUseToken(source))throw new Error('Character is unavailable.');
     if(playerRole!=='GM'&&(target.visible===false||getTrackerData(target).body[partName]?.hidden))throw new Error('Target is unavailable.');
     const sourceData=getTrackerData(source),targetData=source===target?sourceData:getTrackerData(target);
     const item=sourceData.odyssey.inventory.items.find(i=>i.id===itemId);
-    if(!item||!['consumable','medical'].includes(item.kind)||item.quantity<1)throw new Error('No usable item available.');
-    if(playerRole!=='GM'&&item.subtype==='repairkit'){const gear=targetData.odyssey.inventory.items.find(i=>i.id===partName);if(gear?.equippedPart&&targetData.body[gear.equippedPart]?.hidden)throw new Error('Target is unavailable.');}
-    useItemOnTracker(targetData,item,partName,effectId);item.quantity-=1;
-    source.metadata[META_KEY]=sanitizeTrackerData(sourceData);target.metadata[META_KEY]=sanitizeTrackerData(targetData);
-  });
+    if(playerRole!=='GM'&&item?.subtype==='repairkit'){const gear=targetData.odyssey.inventory.items.find(i=>i.id===partName);if(gear?.equippedPart&&targetData.body[gear.equippedPart]?.hidden)throw new Error('Target is unavailable.');}
+    result=applyCheckedItemUse({source:sourceData,target:targetData,itemId,selection:partName,attribute,effectId,rollCharacter:rollCharacterCheck,rollSkill:rollSkillCheck});
+    actorName=getCharacterName(source);result.summary=itemUseSummary(result)+' → '+getCharacterName(target);
+    if(result.mode!=='none'){
+      const last=result.stages.at(-1)?.result;result.source.lastRoll={eventId:0,actorName,summary:result.summary,outcome:'item-use',total:last?.totalPrimary??last?.roll??0,targetPart:item?.subtype==='medkit'?partName:'',timestamp:new Date().toISOString(),source:'owlbear-extension'};
+      result.source.history=[result.source.lastRoll,...(result.source.history||[])].slice(0,12);
+    }
+    source.metadata[META_KEY]=sanitizeTrackerData(result.source);
+    if(source!==target&&result.success)target.metadata[META_KEY]=sanitizeTrackerData(result.target);
+  }));
   await syncState();await Promise.all([...new Set([sourceId,targetId])].map(ensureOverlayForToken));scheduleRender();
+  if(result.mode!=='none')try{await pushDebugEntry(actorName+' uses '+result.itemName,result.summary,result.success?'success':'error');}catch(error){console.warn('[Odyssey] Item use was saved; public log failed',error);result.summary+=' · Public log unavailable; result saved on character.';}
+  return {summary:result.summary,success:result.success};
 }
 
 async function performRollSkillOnce(options = {}) {

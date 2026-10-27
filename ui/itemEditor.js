@@ -22,6 +22,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
   function abilityRow(a={}) {return `<div class="od-ability-row">${field('abilityName','Ability',a.name||'')}${field('abilityLevel','Level',a.level||0,'number',10)}${field('abilityDescription','Description',a.description||'')}<button type="button" data-remove-ability aria-label="Remove ability">×</button></div>`;}
   function collect() {
     const data=Object.fromEntries(new FormData(form));Object.assign(values,data);
+    if(form.elements.useSkill){const input=String(values.useSkill||'').trim();const match=skillChoices.find(([key,label])=>key.toLowerCase()===input.toLowerCase()||label.toLowerCase()===input.toLowerCase());values.useSkill=match?match[1]:input;}
     if(form.elements.acceptsMagazines)values.acceptsMagazines=form.elements.acceptsMagazines.checked;
     if(form.querySelector('[name="magazineCompatible"]'))values.acceptedMagazineIds=[...form.querySelectorAll('[name="magazineCompatible"]:checked')].map(e=>e.value);
     if(form.querySelector('[data-equipment-slots]'))values.slots=[...form.querySelectorAll('[name="equipmentSlot"]:checked')].map(e=>e.value);
@@ -40,6 +41,7 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     let html='';
     if(kind==='consumable') {
       html+=select('subtype','Use type',[['grenade','Grenade · placeholder'],['medkit','Medkit'],['repairkit','Repair kit'],['stim','Stim']],values.subtype||'grenade');
+      html+='<label>Use skill · optional<input name="useSkill" maxlength="80" list="od-item-use-skills" value="'+esc(values.useSkill||'')+'" placeholder="None · no check"></label><datalist id="od-item-use-skills">'+skillChoices.map(([key,label])=>'<option value="'+esc(label)+'"></option>').join('')+'</datalist><p class="cp-muted">Known skill: skill check. Unknown skill: choose a characteristic, then d100 vs d100. Failed checks spend the item.</p>';
       if(['medkit','repairkit'].includes(values.subtype))html+=field('healCritical','Critical wounds restored',values.healCritical??1,'number');
       if(values.subtype==='stim')html+=bonusEditor(values.bonuses,false);
       if(!values.subtype||values.subtype==='grenade')html+='<p class="cp-muted">Grenades have no action yet.</p>';

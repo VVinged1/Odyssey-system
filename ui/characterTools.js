@@ -1,9 +1,10 @@
+import {itemUseRequirement} from '../itemUse.js';
 import {installDescriptions} from './descriptions.js';
 import {createCampaignPoolStore} from '../campaignPoolStore.js';
 import {captureBlueprint,blueprintText,blueprintId,validateBlueprint,poolEntries,parsePoolJSON,exportPool,copyBlueprint,ITEM_POOL_PREFIX,ITEM_POOL_ASSET_KEY,poolFromScenes} from '../itemPool.js';
 import {showItemPool} from './itemPoolView.js';
 import {itemEditor,skillEditor} from './itemEditor.js';
-import {ARMOR_TRAINING} from '../characterRules.js';
+import {ARMOR_TRAINING,ATTRIBUTES,effectiveOdyssey} from '../characterRules.js';
 import {findInventoryEntry,saveInventoryEntry,deleteInventoryEntry} from '../inventory.js';
 import {reloadMagazine} from '../ammunition.js';
 import { buildText, buildSceneUpload } from '@owlbear-rodeo/sdk';
@@ -12,9 +13,9 @@ import { makeTemplate, instantiateTemplate, readLibrary, writeLibrary, emptyLibr
 import { inventoryView, templatesView, esc } from './characterView.js';
 
 // A dialog lives outside the character panel so scene refreshes cannot destroy its draft.
-export function formDialog(title, fields, {danger = false, message = '', onChange} = {}) {
+export function formDialog(title, fields, {danger = false, message = '', onChange, submitLabel = 'Save'} = {}) {
   const dialog = document.createElement('dialog'); dialog.className='od-dialog';
-  dialog.innerHTML=`<form><h2>${esc(title)}</h2>${message?`<p>${esc(message)}</p>`:''}${fields.map(f=>`<label>${esc(f.label)}${f.options?`<select name="${esc(f.name)}">${f.options.map(([v,l])=>`<option value="${esc(v)}" ${v===f.value?'selected':''}>${esc(l)}</option>`).join('')}</select>`:f.type==='textarea'?`<textarea name="${esc(f.name)}" maxlength="2000">${esc(f.value)}</textarea>`:`<input name="${esc(f.name)}" type="${esc(f.type||'text')}" value="${esc(f.value ?? '')}" ${f.required?'required':''} ${f.type==='number'?`min="${f.min ?? 0}" max="${f.max ?? 999999}" step="1"`:'maxlength="120"'}>`}</label>`).join('')}<div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit" class="${danger?'danger':''}">${danger?'Apply':'Save'}</button></div></form>`;
+  dialog.innerHTML=`<form><h2>${esc(title)}</h2>${message?`<p>${esc(message)}</p>`:''}${fields.map(f=>`<label>${esc(f.label)}${f.options?`<select name="${esc(f.name)}" ${f.required?'required':''}>${f.options.map(([v,l])=>`<option value="${esc(v)}" ${v===f.value?'selected':''}>${esc(l)}</option>`).join('')}</select>`:f.type==='textarea'?`<textarea name="${esc(f.name)}" maxlength="2000">${esc(f.value)}</textarea>`:`<input name="${esc(f.name)}" type="${esc(f.type||'text')}" value="${esc(f.value ?? '')}" ${f.required?'required':''} ${f.type==='number'?`min="${f.min ?? 0}" max="${f.max ?? 999999}" step="1"`:'maxlength="120"'}>`}</label>`).join('')}<div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit" class="${danger?'danger':''}">${danger?'Apply':esc(submitLabel)}</button></div></form>`;
   document.body.append(dialog);
   if(onChange)dialog.querySelector('form').addEventListener('change',event=>onChange(event.target.form,event));
   return new Promise(resolve=>{
@@ -135,14 +136,20 @@ export function installCharacterTools(host) {
       const repairOptions=target=>host.tracker(target).odyssey.inventory.items.filter(i=>['armor','shield'].includes(i.kind)&&i.quantity>0&&i.criticalDamage>0&&(getRole()==='GM'||!i.equippedPart||!host.tracker(target).body[i.equippedPart]?.hidden)).map(i=>[i.id,i.name+' · durability '+(i.criticalMax-i.criticalDamage)+'/'+i.criticalMax+(i.equippedPart?' · equipped':' · inventory')]);
       if(item.subtype==='repairkit')fields.push({name:'gear',label:'Armor in inventory',options:[['','Choose damaged armor'],...repairOptions(token)]});
       else if(item.subtype!=='stim')fields.push({name:'part',label:'Body part',options:partsFor(token)});
-      const value=await formDialog('Use '+item.name,fields,{onChange:(form,event)=>{
+      const value=await formDialog('Use '+item.name,fields,{submitLabel:'Use item',onChange:(form,event)=>{
         if(event.target.name!=='target')return;
         if(form.elements.gear){const target=host.getToken(form.elements.target.value||tokenId);form.elements.gear.innerHTML='<option value="">Choose damaged armor</option>'+(target?repairOptions(target).map(([key,label])=>'<option value="'+esc(key)+'">'+esc(label)+'</option>').join(''):'');return;}
         if(!form.elements.part)return;
         const target=host.getToken(form.elements.target.value||tokenId);form.elements.part.innerHTML=target?partsFor(target).map(([key,label])=>'<option value="'+esc(key)+'">'+esc(label)+'</option>').join(''):'';
       }});if(!value)return;
       check(tokenId);const target=host.getToken(value.target||tokenId);if(!target)throw new Error('Target no longer exists.');
-      await host.useItem(tokenId,id,target.id,item.subtype==='repairkit'?value.gear||'':value.part||'');
+      const currentItem=host.tracker(check(tokenId)).odyssey.inventory.items.find(row=>row.id===id);if(!currentItem)throw Error('Item no longer exists.');
+      const useOdyssey=effectiveOdyssey(host.tracker(check(tokenId)).odyssey),requirement=itemUseRequirement(useOdyssey,currentItem);let attribute='';
+      if(requirement.mode==='attribute'){
+        const choice=await formDialog('Use '+currentItem.name+' · choose characteristic',[{name:'attribute',label:'Characteristic',value:'',required:true,options:[['','Choose a characteristic'],...ATTRIBUTES.map(key=>[key,key+' ('+(useOdyssey.attributes[key]||0)+')'])]}],{submitLabel:'Roll and use',message:'Unknown skill: '+requirement.skill+'. First pass a characteristic check, then d100 vs d100. A failed check spends one item without an effect.'});if(!choice)return;attribute=choice.attribute;
+      }
+      const result=await host.useItem(tokenId,id,target.id,item.subtype==='repairkit'?value.gear||'':value.part||'',attribute);
+      status(result.summary,result.success?'success':'error');return;
     } else if(action==='reload-weapon') {
       const index=Number(node.dataset.index),ammoId=readSelect(panel,'data-reload-kind',index);await mutate(tokenId,t=>reloadMagazine(t.odyssey,index,ammoId),true);
     } else if(action==='delete-item') {

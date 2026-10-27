@@ -393,6 +393,270 @@ var require_events = __commonJS({
   }
 });
 
+// rangeRules.js
+var WEAPON_CATEGORIES = [["", "Unclassified"], ["pistol", "Pistol"], ["smg", "SMG"], ["shotgun", "Shotgun"], ["assault", "Assault rifle / machine gun"], ["sniper", "Sniper rifle"]];
+var normalizeWeaponCategory = (value) => WEAPON_CATEGORIES.some(([key]) => key === value) ? value : "";
+var weaponCategoryLabel = (value) => WEAPON_CATEGORIES.find(([key]) => key === value)?.[1] || "Unclassified";
+function distanceMeters(cells, scale) {
+  const value = Number(scale?.parsed?.multiplier), unit = String(scale?.parsed?.unit || "").trim().toLowerCase();
+  const factor = { m: 1, meter: 1, meters: 1, metre: 1, metres: 1, "\u043C": 1, cm: 0.01, "\u0441\u043C": 0.01, km: 1e3, "\u043A\u043C": 1e3, ft: 0.3048, foot: 0.3048, feet: 0.3048, "\u0444\u0443\u0442": 0.3048, "\u0444\u0443\u0442\u044B": 0.3048, in: 0.0254, inch: 0.0254, inches: 0.0254, yd: 0.9144, yard: 0.9144, yards: 0.9144, mi: 1609.344, mile: 1609.344, miles: 1609.344 }[unit];
+  return Number.isFinite(cells) && cells >= 0 && Number.isFinite(value) && value > 0 && factor ? cells * value * factor : null;
+}
+var RANGE_BANDS = [["clinch", "Clinch \xB7 0\u20132 m"], ["short", "Short \xB7 >2\u201315 m"], ["medium", "Medium \xB7 >15\u201350 m"], ["long", "Long \xB7 >50 m"]];
+function distanceBand(meters) {
+  return !Number.isFinite(meters) || meters < 0 ? null : meters <= 2 ? "clinch" : meters <= 15 ? "short" : meters <= 50 ? "medium" : "long";
+}
+function normalizeRangeReduction(raw) {
+  return Object.fromEntries(RANGE_BANDS.map(([key]) => [key, Math.max(0, Math.min(999, Math.trunc(Number(raw?.[key]) || 0)))]).filter(([, v]) => v));
+}
+var MATRIX = { pistol: [-15, 0, -5, -10], smg: [-25, 15, 0, -10], shotgun: [-25, 30, -15, -50], assault: [-30, 0, 0, 0], sniper: [-50, -30, 0, 10] };
+function rangeAdjustment(weapon, meters, odyssey = {}, skill = "") {
+  const category = normalizeWeaponCategory(weapon?.weaponCategory), band = distanceBand(meters);
+  if (!category) return { category, band, raw: 0, reduction: 0, modifier: 0, required: false };
+  if (!band) return { category, band, raw: 0, reduction: 0, modifier: 0, required: true };
+  let raw = MATRIX[category][RANGE_BANDS.findIndex(([key]) => key === band)];
+  if (band === "long" && ["pistol", "smg", "sniper"].includes(category)) raw = Math.sign(raw) * Math.min(50, Math.ceil((meters - 50) / 25) * 10);
+  const reduction = [weapon.rangeReduction, odyssey.skillRangeReduction?.[skill], odyssey.rangeReduction].reduce((sum, row) => sum + (normalizeRangeReduction(row)[band] || 0), 0);
+  return { category, band, raw, reduction, modifier: raw < 0 ? Math.min(0, raw + reduction) : raw, required: false };
+}
+function rangeAdjustmentLabel(result) {
+  if (!result.category) return "Range: unclassified";
+  if (result.required) return "Range: distance in metres required";
+  const band = RANGE_BANDS.find(([key]) => key === result.band)[1].split(" \xB7 ")[0], signed = (n2) => (n2 >= 0 ? "+" : "") + n2;
+  return band + " \xB7 " + signed(result.modifier) + (result.raw < 0 && result.reduction ? " (base " + result.raw + ", relief " + Math.min(result.reduction, -result.raw) + ")" : "");
+}
+
+// characterRules.js
+var ARMOR_TRAINING = { light_armor: "Light Armor", medium_armor: "Medium Armor", heavy_armor: "Heavy Armor", superheavy_armor: "Superheavy Armor" };
+var ATTRIBUTES = ["Strength", "Agility", "Reaction", "Endurance", "Perception", "Intelligence", "Charisma", "Willpower", "Magic"];
+var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
+function normalizeBonuses(raw) {
+  const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
+  const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
+}
+function normalizeEffects(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
+}
+function equipmentFits(item, partName, part) {
+  const slots = Array.isArray(item.slots) ? item.slots : [item.slot || "any"];
+  return slots.includes("any") || slots.includes(partName) || slots.includes(part?.slot);
+}
+function itemActive(item) {
+  return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
+}
+function armorSummary(o) {
+  const total = (o.inventory?.items || []).filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart && itemActive(i)).reduce((sum, i) => sum + i.armor, 0);
+  const key = total <= 0 ? null : total <= 70 ? "light_armor" : total <= 140 ? "medium_armor" : total <= 260 ? "heavy_armor" : "superheavy_armor";
+  return { total, key, name: key ? ARMOR_TRAINING[key] : "No armor" };
+}
+function effectiveOdyssey(base) {
+  const o = structuredClone(base), rows2 = [];
+  o.baseAttributes = structuredClone(base.attributes);
+  o.baseSkills = structuredClone(base.skills);
+  o.grantedSkills = {};
+  for (const i of o.inventory?.items || []) {
+    if (!itemActive(i)) continue;
+    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true });
+    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
+      const key = `implant:${i.id}:${a.id}`;
+      o.skills[key] = a.level;
+      o.skillCategories[key] = "abilities";
+      o.skillLabels[key] = a.name;
+      o.skillDescriptions ?? (o.skillDescriptions = {});
+      o.skillDescriptions[key] = a.description || "";
+      o.skillPerks[key] = a.description ? [a.description] : [];
+      o.grantedSkills[key] = i.name;
+    }
+  }
+  rows2.push(...base.effects || []);
+  const eligibleSkills = new Set(Object.keys(o.skills));
+  for (const row of rows2) {
+    const skills = {};
+    for (const [key, value] of Object.entries(row.bonuses?.skills || {})) {
+      const resolved = eligibleSkills.has(key) ? key : [...eligibleSkills].find((k) => (o.skillLabels[k] || k).toLowerCase() === key.toLowerCase()) || key;
+      skills[resolved] = (skills[resolved] || 0) + value;
+    }
+    row.bonuses = { ...row.bonuses, skills };
+  }
+  for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
+    o.skills[key] = 0;
+    o.baseSkills[key] = 0;
+    o.skillLabels[key] = key;
+    o.skillCategories[key] = "applied";
+    o.skillStrengthBonuses[key] = false;
+    o.skillPerks[key] = [];
+    o.grantedSkills[key] = row.name;
+  }
+  const skillMods = {};
+  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) if (eligibleSkills.has(k)) skillMods[k] = (skillMods[k] || 0) + v;
+  for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
+  const armor = armorSummary(o), trained = !armor.key || (o.skills[armor.key] || 0) >= 1;
+  if (!trained) {
+    const penalties = armor.key === "light_armor" ? { Agility: -1, Endurance: -1 } : armor.key === "medium_armor" ? { Agility: -2, Endurance: -2, Strength: -2 } : { Agility: -4, Endurance: -5, Strength: -4 };
+    rows2.push({ id: "armor-penalty", name: `${armor.name} \xB7 untrained (${armor.total})`, bonuses: { attributes: penalties, skills: {} }, passive: true });
+  }
+  o.modifiers = { attributes: {}, skills: skillMods };
+  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.attributes || {})) o.modifiers.attributes[k] = (o.modifiers.attributes[k] || 0) + v;
+  for (const k of ATTRIBUTES) o.attributes[k] = Math.max(0, (base.attributes[k] || 0) + (o.modifiers.attributes[k] || 0));
+  o.rangeReduction = Object.fromEntries(RANGE_BANDS.map(([key]) => [key, rows2.reduce((sum, row) => sum + (normalizeRangeReduction(row.bonuses?.rangeReduction)[key] || 0), 0)]));
+  o.effectRows = rows2.filter((r) => Object.keys(r.bonuses?.attributes || {}).length || Object.keys(r.bonuses?.skills || {}).length || Object.keys(r.bonuses?.rangeReduction || {}).length);
+  o.armorSummary = { ...armor, trained };
+  return o;
+}
+function reconcileEquipment(tracker) {
+  const inv = tracker.odyssey.inventory;
+  if (!inv) return;
+  inv.baseArmor ?? (inv.baseArmor = {});
+  inv.baseMax ?? (inv.baseMax = {});
+  for (const [partName, part] of Object.entries(tracker.body)) {
+    const equipped = inv.items.filter((i) => ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart === partName);
+    const implantHp = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    const armor = equipped.filter((i) => ["armor", "shield"].includes(i.kind) && i.quantity > 0);
+    const pool = { max: armor.reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0), remaining: armor.reduce((sum, i) => sum + Math.max(0, (Number(i.criticalMax) || 0) - (Number(i.criticalDamage) || 0)), 0) };
+    inv.armorHp ?? (inv.armorHp = {});
+    const previous = inv.armorHp[partName]?.remaining || 0;
+    const hpBonus = implantHp + pool.max;
+    if (hpBonus && !Object.hasOwn(inv.baseMax, partName)) inv.baseMax[partName] = part.max;
+    if (Object.hasOwn(inv.baseMax, partName)) {
+      part.max = Math.min(999, inv.baseMax[partName] + hpBonus);
+      part.current = Math.max(0, Math.min(part.current + pool.remaining - previous, part.max));
+      if (!hpBonus) delete inv.baseMax[partName];
+    }
+    if (pool.max) inv.armorHp[partName] = pool;
+    else delete inv.armorHp[partName];
+    if (!equipped.length) {
+      if (Object.hasOwn(inv.baseArmor, partName)) {
+        part.armor = inv.baseArmor[partName];
+        delete inv.baseArmor[partName];
+      }
+      continue;
+    }
+    if (!Object.hasOwn(inv.baseArmor, partName)) {
+      const legacy = equipped.find((i) => i.legacyEquipment);
+      inv.baseArmor[partName] = legacy ? legacy.previousArmor : part.armor;
+    }
+    part.armor = inv.baseArmor[partName] + equipped.filter(itemActive).reduce((sum, i) => sum + i.armor, 0);
+    for (const i of equipped) i.legacyEquipment = false;
+  }
+}
+function absorbEquipmentCritical(tracker, partName, critical) {
+  let remaining = Math.max(0, Number(critical) || 0), absorbed = 0;
+  const items = tracker.odyssey.inventory?.items || [];
+  for (const i of items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.criticalMax > 0 && itemActive(i2)).sort((a, b) => (a.kind === "implant") - (b.kind === "implant"))) {
+    const amount = Math.min(remaining, i.criticalMax - i.criticalDamage);
+    i.criticalDamage += amount;
+    remaining -= amount;
+    absorbed += amount;
+    if (!remaining) break;
+  }
+  reconcileEquipment(tracker);
+  return { remaining, absorbed };
+}
+function armorHealth(tracker, partName) {
+  const gear = tracker.odyssey.inventory.items.filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName && i.quantity > 0);
+  return { max: gear.reduce((sum, i) => sum + i.criticalMax, 0), remaining: gear.reduce((sum, i) => sum + i.criticalMax - i.criticalDamage, 0) };
+}
+function setCombinedPartMax(tracker, partName, value) {
+  const part = tracker.body[partName];
+  if (!part) return;
+  const inv = tracker.odyssey.inventory, goal = Math.max(0, Math.min(999, Number(value) || 0));
+  if (Object.hasOwn(inv.baseMax || {}, partName)) inv.baseMax[partName] = Math.max(0, goal - (part.max - inv.baseMax[partName]));
+  part.max = goal;
+  part.current = Math.min(part.current, part.max);
+  reconcileEquipment(tracker);
+}
+function setCombinedPartHp(tracker, partName, value) {
+  const part = tracker.body[partName];
+  if (!part) return;
+  const goal = Math.max(0, Math.min(Number(value) || 0, part.max)), delta = goal - part.current;
+  if (delta < 0) absorbEquipmentCritical(tracker, partName, -delta);
+  if (delta > 0) {
+    const pool = armorHealth(tracker, partName), bodyCurrent = Math.max(0, part.current - pool.remaining), bodyMax = Math.max(0, part.max - pool.max);
+    let repair = Math.max(0, delta - Math.max(0, bodyMax - bodyCurrent));
+    for (const i of tracker.odyssey.inventory.items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.quantity > 0)) {
+      const heal = Math.min(repair, i.criticalDamage);
+      i.criticalDamage -= heal;
+      repair -= heal;
+    }
+    reconcileEquipment(tracker);
+  }
+  part.current = goal;
+}
+function useItemOnTracker(target, item, partName, effectId) {
+  var _a;
+  if (item.subtype === "grenade") throw new Error("Grenades are a placeholder; no action is performed.");
+  if (item.subtype === "stim") {
+    (_a = target.odyssey).effects ?? (_a.effects = []);
+    if (target.odyssey.effects.length >= 100) throw new Error("Too many active effects.");
+    target.odyssey.effects.push({ id: effectId, name: item.name, bonuses: normalizeBonuses(item.bonuses) });
+    return;
+  }
+  if (item.subtype === "repairkit") {
+    const gear = target.odyssey.inventory.items.find((i) => i.id === partName && ["armor", "shield"].includes(i.kind) && i.quantity > 0);
+    if (!gear || !gear.criticalDamage) throw new Error("Choose damaged armor from inventory.");
+    if (!item.healCritical) throw new Error("Repair amount must be greater than zero.");
+    let repaired = gear;
+    if (gear.quantity > 1) {
+      if (target.odyssey.inventory.items.length >= 1e3) throw new Error("Inventory is full; cannot separate a repaired unit.");
+      if (!effectId || target.odyssey.inventory.items.some((i) => i.id === effectId)) throw new Error("Repair instance ID is unavailable.");
+      gear.quantity--;
+      repaired = { ...structuredClone(gear), id: effectId, quantity: 1 };
+      target.odyssey.inventory.items.push(repaired);
+    }
+    repaired.criticalDamage = Math.max(0, repaired.criticalDamage - item.healCritical);
+    reconcileEquipment(target);
+    return;
+  }
+  const part = target.body[partName];
+  if (!part) throw new Error("Choose a body part.");
+  if (item.subtype === "medkit") {
+    const pool = armorHealth(target, partName), missing = Math.max(0, part.max - pool.max - Math.max(0, part.current - pool.remaining));
+    if (!item.healCritical || !missing) throw new Error("No critical wounds to heal on this part.");
+    part.current += Math.min(missing, item.healCritical);
+    return;
+  }
+  throw new Error("This item cannot be used.");
+}
+
+// itemUse.js
+function itemUseRequirement(odyssey, item) {
+  const skill = String(item.useSkill || "").trim();
+  if (!skill) return { mode: "none", skill: "" };
+  const match = Object.keys(odyssey.skills || {}).find((key) => key.toLowerCase() === skill.toLowerCase() || String(odyssey.skillLabels?.[key] || key).toLowerCase() === skill.toLowerCase());
+  const learned = match && (!Object.hasOwn(odyssey.grantedSkills || {}, match) || match.startsWith("implant:"));
+  return learned ? { mode: "skill", skill: odyssey.skillLabels?.[match] || skill, key: match, level: odyssey.skills[match] } : { mode: "attribute", skill };
+}
+var passed = (result) => ["success", "critical-success"].includes(result.outcome);
+function resolveItemUseCheck({ odyssey, item, attribute, rollCharacter, rollSkill }) {
+  const requirement = itemUseRequirement(odyssey, item), stages = [];
+  if (requirement.mode === "none") return { ...requirement, stages, success: true };
+  if (requirement.mode === "attribute") {
+    if (!ATTRIBUTES.includes(attribute)) throw Error("Choose a characteristic for the unknown skill.");
+    const result2 = rollCharacter(odyssey.attributes[attribute] || 0, 0);
+    stages.push({ kind: "attribute", name: attribute, result: result2 });
+    if (!passed(result2)) return { ...requirement, stages, success: false };
+  }
+  const result = rollSkill(requirement.mode === "skill" ? requirement.level : 0, 0);
+  stages.push({ kind: requirement.mode === "skill" ? "skill" : "random", name: requirement.mode === "skill" ? requirement.skill : "d100 vs d100", result });
+  return { ...requirement, stages, success: passed(result) };
+}
+function applyCheckedItemUse({ source, target, itemId, selection, attribute, effectId, rollCharacter, rollSkill }) {
+  const item = source.odyssey.inventory.items.find((row) => row.id === itemId);
+  if (!item || !["consumable", "medical"].includes(item.kind) || item.quantity < 1) throw Error("No usable item available.");
+  const projected = structuredClone(target);
+  useItemOnTracker(projected, item, selection, effectId);
+  const check = resolveItemUseCheck({ odyssey: effectiveOdyssey(source.odyssey), item, attribute, rollCharacter, rollSkill });
+  const same = source === target, nextSource = same && check.success ? projected : structuredClone(source);
+  nextSource.odyssey.inventory.items.find((row) => row.id === itemId).quantity--;
+  return { ...check, itemName: item.name, source: nextSource, target: same ? nextSource : check.success ? projected : target };
+}
+function itemUseSummary(result) {
+  const stages = result.stages.map((stage) => stage.kind === "attribute" ? stage.name + ": " + stage.result.roll + " vs " + stage.result.finalAttribute + " (" + stage.result.result + ")" : stage.name + ": " + stage.result.totalPrimary + " vs " + stage.result.totalSecondary + " (" + stage.result.result + ")");
+  return result.itemName + " \xB7 " + (result.success ? "effect applied" : "no effect") + " \xB7 1 item spent" + (stages.length ? " \xB7 " + stages.join(" \u2192 ") : "");
+}
+
 // fieldDrafts.js
 function createFieldDrafts() {
   const tokens = /* @__PURE__ */ new Map();
@@ -430,39 +694,6 @@ function createTokenWriteQueue() {
     task.then(cleanup, cleanup);
     return task;
   };
-}
-
-// rangeRules.js
-var WEAPON_CATEGORIES = [["", "Unclassified"], ["pistol", "Pistol"], ["smg", "SMG"], ["shotgun", "Shotgun"], ["assault", "Assault rifle / machine gun"], ["sniper", "Sniper rifle"]];
-var normalizeWeaponCategory = (value) => WEAPON_CATEGORIES.some(([key]) => key === value) ? value : "";
-var weaponCategoryLabel = (value) => WEAPON_CATEGORIES.find(([key]) => key === value)?.[1] || "Unclassified";
-function distanceMeters(cells, scale) {
-  const value = Number(scale?.parsed?.multiplier), unit = String(scale?.parsed?.unit || "").trim().toLowerCase();
-  const factor = { m: 1, meter: 1, meters: 1, metre: 1, metres: 1, "\u043C": 1, cm: 0.01, "\u0441\u043C": 0.01, km: 1e3, "\u043A\u043C": 1e3, ft: 0.3048, foot: 0.3048, feet: 0.3048, "\u0444\u0443\u0442": 0.3048, "\u0444\u0443\u0442\u044B": 0.3048, in: 0.0254, inch: 0.0254, inches: 0.0254, yd: 0.9144, yard: 0.9144, yards: 0.9144, mi: 1609.344, mile: 1609.344, miles: 1609.344 }[unit];
-  return Number.isFinite(cells) && cells >= 0 && Number.isFinite(value) && value > 0 && factor ? cells * value * factor : null;
-}
-var RANGE_BANDS = [["clinch", "Clinch \xB7 0\u20132 m"], ["short", "Short \xB7 >2\u201315 m"], ["medium", "Medium \xB7 >15\u201350 m"], ["long", "Long \xB7 >50 m"]];
-function distanceBand(meters) {
-  return !Number.isFinite(meters) || meters < 0 ? null : meters <= 2 ? "clinch" : meters <= 15 ? "short" : meters <= 50 ? "medium" : "long";
-}
-function normalizeRangeReduction(raw) {
-  return Object.fromEntries(RANGE_BANDS.map(([key]) => [key, Math.max(0, Math.min(999, Math.trunc(Number(raw?.[key]) || 0)))]).filter(([, v]) => v));
-}
-var MATRIX = { pistol: [-15, 0, -5, -10], smg: [-25, 15, 0, -10], shotgun: [-25, 30, -15, -50], assault: [-30, 0, 0, 0], sniper: [-50, -30, 0, 10] };
-function rangeAdjustment(weapon, meters, odyssey = {}, skill = "") {
-  const category = normalizeWeaponCategory(weapon?.weaponCategory), band = distanceBand(meters);
-  if (!category) return { category, band, raw: 0, reduction: 0, modifier: 0, required: false };
-  if (!band) return { category, band, raw: 0, reduction: 0, modifier: 0, required: true };
-  let raw = MATRIX[category][RANGE_BANDS.findIndex(([key]) => key === band)];
-  if (band === "long" && ["pistol", "smg", "sniper"].includes(category)) raw = Math.sign(raw) * Math.min(50, Math.ceil((meters - 50) / 25) * 10);
-  const reduction = [weapon.rangeReduction, odyssey.skillRangeReduction?.[skill], odyssey.rangeReduction].reduce((sum, row) => sum + (normalizeRangeReduction(row)[band] || 0), 0);
-  return { category, band, raw, reduction, modifier: raw < 0 ? Math.min(0, raw + reduction) : raw, required: false };
-}
-function rangeAdjustmentLabel(result) {
-  if (!result.category) return "Range: unclassified";
-  if (result.required) return "Range: distance in metres required";
-  const band = RANGE_BANDS.find(([key]) => key === result.band)[1].split(" \xB7 ")[0], signed = (n2) => (n2 >= 0 ? "+" : "") + n2;
-  return band + " \xB7 " + signed(result.modifier) + (result.raw < 0 && result.reduction ? " (base " + result.raw + ", relief " + Math.min(result.reduction, -result.raw) + ")" : "");
 }
 
 // targetDistance.js
@@ -704,200 +935,6 @@ function installCompactButtons() {
   enhance();
 }
 
-// characterRules.js
-var ARMOR_TRAINING = { light_armor: "Light Armor", medium_armor: "Medium Armor", heavy_armor: "Heavy Armor", superheavy_armor: "Superheavy Armor" };
-var ATTRIBUTES = ["Strength", "Agility", "Reaction", "Endurance", "Perception", "Intelligence", "Charisma", "Willpower", "Magic"];
-var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
-function normalizeBonuses(raw) {
-  const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
-  const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
-  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
-}
-function normalizeEffects(raw) {
-  const seen = /* @__PURE__ */ new Set();
-  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
-}
-function equipmentFits(item, partName, part) {
-  const slots = Array.isArray(item.slots) ? item.slots : [item.slot || "any"];
-  return slots.includes("any") || slots.includes(partName) || slots.includes(part?.slot);
-}
-function itemActive(item) {
-  return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
-}
-function armorSummary(o) {
-  const total = (o.inventory?.items || []).filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart && itemActive(i)).reduce((sum, i) => sum + i.armor, 0);
-  const key = total <= 0 ? null : total <= 70 ? "light_armor" : total <= 140 ? "medium_armor" : total <= 260 ? "heavy_armor" : "superheavy_armor";
-  return { total, key, name: key ? ARMOR_TRAINING[key] : "No armor" };
-}
-function effectiveOdyssey(base) {
-  const o = structuredClone(base), rows2 = [];
-  o.baseAttributes = structuredClone(base.attributes);
-  o.baseSkills = structuredClone(base.skills);
-  o.grantedSkills = {};
-  for (const i of o.inventory?.items || []) {
-    if (!itemActive(i)) continue;
-    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true });
-    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
-      const key = `implant:${i.id}:${a.id}`;
-      o.skills[key] = a.level;
-      o.skillCategories[key] = "abilities";
-      o.skillLabels[key] = a.name;
-      o.skillDescriptions ?? (o.skillDescriptions = {});
-      o.skillDescriptions[key] = a.description || "";
-      o.skillPerks[key] = a.description ? [a.description] : [];
-      o.grantedSkills[key] = i.name;
-    }
-  }
-  rows2.push(...base.effects || []);
-  const eligibleSkills = new Set(Object.keys(o.skills));
-  for (const row of rows2) {
-    const skills = {};
-    for (const [key, value] of Object.entries(row.bonuses?.skills || {})) {
-      const resolved = eligibleSkills.has(key) ? key : [...eligibleSkills].find((k) => (o.skillLabels[k] || k).toLowerCase() === key.toLowerCase()) || key;
-      skills[resolved] = (skills[resolved] || 0) + value;
-    }
-    row.bonuses = { ...row.bonuses, skills };
-  }
-  for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
-    o.skills[key] = 0;
-    o.baseSkills[key] = 0;
-    o.skillLabels[key] = key;
-    o.skillCategories[key] = "applied";
-    o.skillStrengthBonuses[key] = false;
-    o.skillPerks[key] = [];
-    o.grantedSkills[key] = row.name;
-  }
-  const skillMods = {};
-  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) if (eligibleSkills.has(k)) skillMods[k] = (skillMods[k] || 0) + v;
-  for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
-  const armor = armorSummary(o), trained = !armor.key || (o.skills[armor.key] || 0) >= 1;
-  if (!trained) {
-    const penalties = armor.key === "light_armor" ? { Agility: -1, Endurance: -1 } : armor.key === "medium_armor" ? { Agility: -2, Endurance: -2, Strength: -2 } : { Agility: -4, Endurance: -5, Strength: -4 };
-    rows2.push({ id: "armor-penalty", name: `${armor.name} \xB7 untrained (${armor.total})`, bonuses: { attributes: penalties, skills: {} }, passive: true });
-  }
-  o.modifiers = { attributes: {}, skills: skillMods };
-  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.attributes || {})) o.modifiers.attributes[k] = (o.modifiers.attributes[k] || 0) + v;
-  for (const k of ATTRIBUTES) o.attributes[k] = Math.max(0, (base.attributes[k] || 0) + (o.modifiers.attributes[k] || 0));
-  o.rangeReduction = Object.fromEntries(RANGE_BANDS.map(([key]) => [key, rows2.reduce((sum, row) => sum + (normalizeRangeReduction(row.bonuses?.rangeReduction)[key] || 0), 0)]));
-  o.effectRows = rows2.filter((r) => Object.keys(r.bonuses?.attributes || {}).length || Object.keys(r.bonuses?.skills || {}).length || Object.keys(r.bonuses?.rangeReduction || {}).length);
-  o.armorSummary = { ...armor, trained };
-  return o;
-}
-function reconcileEquipment(tracker) {
-  const inv = tracker.odyssey.inventory;
-  if (!inv) return;
-  inv.baseArmor ?? (inv.baseArmor = {});
-  inv.baseMax ?? (inv.baseMax = {});
-  for (const [partName, part] of Object.entries(tracker.body)) {
-    const equipped = inv.items.filter((i) => ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart === partName);
-    const implantHp = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
-    const armor = equipped.filter((i) => ["armor", "shield"].includes(i.kind) && i.quantity > 0);
-    const pool = { max: armor.reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0), remaining: armor.reduce((sum, i) => sum + Math.max(0, (Number(i.criticalMax) || 0) - (Number(i.criticalDamage) || 0)), 0) };
-    inv.armorHp ?? (inv.armorHp = {});
-    const previous = inv.armorHp[partName]?.remaining || 0;
-    const hpBonus = implantHp + pool.max;
-    if (hpBonus && !Object.hasOwn(inv.baseMax, partName)) inv.baseMax[partName] = part.max;
-    if (Object.hasOwn(inv.baseMax, partName)) {
-      part.max = Math.min(999, inv.baseMax[partName] + hpBonus);
-      part.current = Math.max(0, Math.min(part.current + pool.remaining - previous, part.max));
-      if (!hpBonus) delete inv.baseMax[partName];
-    }
-    if (pool.max) inv.armorHp[partName] = pool;
-    else delete inv.armorHp[partName];
-    if (!equipped.length) {
-      if (Object.hasOwn(inv.baseArmor, partName)) {
-        part.armor = inv.baseArmor[partName];
-        delete inv.baseArmor[partName];
-      }
-      continue;
-    }
-    if (!Object.hasOwn(inv.baseArmor, partName)) {
-      const legacy = equipped.find((i) => i.legacyEquipment);
-      inv.baseArmor[partName] = legacy ? legacy.previousArmor : part.armor;
-    }
-    part.armor = inv.baseArmor[partName] + equipped.filter(itemActive).reduce((sum, i) => sum + i.armor, 0);
-    for (const i of equipped) i.legacyEquipment = false;
-  }
-}
-function absorbEquipmentCritical(tracker, partName, critical) {
-  let remaining = Math.max(0, Number(critical) || 0), absorbed = 0;
-  const items = tracker.odyssey.inventory?.items || [];
-  for (const i of items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.criticalMax > 0 && itemActive(i2)).sort((a, b) => (a.kind === "implant") - (b.kind === "implant"))) {
-    const amount = Math.min(remaining, i.criticalMax - i.criticalDamage);
-    i.criticalDamage += amount;
-    remaining -= amount;
-    absorbed += amount;
-    if (!remaining) break;
-  }
-  reconcileEquipment(tracker);
-  return { remaining, absorbed };
-}
-function armorHealth(tracker, partName) {
-  const gear = tracker.odyssey.inventory.items.filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart === partName && i.quantity > 0);
-  return { max: gear.reduce((sum, i) => sum + i.criticalMax, 0), remaining: gear.reduce((sum, i) => sum + i.criticalMax - i.criticalDamage, 0) };
-}
-function setCombinedPartMax(tracker, partName, value) {
-  const part = tracker.body[partName];
-  if (!part) return;
-  const inv = tracker.odyssey.inventory, goal = Math.max(0, Math.min(999, Number(value) || 0));
-  if (Object.hasOwn(inv.baseMax || {}, partName)) inv.baseMax[partName] = Math.max(0, goal - (part.max - inv.baseMax[partName]));
-  part.max = goal;
-  part.current = Math.min(part.current, part.max);
-  reconcileEquipment(tracker);
-}
-function setCombinedPartHp(tracker, partName, value) {
-  const part = tracker.body[partName];
-  if (!part) return;
-  const goal = Math.max(0, Math.min(Number(value) || 0, part.max)), delta = goal - part.current;
-  if (delta < 0) absorbEquipmentCritical(tracker, partName, -delta);
-  if (delta > 0) {
-    const pool = armorHealth(tracker, partName), bodyCurrent = Math.max(0, part.current - pool.remaining), bodyMax = Math.max(0, part.max - pool.max);
-    let repair = Math.max(0, delta - Math.max(0, bodyMax - bodyCurrent));
-    for (const i of tracker.odyssey.inventory.items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.quantity > 0)) {
-      const heal = Math.min(repair, i.criticalDamage);
-      i.criticalDamage -= heal;
-      repair -= heal;
-    }
-    reconcileEquipment(tracker);
-  }
-  part.current = goal;
-}
-function useItemOnTracker(target, item, partName, effectId) {
-  var _a;
-  if (item.subtype === "grenade") throw new Error("Grenades are a placeholder; no action is performed.");
-  if (item.subtype === "stim") {
-    (_a = target.odyssey).effects ?? (_a.effects = []);
-    if (target.odyssey.effects.length >= 100) throw new Error("Too many active effects.");
-    target.odyssey.effects.push({ id: effectId, name: item.name, bonuses: normalizeBonuses(item.bonuses) });
-    return;
-  }
-  if (item.subtype === "repairkit") {
-    const gear = target.odyssey.inventory.items.find((i) => i.id === partName && ["armor", "shield"].includes(i.kind) && i.quantity > 0);
-    if (!gear || !gear.criticalDamage) throw new Error("Choose damaged armor from inventory.");
-    if (!item.healCritical) throw new Error("Repair amount must be greater than zero.");
-    let repaired = gear;
-    if (gear.quantity > 1) {
-      if (target.odyssey.inventory.items.length >= 1e3) throw new Error("Inventory is full; cannot separate a repaired unit.");
-      if (!effectId || target.odyssey.inventory.items.some((i) => i.id === effectId)) throw new Error("Repair instance ID is unavailable.");
-      gear.quantity--;
-      repaired = { ...structuredClone(gear), id: effectId, quantity: 1 };
-      target.odyssey.inventory.items.push(repaired);
-    }
-    repaired.criticalDamage = Math.max(0, repaired.criticalDamage - item.healCritical);
-    reconcileEquipment(target);
-    return;
-  }
-  const part = target.body[partName];
-  if (!part) throw new Error("Choose a body part.");
-  if (item.subtype === "medkit") {
-    const pool = armorHealth(target, partName), missing = Math.max(0, part.max - pool.max - Math.max(0, part.current - pool.remaining));
-    if (!item.healCritical || !missing) throw new Error("No critical wounds to heal on this part.");
-    part.current += Math.min(missing, item.healCritical);
-    return;
-  }
-  throw new Error("This item cannot be used.");
-}
-
 // ui/descriptions.js
 var escape = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 var descriptionButton = (title, text2) => '<button type="button" class="cp-info" data-description-title="' + escape(title) + '" data-description-text="' + escape(text2 || "No description yet.") + '" aria-label="Description: ' + escape(title) + '" title="Show description">i</button>';
@@ -953,6 +990,7 @@ function normalizeInventory(raw, weapons = []) {
     armor: int(r.armor, 999),
     subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
     healCritical: int(r.healCritical ?? 1, 999),
+    useSkill: text(r.useSkill, 80),
     slots: [...new Set((Array.isArray(r.slots) ? r.slots : [r.slot || "any"]).map((s) => text(s, 40)).filter(Boolean))].slice(0, 100),
     slot: text(r.slot || "any", 40),
     criticalMax: int(r.criticalMax, 999),
@@ -1279,7 +1317,7 @@ function inventoryView(tracker, gm) {
         controls = '<label>Slot <select data-equip-part="' + esc(i.id) + '">' + options.map(([key, p]) => '<option value="' + esc(key) + '">' + esc(p.label || key) + "</option>").join("") + '</select></label><button type="button" data-od-action="equip" data-id="' + esc(i.id) + '" ' + (!i.quantity || !options.length ? "disabled" : "") + ">Equip</button>";
       }
     } else if (usable) controls = '<button type="button" data-od-action="use-item" data-id="' + esc(i.id) + '" ' + (!i.quantity || subtype === "grenade" ? "disabled" : "") + ">" + (subtype === "grenade" ? "Grenade \xB7 placeholder" : "Use\u2026") + "</button>";
-    return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + descriptionButton(i.name, i.description) + edit("item", i.id) + "</div>" + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
+    return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + (usable && i.useSkill ? '<span class="cp-pill">Use: ' + esc(i.useSkill) + "</span>" : "") + descriptionButton(i.name, i.description) + edit("item", i.id) + "</div>" + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
   };
   const equippedItems = inv.items.filter((i) => i.equippedPart).map(renderItem).join("");
   const items = inv.items.filter((i) => !i.equippedPart).map(renderItem).join("");
@@ -1368,6 +1406,7 @@ function captureBlueprint(tracker, type, id) {
     }
     if (values.abilities) values.abilities = values.abilities.map((ability, index) => ({ ...ability, id: "ability-" + index }));
   }
+  if (entry.useSkill) values.useSkill = String(o.skillLabels[entry.useSkill] || entry.useSkill).trim().slice(0, 80);
   if (entry.description) values.description = String(entry.description).slice(0, 2e3);
   return { format: "odyssey-item-blueprint", version: 1, type, values, dependencies };
 }
@@ -1679,7 +1718,7 @@ function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImp
     for (const details2 of list.querySelectorAll("details[data-pool-category]")) expanded.set(details2.dataset.poolCategory, details2.open);
     const row = (e) => {
       const b = e.blueprint, v = b.values;
-      return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : ""].filter(Boolean).join(" \xB7 ")) + "</span>" + descriptionButton(v.name, v.description) + '<button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
+      return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : "", v.useSkill ? "Use: " + v.useSkill : ""].filter(Boolean).join(" \xB7 ")) + "</span>" + descriptionButton(v.name, v.description) + '<button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
     };
     if (search) {
       const words = search.split(/\s+/);
@@ -1777,6 +1816,11 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   function collect() {
     const data = Object.fromEntries(new FormData(form));
     Object.assign(values, data);
+    if (form.elements.useSkill) {
+      const input = String(values.useSkill || "").trim();
+      const match = skillChoices.find(([key, label]) => key.toLowerCase() === input.toLowerCase() || label.toLowerCase() === input.toLowerCase());
+      values.useSkill = match ? match[1] : input;
+    }
     if (form.elements.acceptsMagazines) values.acceptsMagazines = form.elements.acceptsMagazines.checked;
     if (form.querySelector('[name="magazineCompatible"]')) values.acceptedMagazineIds = [...form.querySelectorAll('[name="magazineCompatible"]:checked')].map((e) => e.value);
     if (form.querySelector("[data-equipment-slots]")) values.slots = [...form.querySelectorAll('[name="equipmentSlot"]:checked')].map((e) => e.value);
@@ -1801,6 +1845,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     let html = "";
     if (kind === "consumable") {
       html += select("subtype", "Use type", [["grenade", "Grenade \xB7 placeholder"], ["medkit", "Medkit"], ["repairkit", "Repair kit"], ["stim", "Stim"]], values.subtype || "grenade");
+      html += '<label>Use skill \xB7 optional<input name="useSkill" maxlength="80" list="od-item-use-skills" value="' + esc(values.useSkill || "") + '" placeholder="None \xB7 no check"></label><datalist id="od-item-use-skills">' + skillChoices.map(([key, label]) => '<option value="' + esc(label) + '"></option>').join("") + '</datalist><p class="cp-muted">Known skill: skill check. Unknown skill: choose a characteristic, then d100 vs d100. Failed checks spend the item.</p>';
       if (["medkit", "repairkit"].includes(values.subtype)) html += field("healCritical", "Critical wounds restored", values.healCritical ?? 1, "number");
       if (values.subtype === "stim") html += bonusEditor(values.bonuses, false);
       if (!values.subtype || values.subtype === "grenade") html += '<p class="cp-muted">Grenades have no action yet.</p>';
@@ -5741,10 +5786,10 @@ function libraryFromScenes(scenes, sanitize) {
 }
 
 // ui/characterTools.js
-function formDialog(title, fields, { danger = false, message = "", onChange } = {}) {
+function formDialog(title, fields, { danger = false, message = "", onChange, submitLabel = "Save" } = {}) {
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog";
-  dialog.innerHTML = `<form><h2>${esc(title)}</h2>${message ? `<p>${esc(message)}</p>` : ""}${fields.map((f) => `<label>${esc(f.label)}${f.options ? `<select name="${esc(f.name)}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v === f.value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>` : f.type === "textarea" ? `<textarea name="${esc(f.name)}" maxlength="2000">${esc(f.value)}</textarea>` : `<input name="${esc(f.name)}" type="${esc(f.type || "text")}" value="${esc(f.value ?? "")}" ${f.required ? "required" : ""} ${f.type === "number" ? `min="${f.min ?? 0}" max="${f.max ?? 999999}" step="1"` : 'maxlength="120"'}>`}</label>`).join("")}<div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit" class="${danger ? "danger" : ""}">${danger ? "Apply" : "Save"}</button></div></form>`;
+  dialog.innerHTML = `<form><h2>${esc(title)}</h2>${message ? `<p>${esc(message)}</p>` : ""}${fields.map((f) => `<label>${esc(f.label)}${f.options ? `<select name="${esc(f.name)}" ${f.required ? "required" : ""}>${f.options.map(([v, l]) => `<option value="${esc(v)}" ${v === f.value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>` : f.type === "textarea" ? `<textarea name="${esc(f.name)}" maxlength="2000">${esc(f.value)}</textarea>` : `<input name="${esc(f.name)}" type="${esc(f.type || "text")}" value="${esc(f.value ?? "")}" ${f.required ? "required" : ""} ${f.type === "number" ? `min="${f.min ?? 0}" max="${f.max ?? 999999}" step="1"` : 'maxlength="120"'}>`}</label>`).join("")}<div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit" class="${danger ? "danger" : ""}">${danger ? "Apply" : esc(submitLabel)}</button></div></form>`;
   document.body.append(dialog);
   if (onChange) dialog.querySelector("form").addEventListener("change", (event) => onChange(event.target.form, event));
   return new Promise((resolve) => {
@@ -6057,7 +6102,7 @@ function installCharacterTools(host) {
       const repairOptions = (target2) => host.tracker(target2).odyssey.inventory.items.filter((i) => ["armor", "shield"].includes(i.kind) && i.quantity > 0 && i.criticalDamage > 0 && (getRole() === "GM" || !i.equippedPart || !host.tracker(target2).body[i.equippedPart]?.hidden)).map((i) => [i.id, i.name + " \xB7 durability " + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + (i.equippedPart ? " \xB7 equipped" : " \xB7 inventory")]);
       if (item.subtype === "repairkit") fields.push({ name: "gear", label: "Armor in inventory", options: [["", "Choose damaged armor"], ...repairOptions(token)] });
       else if (item.subtype !== "stim") fields.push({ name: "part", label: "Body part", options: partsFor(token) });
-      const value = await formDialog("Use " + item.name, fields, { onChange: (form, event) => {
+      const value = await formDialog("Use " + item.name, fields, { submitLabel: "Use item", onChange: (form, event) => {
         if (event.target.name !== "target") return;
         if (form.elements.gear) {
           const target3 = host.getToken(form.elements.target.value || tokenId);
@@ -6072,7 +6117,18 @@ function installCharacterTools(host) {
       check(tokenId);
       const target = host.getToken(value.target || tokenId);
       if (!target) throw new Error("Target no longer exists.");
-      await host.useItem(tokenId, id, target.id, item.subtype === "repairkit" ? value.gear || "" : value.part || "");
+      const currentItem = host.tracker(check(tokenId)).odyssey.inventory.items.find((row) => row.id === id);
+      if (!currentItem) throw Error("Item no longer exists.");
+      const useOdyssey = effectiveOdyssey(host.tracker(check(tokenId)).odyssey), requirement = itemUseRequirement(useOdyssey, currentItem);
+      let attribute = "";
+      if (requirement.mode === "attribute") {
+        const choice = await formDialog("Use " + currentItem.name + " \xB7 choose characteristic", [{ name: "attribute", label: "Characteristic", value: "", required: true, options: [["", "Choose a characteristic"], ...ATTRIBUTES.map((key) => [key, key + " (" + (useOdyssey.attributes[key] || 0) + ")"])] }], { submitLabel: "Roll and use", message: "Unknown skill: " + requirement.skill + ". First pass a characteristic check, then d100 vs d100. A failed check spends one item without an effect." });
+        if (!choice) return;
+        attribute = choice.attribute;
+      }
+      const result = await host.useItem(tokenId, id, target.id, item.subtype === "repairkit" ? value.gear || "" : value.part || "", attribute);
+      status(result.summary, result.success ? "success" : "error");
+      return;
     } else if (action === "reload-weapon") {
       const index = Number(node.dataset.index), ammoId = readSelect(panel, "data-reload-kind", index);
       await mutate(tokenId, (t) => reloadMagazine(t.odyssey, index, ammoId), true);
@@ -10366,27 +10422,40 @@ async function performRollCharOnce(options = {}) {
   );
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
-async function useCharacterItem(sourceId, itemId, targetId, partName) {
+async function useCharacterItem(sourceId, itemId, targetId, partName, attribute = "") {
   const effectId = crypto.randomUUID();
-  await lib_default.scene.items.updateItems([.../* @__PURE__ */ new Set([sourceId, targetId])], (items) => {
+  let result, actorName;
+  await queueTrackerWrite(sourceId, () => lib_default.scene.items.updateItems([.../* @__PURE__ */ new Set([sourceId, targetId])], (items) => {
     const source = items.find((t) => t.id === sourceId), target = items.find((t) => t.id === targetId);
     if (!source || !target || !canUseToken(source)) throw new Error("Character is unavailable.");
     if (playerRole !== "GM" && (target.visible === false || getTrackerData(target).body[partName]?.hidden)) throw new Error("Target is unavailable.");
     const sourceData = getTrackerData(source), targetData = source === target ? sourceData : getTrackerData(target);
     const item = sourceData.odyssey.inventory.items.find((i) => i.id === itemId);
-    if (!item || !["consumable", "medical"].includes(item.kind) || item.quantity < 1) throw new Error("No usable item available.");
-    if (playerRole !== "GM" && item.subtype === "repairkit") {
+    if (playerRole !== "GM" && item?.subtype === "repairkit") {
       const gear = targetData.odyssey.inventory.items.find((i) => i.id === partName);
       if (gear?.equippedPart && targetData.body[gear.equippedPart]?.hidden) throw new Error("Target is unavailable.");
     }
-    useItemOnTracker(targetData, item, partName, effectId);
-    item.quantity -= 1;
-    source.metadata[META_KEY] = sanitizeTrackerData(sourceData);
-    target.metadata[META_KEY] = sanitizeTrackerData(targetData);
-  });
+    result = applyCheckedItemUse({ source: sourceData, target: targetData, itemId, selection: partName, attribute, effectId, rollCharacter: rollCharacterCheck, rollSkill: rollSkillCheck });
+    actorName = getCharacterName(source);
+    result.summary = itemUseSummary(result) + " \u2192 " + getCharacterName(target);
+    if (result.mode !== "none") {
+      const last = result.stages.at(-1)?.result;
+      result.source.lastRoll = { eventId: 0, actorName, summary: result.summary, outcome: "item-use", total: last?.totalPrimary ?? last?.roll ?? 0, targetPart: item?.subtype === "medkit" ? partName : "", timestamp: (/* @__PURE__ */ new Date()).toISOString(), source: "owlbear-extension" };
+      result.source.history = [result.source.lastRoll, ...result.source.history || []].slice(0, 12);
+    }
+    source.metadata[META_KEY] = sanitizeTrackerData(result.source);
+    if (source !== target && result.success) target.metadata[META_KEY] = sanitizeTrackerData(result.target);
+  }));
   await syncState();
   await Promise.all([.../* @__PURE__ */ new Set([sourceId, targetId])].map(ensureOverlayForToken));
   scheduleRender();
+  if (result.mode !== "none") try {
+    await pushDebugEntry(actorName + " uses " + result.itemName, result.summary, result.success ? "success" : "error");
+  } catch (error) {
+    console.warn("[Odyssey] Item use was saved; public log failed", error);
+    result.summary += " \xB7 Public log unavailable; result saved on character.";
+  }
+  return { summary: result.summary, success: result.success };
 }
 async function performRollSkillOnce(options = {}) {
   const token = getCharacterById(activeTokenId);

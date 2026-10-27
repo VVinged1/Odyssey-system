@@ -18,7 +18,7 @@ export function normalizeInventory(raw, weapons = []) {
     kind: kinds.has(r.kind) ? r.kind : 'item', quantity: int(r.quantity ?? 1),
     description: text(r.description, 2000), armor: int(r.armor, 999),
     subtype: ['grenade','medkit','repairkit','stim'].includes(r.subtype)?r.subtype:r.kind==='medical'?'medkit':'grenade',
-    healCritical: int(r.healCritical ?? 1,999), slots:[...new Set((Array.isArray(r.slots)?r.slots:[r.slot||'any']).map(s=>text(s,40)).filter(Boolean))].slice(0,100), slot: text(r.slot||'any',40),
+    healCritical: int(r.healCritical ?? 1,999), useSkill:text(r.useSkill,80), slots:[...new Set((Array.isArray(r.slots)?r.slots:[r.slot||'any']).map(s=>text(s,40)).filter(Boolean))].slice(0,100), slot: text(r.slot||'any',40),
     criticalMax:int(r.criticalMax,999), criticalDamage:int(r.criticalDamage,int(r.criticalMax,999)),
     playerRemovable:r.playerRemovable===true, bonuses:normalizeBonuses(['resource','implant'].includes(r.kind)?{...r.bonuses,rangeReduction:{}}:r.bonuses),
     abilities:(Array.isArray(r.abilities)?r.abilities:[]).slice(0,20).map((a,j)=>({id:text(a.id||'ability-'+j),name:text(a.name)||'Ability',level:int(a.level,10),description:text(a.description,2000)})),

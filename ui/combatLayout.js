@@ -12,7 +12,7 @@ export function arrangeCombatPanels(root=document) {
       const control=field.querySelector('[data-attack-field],[data-manual-attack-field],input,select,button,[id],.combat-value');
       const key=control?.dataset.attackField||control?.dataset.manualAttackField||control?.id||control?.dataset.action||'';
       const isWeapon=['skill','weaponName','weaponDamage','ammoId','rounds','attackSourceName','attackSkill','weaponAccuracy'].includes(key)||field.querySelector('[data-weapon-accuracy-display]');
-      const isTarget=['targetPart','targetName','targetTokenId','pick-attack-target','pickTargetBtn','clearTargetBtn','manualArmor','manualParry'].includes(key)||field.querySelector('.combat-value:not([data-weapon-accuracy-display])');
+      const isTarget=['distanceMeters','targetPart','targetName','targetTokenId','pick-attack-target','pickTargetBtn','clearTargetBtn','manualArmor','manualParry'].includes(key)||field.querySelector('.combat-value:not([data-weapon-accuracy-display])');
       cards[isWeapon?0:isTarget?1:2].append(field);
     }
     for(const hidden of [...panel.querySelectorAll('input[type="hidden"]')])cards[1].append(hidden);

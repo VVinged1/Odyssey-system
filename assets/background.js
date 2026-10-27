@@ -393,13 +393,22 @@ var require_events = __commonJS({
   }
 });
 
+// rangeRules.js
+var WEAPON_CATEGORIES = [["", "Unclassified"], ["pistol", "Pistol"], ["smg", "SMG"], ["shotgun", "Shotgun"], ["assault", "Assault rifle / machine gun"], ["sniper", "Sniper rifle"]];
+var normalizeWeaponCategory = (value) => WEAPON_CATEGORIES.some(([key]) => key === value) ? value : "";
+var RANGE_BANDS = [["clinch", "Clinch \xB7 0\u20132 m"], ["short", "Short \xB7 >2\u201315 m"], ["medium", "Medium \xB7 >15\u201350 m"], ["long", "Long \xB7 >50 m"]];
+function normalizeRangeReduction(raw) {
+  return Object.fromEntries(RANGE_BANDS.map(([key]) => [key, Math.max(0, Math.min(999, Math.trunc(Number(raw?.[key]) || 0)))]).filter(([, v]) => v));
+}
+
 // characterRules.js
 var ARMOR_TRAINING = { light_armor: "Light Armor", medium_armor: "Medium Armor", heavy_armor: "Heavy Armor", superheavy_armor: "Superheavy Armor" };
 var ATTRIBUTES = ["Strength", "Agility", "Reaction", "Endurance", "Perception", "Intelligence", "Charisma", "Willpower", "Magic"];
 var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
 function normalizeBonuses(raw) {
   const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
-  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills) };
+  const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
 }
 function normalizeEffects(raw) {
   const seen = /* @__PURE__ */ new Set();
@@ -3881,6 +3890,8 @@ function sanitizeAmmunition(raw) {
 function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    weaponCategory: normalizeWeaponCategory(weapon.weaponCategory),
+    rangeReduction: normalizeRangeReduction(weapon.rangeReduction),
     acceptsMagazines: weapon.acceptsMagazines !== false,
     ...Array.isArray(weapon.acceptedMagazineIds) ? { acceptedMagazineIds: [...new Set(weapon.acceptedMagazineIds.filter((id) => typeof id === "string"))].slice(0, 200) } : {},
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
@@ -3985,6 +3996,7 @@ var DEFAULT_TRACKER_DATA = {
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     skillLabels: {},
     skillPerks: {},
+    skillRangeReduction: {},
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -4127,7 +4139,10 @@ function sanitizeOdysseyData(raw) {
     const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
+  next.skillRangeReduction = {};
   for (const skillName of Object.keys(next.skills)) {
+    const reduction = sanitizeMagazine({ rangeReduction: raw.skillRangeReduction?.[skillName] }).rangeReduction;
+    if (Object.keys(reduction).length) next.skillRangeReduction[skillName] = reduction;
     next.skillLabels[skillName] = String(rawSkillLabels[skillName] ?? skillName).trim().slice(0, 40) || skillName;
     next.skillPerks[skillName] = Array.isArray(rawSkillPerks[skillName]) ? rawSkillPerks[skillName].map((perk) => String(perk ?? "").trim().slice(0, 40)).filter(Boolean).slice(0, 12) : [];
   }

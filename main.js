@@ -1,3 +1,4 @@
+import {rangeAdjustment,rangeAdjustmentLabel} from './rangeRules.js';
 import {createTargetDistance} from './targetDistance.js';
 import {arrangeCombatPanels} from './ui/combatLayout.js';
 import {installCompactButtons} from './ui/compactButtons.js';
@@ -76,6 +77,18 @@ let measuredTargetDistance=null,targetDistance=null;
 function paintTargetDistance(reading) {
   measuredTargetDistance=reading;
   for(const node of document.querySelectorAll('[data-target-distance]'))node.textContent=reading?.sourceId===activeTokenId?reading.label:'—';
+  paintRangeAdjustments();
+}
+function paintRangeAdjustments() {
+  const token=getCharacterById(activeTokenId);if(!token)return;
+  const odyssey=getOdysseyData(token);
+  for(const node of document.querySelectorAll('[data-range-modifier]')) {
+    const manual=node.dataset.rangeModifier==='manual',prefix=manual?'data-manual-attack-field':'data-attack-field';
+    const weapon=getWeaponByName(token,getActionFieldValue(`[${prefix}="weaponName"]`));
+    const skill=getActionFieldValue(`[${prefix}="skill"]`),raw=getActionFieldValue('[data-manual-attack-field="distanceMeters"]');
+    const meters=manual?(String(raw??'').trim()===''?null:Number(raw)):(measuredTargetDistance?.sourceId===token.id?measuredTargetDistance.meters:null);
+    const result=rangeAdjustment(weapon,meters,odyssey,skill);node.hidden=!result.category;node.textContent=rangeAdjustmentLabel(result);node.classList.toggle('bad',result.modifier<0);node.classList.toggle('good',result.modifier>0);
+  }
 }
 function refreshTargetDistance() {
   if(!targetDistance)return;
@@ -757,6 +770,7 @@ function startSelectionPolling() {
 }
 
 function formatAttackDebug({
+  range,
   distance,
   attackerName,
   targetName,
@@ -818,6 +832,7 @@ function formatAttackDebug({
     ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
     ["Strength Bonus", strengthBonus],
     ["Weapon Accuracy", weaponAccuracy],
+    ...(range?.category?[["Weapon range",rangeAdjustmentLabel(range)]]:[]),
     ["Manual Attack Bonus", manualAttackBonuses],
     ["Total Attack Bonus", totalAttackBonuses],
     ["Manual Attack Penalty", manualAttackPenalties],
@@ -1183,6 +1198,7 @@ function getAttackDraft(token, data, targetCharacters) {
     manualAttackPenalties: stored.manualAttackPenalties ?? stored.attackPenalties ?? "0",
     defenseBonuses: stored.defenseBonuses ?? "0",
     defensePenalties: stored.defensePenalties ?? "0",
+    distanceMeters: stored.distanceMeters ?? "",
     manualArmor: stored.manualArmor ?? "0",
     manualParry: stored.manualParry ?? "0",
     rounds: stored.rounds ?? "1",
@@ -1202,6 +1218,7 @@ function saveAttackDraftValue(tokenId, field, value) {
 }
 
 function getSharedAttackDraftField(manualField) {
+  if (manualField === "distanceMeters") return "distanceMeters";
   if (manualField === "rounds") return "rounds";
   if (manualField === "targetPart") return "targetPart";
   if (manualField === "skill") return "skill";
@@ -3026,6 +3043,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Weapon</span>
           <select data-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
+          <span class="od-range-readout cp-muted" data-range-modifier="attack"></span>
         </label>
         <label class="field-stack">
           <span class="field-label">Current Target</span>
@@ -3124,7 +3142,9 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Weapon</span>
           <select data-manual-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
+          <span class="od-range-readout cp-muted" data-range-modifier="manual"></span>
         </label>
+        <label class="field-stack"><span class="field-label">Distance · metres</span><input type="number" min="0" step="0.1" value="${escapeHtml(draft.distanceMeters)}" data-manual-attack-field="distanceMeters" ${disabledAttr}></label>
         <label class="field-stack ${getWeaponByName(token, draft.weaponName).rangedIndex != null ? "hidden" : ""}">
           <span class="field-label">Weapon Damage</span>
           <input type="number" value="${getWeaponByName(token, draft.weaponName).rangedIndex != null ? 0 : draft.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr} ${getWeaponByName(token, draft.weaponName).rangedIndex != null ? "disabled" : ""}>
@@ -3426,6 +3446,7 @@ function renderSelectedToken() {
 
   if(characterTools?.isBusy())ui.selectedTokenPanel.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
   arrangeCombatPanels(ui.selectedTokenPanel);
+  paintRangeAdjustments();
   refreshTargetDistance();
   restoreSelectedPanelState(panelState);
 }
@@ -4245,7 +4266,12 @@ async function performAttackOnce({ manualDefense = false } = {}) {
       : getActionFieldValue('[data-attack-field="attackBonuses"]')
   ) || 0;
   const weaponAccuracy = Number(selectedWeapon?.accuracy) || 0;
-  const attackBonuses = manualAttackBonuses + weaponAccuracy;
+  const attackDistance=target&&targetDistance?await targetDistance.measure(attacker,target):null;
+  const enteredDistance=manualDefense?getActionFieldValue('[data-manual-attack-field="distanceMeters"]'):null;
+  const meters=manualDefense?(String(enteredDistance??'').trim()===''?null:Number(enteredDistance)):attackDistance?.meters;
+  const range=rangeAdjustment(selectedWeapon,meters,attackerOdyssey,skillName);
+  if(range.required)throw new Error(manualDefense?'Enter distance in metres for this weapon.':'Set scene ruler units to metres or feet to calculate weapon range.');
+  const attackBonuses = manualAttackBonuses + weaponAccuracy + Math.max(0,range.modifier);
   const manualAttackPenalties = Number(
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]')
@@ -4254,7 +4280,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const availableTargetParts = getTargetableBodyParts(targetData, isEditable());
   const targetPart = manualDefense ? "Torso" : (availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso");
   const automaticTargetPenalty = manualDefense ? 0 : getBodyPartAttackPenalty(targetData, targetPart);
-  const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
+  const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty + Math.max(0,-range.modifier);
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
   const manualArmor = clamp(
@@ -4451,7 +4477,8 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   await pushDebugEntry(
     `${getAttackOutcomeIcon(result.outcome)} ${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
-      distance: target&&targetDistance?await targetDistance.measure(attacker,target):null,
+      distance: attackDistance||(Number.isFinite(meters)?{label:meters+' m (manual)'}:null),
+      range,
       attackerName: getCharacterName(attacker),
       targetName: resolvedTargetName,
       targetPart,
@@ -5112,6 +5139,7 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.attackField||target.dataset.manualAttackField||target.dataset.hudAttackField)queueMicrotask(paintRangeAdjustments);
     if (target.dataset.hudAttackField) {
       const field=target.dataset.hudAttackField;
       const original=ui.selectedTokenPanel.querySelector(`[data-attack-field="${field}"]`);
@@ -5285,6 +5313,7 @@ function bindUiEvents() {
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
 
+    if(target.dataset.attackField||target.dataset.manualAttackField||target.dataset.hudAttackField)queueMicrotask(paintRangeAdjustments);
     if (target.dataset.hudAttackField) {
       const field=target.dataset.hudAttackField;
       const original=ui.selectedTokenPanel.querySelector(`[data-attack-field="${field}"]`);

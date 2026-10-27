@@ -1,3 +1,4 @@
+import {weaponCategoryLabel} from './rangeRules.js';
 export const ARMOR_POOL_TIERS=['Light Armor','Medium Armor','Heavy Armor','Superheavy Armor','Outside listed ranges'];
 const SLOTS={Torso:['Torso',true],torso:['Torso',true],Head:['Head',false],head:['Head',false],'L.Arm':['Left Arm',false],'left-arm':['Left Arm',false],'R.Arm':['Right Arm',false],'right-arm':['Right Arm',false],'L.Leg':['Left Leg',false],'left-leg':['Left Leg',false],'R.Leg':['Right Leg',false],'right-leg':['Right Leg',false],Shield:['Shield',false],Special:['Special',false],other:['Other parts',false]};
 export function armorPoolTier(armor,torso=false) {
@@ -11,7 +12,7 @@ export function poolCategoryPaths(blueprint) {
     return parts.map(([label,torso])=>v.kind==='implant'?['Implants',label]:['Armor',armorPoolTier(v.armor,torso),label]);
   }
   if(v.kind==='consumable'||v.kind==='medical')return [['Usables',({grenade:'Grenades',medkit:'Medkits',repairkit:'Repair kits',stim:'Stims'})[v.subtype]||'Other usables']];
-  if(v.kind==='weapon')return [['Weapons',v.weaponKind==='ranged'?'Ranged':'Melee']];
+  if(v.kind==='weapon')return [v.weaponKind==='ranged'?['Weapons','Ranged',weaponCategoryLabel(v.weaponCategory)]:['Weapons','Melee']];
   return [[({ammo:'Ammunition',magazine:'Magazines',resource:'Resources',tool:'Tools'})[v.kind]||'Other items']];
 }
 export function groupPoolEntries(entries) {

@@ -200,4 +200,12 @@ test('Already equipped V3 armor migrates once; healthy templates preserve the co
  const template=makeTemplate('Armored',t),fresh=instantiateTemplate(t,template,sanitize);assert.equal(fresh.body.Torso.current,6);assert.equal(fresh.body.Torso.max,6);assert.equal(fresh.odyssey.inventory.items[0].criticalDamage,0);
 });
 
+test('Range mitigation survives sanitization, templates and equipped/passive rules',()=>{
+ const raw=legacy();raw.odyssey.weapons.ranged[0].weaponCategory='pistol';raw.odyssey.weapons.ranged[0].rangeReduction={clinch:5};raw.odyssey.skillRangeReduction={Shoot:{long:10},Unknown:{long:999}};
+ let t=sanitize(raw);assert.equal(t.odyssey.weapons.ranged[0].weaponCategory,'pistol');assert.equal(t.odyssey.weapons.ranged[0].rangeReduction.clinch,5);assert.equal(t.odyssey.skillRangeReduction.Shoot.long,10);assert.equal(t.odyssey.skillRangeReduction.Unknown,undefined);
+ saveInventoryEntry(t,null,{kind:'resource',name:'Scope training',quantity:1,bonuses:{rangeReduction:{long:3}}},'resource');
+ saveInventoryEntry(t,null,{kind:'implant',name:'Eye',quantity:1,slots:['Torso'],bonuses:{rangeReduction:{long:4}}},'eye');
+ assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,3);equipItem(t,'eye','Torso');assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,7);unequipItem(t,'eye','Torso');assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,3);
+ const template=makeTemplate('Shooter',t),copy=instantiateTemplate(sanitize(legacy()),template,sanitize);assert.equal(copy.odyssey.skillRangeReduction.Shoot.long,10);assert.equal(copy.odyssey.weapons.ranged[0].rangeReduction.clinch,5);assert.equal(copy.odyssey.weapons.ranged[0].weaponCategory,'pistol');
+});
 console.log(`${count} integration checks passed.`);

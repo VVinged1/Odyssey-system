@@ -109,6 +109,7 @@ export const DEFAULT_TRACKER_DATA = {
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     skillLabels: {},
     skillPerks: {},
+    skillRangeReduction: {},
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -352,7 +353,9 @@ export function sanitizeOdysseyData(raw) {
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
 
+  next.skillRangeReduction={};
   for (const skillName of Object.keys(next.skills)) {
+    const reduction=sanitizeMagazine({rangeReduction:raw.skillRangeReduction?.[skillName]}).rangeReduction;if(Object.keys(reduction).length)next.skillRangeReduction[skillName]=reduction;
     next.skillLabels[skillName] = String(rawSkillLabels[skillName] ?? skillName).trim().slice(0, 40) || skillName;
     next.skillPerks[skillName] = Array.isArray(rawSkillPerks[skillName])
       ? rawSkillPerks[skillName]

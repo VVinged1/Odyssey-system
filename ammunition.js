@@ -1,3 +1,4 @@
+import {normalizeWeaponCategory,normalizeRangeReduction} from './rangeRules.js';
 const integer = (value, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(value) || 0)));
 const modifier = (value) => Math.min(999, Math.max(-999, Math.trunc(Number(value) || 0)));
 
@@ -19,6 +20,8 @@ export function sanitizeAmmunition(raw) {
 export function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    weaponCategory: normalizeWeaponCategory(weapon.weaponCategory),
+    rangeReduction: normalizeRangeReduction(weapon.rangeReduction),
     acceptsMagazines: weapon.acceptsMagazines !== false,
     ...(Array.isArray(weapon.acceptedMagazineIds)?{acceptedMagazineIds:[...new Set(weapon.acceptedMagazineIds.filter(id=>typeof id==="string"))].slice(0,200)}:{}),
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],

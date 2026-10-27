@@ -17,7 +17,7 @@ export function captureBlueprint(tracker,type,id) {
   if(type==='ammo')values={kind:'ammo',...ammoDefinition(entry),quantity:1};
   else if(type==='magazine')values={kind:'magazine',name:entry.name,quantity:1,capacity:entry.capacity,loaded:0,loadedAmmoId:''};
   else if(type.startsWith('weapon-')) {
-    const kind=type.slice(7);values={kind:'weapon',weaponKind:kind,name:entry.name,accuracy:entry.accuracy,damage:entry.damage};
+    const kind=type.slice(7);values={kind:'weapon',weaponKind:kind,name:entry.name,accuracy:entry.accuracy,damage:entry.damage,...(kind==='ranged'&&entry.weaponCategory?{weaponCategory:entry.weaponCategory}:{}),...(kind==='ranged'&&Object.values(entry.rangeReduction||{}).some(Boolean)?{rangeReduction:structuredClone(entry.rangeReduction)}:{})};
     if(kind==='ranged') {
       values.acceptsMagazines=entry.acceptsMagazines!==false;values.loaded=0;values.loadedAmmoId='';values.magazineId='';
       if(values.acceptsMagazines) {

@@ -393,6 +393,39 @@ var require_events = __commonJS({
   }
 });
 
+// rangeRules.js
+var WEAPON_CATEGORIES = [["", "Unclassified"], ["pistol", "Pistol"], ["smg", "SMG"], ["shotgun", "Shotgun"], ["assault", "Assault rifle / machine gun"], ["sniper", "Sniper rifle"]];
+var normalizeWeaponCategory = (value) => WEAPON_CATEGORIES.some(([key]) => key === value) ? value : "";
+var weaponCategoryLabel = (value) => WEAPON_CATEGORIES.find(([key]) => key === value)?.[1] || "Unclassified";
+function distanceMeters(cells, scale) {
+  const value = Number(scale?.parsed?.multiplier), unit = String(scale?.parsed?.unit || "").trim().toLowerCase();
+  const factor = { m: 1, meter: 1, meters: 1, metre: 1, metres: 1, "\u043C": 1, cm: 0.01, "\u0441\u043C": 0.01, km: 1e3, "\u043A\u043C": 1e3, ft: 0.3048, foot: 0.3048, feet: 0.3048, "\u0444\u0443\u0442": 0.3048, "\u0444\u0443\u0442\u044B": 0.3048, in: 0.0254, inch: 0.0254, inches: 0.0254, yd: 0.9144, yard: 0.9144, yards: 0.9144, mi: 1609.344, mile: 1609.344, miles: 1609.344 }[unit];
+  return Number.isFinite(cells) && cells >= 0 && Number.isFinite(value) && value > 0 && factor ? cells * value * factor : null;
+}
+var RANGE_BANDS = [["clinch", "Clinch \xB7 0\u20132 m"], ["short", "Short \xB7 >2\u201315 m"], ["medium", "Medium \xB7 >15\u201350 m"], ["long", "Long \xB7 >50 m"]];
+function distanceBand(meters) {
+  return !Number.isFinite(meters) || meters < 0 ? null : meters <= 2 ? "clinch" : meters <= 15 ? "short" : meters <= 50 ? "medium" : "long";
+}
+function normalizeRangeReduction(raw) {
+  return Object.fromEntries(RANGE_BANDS.map(([key]) => [key, Math.max(0, Math.min(999, Math.trunc(Number(raw?.[key]) || 0)))]).filter(([, v]) => v));
+}
+var MATRIX = { pistol: [-15, 0, -5, -10], smg: [-25, 15, 0, -10], shotgun: [-25, 30, -15, -50], assault: [-30, 0, 0, 0], sniper: [-50, -30, 0, 10] };
+function rangeAdjustment(weapon, meters, odyssey = {}, skill = "") {
+  const category = normalizeWeaponCategory(weapon?.weaponCategory), band = distanceBand(meters);
+  if (!category) return { category, band, raw: 0, reduction: 0, modifier: 0, required: false };
+  if (!band) return { category, band, raw: 0, reduction: 0, modifier: 0, required: true };
+  let raw = MATRIX[category][RANGE_BANDS.findIndex(([key]) => key === band)];
+  if (band === "long" && ["pistol", "smg", "sniper"].includes(category)) raw = Math.sign(raw) * Math.min(50, Math.ceil((meters - 50) / 25) * 10);
+  const reduction = [weapon.rangeReduction, odyssey.skillRangeReduction?.[skill], odyssey.rangeReduction].reduce((sum, row) => sum + (normalizeRangeReduction(row)[band] || 0), 0);
+  return { category, band, raw, reduction, modifier: raw < 0 ? Math.min(0, raw + reduction) : raw, required: false };
+}
+function rangeAdjustmentLabel(result) {
+  if (!result.category) return "Range: unclassified";
+  if (result.required) return "Range: distance in metres required";
+  const band = RANGE_BANDS.find(([key]) => key === result.band)[1].split(" \xB7 ")[0], signed = (n2) => (n2 >= 0 ? "+" : "") + n2;
+  return band + " \xB7 " + signed(result.modifier) + (result.raw < 0 && result.reduction ? " (base " + result.raw + ", relief " + Math.min(result.reduction, -result.raw) + ")" : "");
+}
+
 // targetDistance.js
 function distanceLabel(cells, scale) {
   if (!Number.isFinite(cells) || cells < 0) throw new Error("Distance is unavailable.");
@@ -418,7 +451,7 @@ function createTargetDistance({ OBR: OBR2, buildRuler: buildRuler2, onRead, cont
       const promise = (async () => {
         const [from, to, scale] = await Promise.all([center(source), center(target), scalePromise ?? (scalePromise = OBR2.scene.grid.getScale())]);
         const cells = await OBR2.scene.grid.getDistance(from, to);
-        return { sourceId: source.id, targetId: target.id || "", from, to, cells, label: distanceLabel(cells, scale) };
+        return { sourceId: source.id, targetId: target.id || "", from, to, cells, meters: distanceMeters(cells, scale), label: distanceLabel(cells, scale) };
       })();
       cache.set(cacheKey, promise);
       promise.catch(() => {
@@ -526,7 +559,7 @@ function arrangeCombatPanels(root = document) {
       const control = field.querySelector("[data-attack-field],[data-manual-attack-field],input,select,button,[id],.combat-value");
       const key = control?.dataset.attackField || control?.dataset.manualAttackField || control?.id || control?.dataset.action || "";
       const isWeapon = ["skill", "weaponName", "weaponDamage", "ammoId", "rounds", "attackSourceName", "attackSkill", "weaponAccuracy"].includes(key) || field.querySelector("[data-weapon-accuracy-display]");
-      const isTarget = ["targetPart", "targetName", "targetTokenId", "pick-attack-target", "pickTargetBtn", "clearTargetBtn", "manualArmor", "manualParry"].includes(key) || field.querySelector(".combat-value:not([data-weapon-accuracy-display])");
+      const isTarget = ["distanceMeters", "targetPart", "targetName", "targetTokenId", "pick-attack-target", "pickTargetBtn", "clearTargetBtn", "manualArmor", "manualParry"].includes(key) || field.querySelector(".combat-value:not([data-weapon-accuracy-display])");
       cards[isWeapon ? 0 : isTarget ? 1 : 2].append(field);
     }
     for (const hidden of [...panel.querySelectorAll('input[type="hidden"]')]) cards[1].append(hidden);
@@ -636,7 +669,8 @@ var ATTRIBUTES = ["Strength", "Agility", "Reaction", "Endurance", "Perception", 
 var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
 function normalizeBonuses(raw) {
   const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
-  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills) };
+  const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
 }
 function normalizeEffects(raw) {
   const seen = /* @__PURE__ */ new Set();
@@ -692,7 +726,8 @@ function effectiveOdyssey(base) {
   o.modifiers = { attributes: {}, skills: skillMods };
   for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.attributes || {})) o.modifiers.attributes[k] = (o.modifiers.attributes[k] || 0) + v;
   for (const k of ATTRIBUTES) o.attributes[k] = Math.max(0, (base.attributes[k] || 0) + (o.modifiers.attributes[k] || 0));
-  o.effectRows = rows2.filter((r) => Object.keys(r.bonuses?.attributes || {}).length || Object.keys(r.bonuses?.skills || {}).length);
+  o.rangeReduction = Object.fromEntries(RANGE_BANDS.map(([key]) => [key, rows2.reduce((sum, row) => sum + (normalizeRangeReduction(row.bonuses?.rangeReduction)[key] || 0), 0)]));
+  o.effectRows = rows2.filter((r) => Object.keys(r.bonuses?.attributes || {}).length || Object.keys(r.bonuses?.skills || {}).length || Object.keys(r.bonuses?.rangeReduction || {}).length);
   o.armorSummary = { ...armor, trained };
   return o;
 }
@@ -1074,6 +1109,8 @@ function saveInventoryEntry(tracker, origin, values, id) {
     if ([...o.weapons.melee, ...o.weapons.ranged].some((w) => w !== same && w.name === values.name)) throw new Error("A weapon with this name already exists.");
     const row2 = { id, name: values.name, accuracy: Number(values.accuracy) || 0, damage: Number(values.damage) || 0 };
     if (weaponKind === "ranged") {
+      row2.weaponCategory = normalizeWeaponCategory(values.weaponCategory);
+      row2.rangeReduction = normalizeRangeReduction(values.rangeReduction);
       const acceptsMagazines = values.acceptsMagazines !== false;
       if (same && same.acceptsMagazines !== false !== acceptsMagazines && same.loaded > 0) throw new Error("Empty or detach the current magazine before changing magazine type.");
       if (acceptsMagazines) {
@@ -1116,7 +1153,7 @@ function saveInventoryEntry(tracker, origin, values, id) {
 
 // ui/characterView.js
 var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-var bonusText = (b) => [...Object.entries(b?.attributes || {}), ...Object.entries(b?.skills || {})].map(([k, v]) => `${k} ${v > 0 ? "+" : ""}${v}`).join(" \xB7 ");
+var bonusText = (b) => [...Object.entries(b?.attributes || {}), ...Object.entries(b?.skills || {}), ...RANGE_BANDS.filter(([key]) => b?.rangeReduction?.[key]).map(([key, label]) => [label.split(" \xB7 ")[0] + " relief", b.rangeReduction[key]])].map(([k, v]) => `${k} ${v > 0 ? "+" : ""}${v}`).join(" \xB7 ");
 function attributeCards(o, fields, editable) {
   return `<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="attribute" aria-label="Characteristic roll modifier"></label></div><div class="cp-attrs">${fields.map(([k, label]) => {
     const delta = o.modifiers?.attributes?.[k] || 0;
@@ -1127,7 +1164,7 @@ function skillCards(o, groups, editable) {
   const passives = Object.entries(ARMOR_TRAINING).filter(([k]) => Object.hasOwn(o.skills, k) && (editable || o.skills[k] === 1));
   return `<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="skill" aria-label="Skill roll modifier"></label><button type="button" class="secondary" data-action="profile-random-skill">d100 vs d100</button>${editable ? '<button type="button" class="secondary" data-od-action="add-skill">+ Skill</button>' : ""}</div>${groups.filter(([, entries]) => entries.length).map(([label, entries]) => `<div class="cp-section-title">${esc(label)}</div><div class="cp-list">${entries.map(([k, value]) => {
     const name = o.skillLabels[k] || k, perks = o.skillPerks[k] || [], mod = o.modifiers?.skills?.[k] || 0;
-    return `<div class="cp-skill-row"><button class="cp-card cp-skill-card" type="button" data-action="profile-roll-skill" data-skill="${esc(k)}" aria-label="Roll ${esc(name)}"><span><b>${esc(name)}</b>${o.skillStrengthBonuses[k] ? '<span class="cp-pill">STR</span>' : ""}<span class="cp-perks">${perks.map((p) => `<span class="cp-pill">${esc(p)}</span>`).join("")}</span></span><span class="cp-skill-level"><span class="cp-pips">${Array.from({ length: 10 }, (_, i) => `<i class="cp-pip ${i < value ? "on" : ""}"></i>`).join("")}</span><strong>${value}/10</strong>${mod ? `<span class="cp-mod ${mod > 0 ? "good" : "bad"}">${mod > 0 ? "+" : ""}${mod}</span>` : ""}</span></button>${editable && !o.grantedSkills?.[k] ? `<button type="button" class="cp-pencil" data-od-action="edit-skill" data-skill="${esc(k)}" aria-label="Edit ${esc(name)}">\u270E</button>` : ""}</div>`;
+    return `<div class="cp-skill-row"><button class="cp-card cp-skill-card" type="button" data-action="profile-roll-skill" data-skill="${esc(k)}" aria-label="Roll ${esc(name)}"><span><b>${esc(name)}</b>${o.skillStrengthBonuses[k] ? '<span class="cp-pill">STR</span>' : ""}<span class="cp-perks">${RANGE_BANDS.filter(([band]) => o.skillRangeReduction?.[k]?.[band]).map(([band, label2]) => `<span class="cp-pill">${esc(label2.split(" \xB7 ")[0])} relief ${o.skillRangeReduction[k][band]}</span>`).join("")}${perks.map((p) => `<span class="cp-pill">${esc(p)}</span>`).join("")}</span></span><span class="cp-skill-level"><span class="cp-pips">${Array.from({ length: 10 }, (_, i) => `<i class="cp-pip ${i < value ? "on" : ""}"></i>`).join("")}</span><strong>${value}/10</strong>${mod ? `<span class="cp-mod ${mod > 0 ? "good" : "bad"}">${mod > 0 ? "+" : ""}${mod}</span>` : ""}</span></button>${editable && !o.grantedSkills?.[k] ? `<button type="button" class="cp-pencil" data-od-action="edit-skill" data-skill="${esc(k)}" aria-label="Edit ${esc(name)}">\u270E</button>` : ""}</div>`;
   }).join("")}</div>`).join("")}${passives.length ? `<div class="cp-passives cp-row"><span class="cp-muted">Armor training</span>${passives.map(([k, label]) => `<span class="cp-pill">${esc(label)} ${o.skills[k]}</span>`).join("")}${editable ? '<button type="button" class="cp-pencil" data-od-action="edit-training" aria-label="Edit armor training">\u270E</button>' : ""}</div>` : ""}</div>`;
 }
 function effectChips(o, gm) {
@@ -1167,7 +1204,7 @@ function inventoryView(tracker, gm) {
         controls = '<div class="cp-row"><label>Magazine<select data-weapon-mag="' + index + '"><option value="">Detached</option>' + compatible.map((m) => '<option value="' + esc(m.id) + '" ' + (m.id === w.magazineId ? "selected" : "") + ">" + esc(m.name) + " \xB7 " + m.loaded + "/" + m.capacity + "</option>").join("") + '</select></label><button type="button" data-od-action="mount-mag" data-index="' + index + '">Apply magazine</button></div>';
       } else controls = '<div class="cp-row"><label>Ammo<select data-reload-kind="' + index + '">' + o.ammunition.filter((a) => w.ammoIds.includes(a.id)).map((a) => '<option value="' + esc(a.id) + '" ' + (a.id === w.loadedAmmoId ? "selected" : "") + ">" + esc(a.name) + " (" + a.quantity + ")</option>").join("") + '</select></label><button type="button" data-od-action="reload-weapon" data-index="' + index + '">Reload built-in magazine</button></div>';
     }
-    return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + kind + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
+    return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + esc(kind === "ranged" ? weaponCategoryLabel(w.weaponCategory) : kind) + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + (Object.keys(w.rangeReduction || {}).length ? '<span class="cp-muted">' + esc(bonusText({ rangeReduction: w.rangeReduction })) + "</span>" : "") + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
   }));
   const group = (label, html) => html ? `<div class="cp-section-title">${label}</div><div class="cp-list">${html}</div>` : "";
   return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button><button type="button" data-od-action="open-item-pool">Campaign item pool</button></div>' : ""}${group("Equipped", equippedItems)}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!equippedItems && !items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
@@ -1179,7 +1216,7 @@ function templatesView(library, gm) {
 
 // ui/compactHud.js
 function compactHud({ token, tracker, floating, target, targetData, skills, weapons, draft: draft2, parts, ammunition }) {
-  return `<section class="od-hud cp-screen"><div class="cp-row"><div><span class="cp-section-title">Character</span><h3>${esc(token.name || "Character")}</h3></div><span class="cp-pill">${Object.entries(tracker.body).filter(([k]) => !["Shield", "Special"].includes(k)).reduce((n2, [, p]) => n2 + p.current, 0)} HP</span><button type="button" data-action="${floating ? "close-character-hud" : "open-character-hud"}" class="secondary">${floating ? "Close HUD" : "Floating HUD"}</button></div><div class="od-hud-grid"><div class="cp-card"><div class="cp-section-title">Weapon & skill</div><label>Weapon<select data-hud-attack-field="weaponName">${weapons}</select></label><label>Skill<select data-hud-attack-field="skill">${skills}</select></label>${ammunition.replaceAll("data-attack-field=", "data-hud-attack-field=")}</div><div class="cp-card"><div class="cp-section-title">Target</div><div class="cp-row"><b>${esc(target?.name || "No target selected")}</b><button type="button" data-action="pick-attack-target">Pick on map</button></div><label>Body zone<select data-hud-attack-field="targetPart">${parts.map(([key, label]) => `<option value="${esc(key)}" ${key === draft2.targetPart ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><p class="cp-muted">${targetData ? "Target selected \xB7 V1 armor, Parry and damage rules" : "Select a visible target to attack."}</p></div><div class="cp-card"><div class="cp-section-title">Action</div><label>Attack bonus<input type="number" value="${Number(draft2.attackBonuses) || 0}" data-hud-attack-field="attackBonuses"></label><label>Attack penalty<input type="number" value="${Number(draft2.attackPenalties) || 0}" data-hud-attack-field="attackPenalties"></label><button type="button" data-action="perform-attack" ${!target ? "disabled" : ""}>Attack</button></div></div><p class="cp-muted" role="status">${esc(tracker.lastRoll?.summary || "No rolls yet.")}</p></section>`;
+  return `<section class="od-hud cp-screen"><div class="cp-row"><div><span class="cp-section-title">Character</span><h3>${esc(token.name || "Character")}</h3></div><span class="cp-pill">${Object.entries(tracker.body).filter(([k]) => !["Shield", "Special"].includes(k)).reduce((n2, [, p]) => n2 + p.current, 0)} HP</span><button type="button" data-action="${floating ? "close-character-hud" : "open-character-hud"}" class="secondary">${floating ? "Close HUD" : "Floating HUD"}</button></div><div class="od-hud-grid"><div class="cp-card"><div class="cp-section-title">Weapon & skill</div><label>Weapon<select data-hud-attack-field="weaponName">${weapons}</select></label><label>Skill<select data-hud-attack-field="skill">${skills}</select></label>${ammunition.replaceAll("data-attack-field=", "data-hud-attack-field=")}</div><div class="cp-card"><div class="cp-section-title">Target</div><div class="cp-row"><b>${esc(target?.name || "No target selected")}</b><span data-target-distance class="od-target-distance"></span><span data-range-modifier="attack" class="od-range-readout cp-muted"></span><button type="button" data-action="pick-attack-target">Pick on map</button></div><label>Body zone<select data-hud-attack-field="targetPart">${parts.map(([key, label]) => `<option value="${esc(key)}" ${key === draft2.targetPart ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><p class="cp-muted">${targetData ? "Target selected \xB7 V1 armor, Parry and damage rules" : "Select a visible target to attack."}</p></div><div class="cp-card"><div class="cp-section-title">Action</div><label>Attack bonus<input type="number" value="${Number(draft2.attackBonuses) || 0}" data-hud-attack-field="attackBonuses"></label><label>Attack penalty<input type="number" value="${Number(draft2.attackPenalties) || 0}" data-hud-attack-field="attackPenalties"></label><button type="button" data-action="perform-attack" ${!target ? "disabled" : ""}>Attack</button></div></div><p class="cp-muted" role="status">${esc(tracker.lastRoll?.summary || "No rolls yet.")}</p></section>`;
 }
 
 // itemPool.js
@@ -1206,7 +1243,7 @@ function captureBlueprint(tracker, type, id) {
   else if (type === "magazine") values = { kind: "magazine", name: entry.name, quantity: 1, capacity: entry.capacity, loaded: 0, loadedAmmoId: "" };
   else if (type.startsWith("weapon-")) {
     const kind = type.slice(7);
-    values = { kind: "weapon", weaponKind: kind, name: entry.name, accuracy: entry.accuracy, damage: entry.damage };
+    values = { kind: "weapon", weaponKind: kind, name: entry.name, accuracy: entry.accuracy, damage: entry.damage, ...kind === "ranged" && entry.weaponCategory ? { weaponCategory: entry.weaponCategory } : {}, ...kind === "ranged" && Object.values(entry.rangeReduction || {}).some(Boolean) ? { rangeReduction: structuredClone(entry.rangeReduction) } : {} };
     if (kind === "ranged") {
       values.acceptsMagazines = entry.acceptsMagazines !== false;
       values.loaded = 0;
@@ -1356,7 +1393,7 @@ function poolCategoryPaths(blueprint) {
     return parts.map(([label, torso]) => v.kind === "implant" ? ["Implants", label] : ["Armor", armorPoolTier(v.armor, torso), label]);
   }
   if (v.kind === "consumable" || v.kind === "medical") return [["Usables", { grenade: "Grenades", medkit: "Medkits", repairkit: "Repair kits", stim: "Stims" }[v.subtype] || "Other usables"]];
-  if (v.kind === "weapon") return [["Weapons", v.weaponKind === "ranged" ? "Ranged" : "Melee"]];
+  if (v.kind === "weapon") return [v.weaponKind === "ranged" ? ["Weapons", "Ranged", weaponCategoryLabel(v.weaponCategory)] : ["Weapons", "Melee"]];
   return [[{ ammo: "Ammunition", magazine: "Magazines", resource: "Resources", tool: "Tools" }[v.kind] || "Other items"]];
 }
 function groupPoolEntries(entries) {
@@ -1478,8 +1515,9 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   for (const key of Object.keys(existing.bonuses?.skills || {})) if (!skillChoices.some(([k]) => k === key)) skillChoices.push([key, key]);
   dialog.innerHTML = `<form><h2>${existing.id ? "Edit item" : "New item"}</h2>${select("kind", "Type", ITEM_TYPES, type)}${field("name", "Name", existing.name || "")}${field("quantity", "Quantity / ammo reserve", existing.quantity ?? 1, "number", 999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description || "")}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
   const form = dialog.querySelector("form"), host = dialog.querySelector("[data-type-fields]");
+  const rangeEditor = (prefix, value = {}) => `<fieldset class="od-range-reduction"><legend>Range penalty reduction \xB7 per band</legend>${RANGE_BANDS.map(([key, label]) => field(prefix + key, label, value[key] || 0, "number")).join("")}</fieldset>`;
   function bonusEditor(bonuses = {}, allowSkills = true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
+    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${rangeEditor("bonusRange:", bonuses.rangeReduction)}${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
   }
   function abilityRow(a = {}) {
     return `<div class="od-ability-row">${field("abilityName", "Ability", a.name || "")}${field("abilityLevel", "Level", a.level || 0, "number", 10)}${field("abilityDescription", "Description", a.description || "")}<button type="button" data-remove-ability aria-label="Remove ability">\xD7</button></div>`;
@@ -1497,7 +1535,11 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
       const value = Number(input.value) || 0;
       if (value) bonuses[kind === "attr" ? "attributes" : "skills"][key.join(":")] = value;
     }
-    if (form.querySelector(".od-bonuses")) values.bonuses = bonuses;
+    if (form.querySelector(".od-bonuses")) {
+      bonuses.rangeReduction = normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key]) => [key, data["bonusRange:" + key]])));
+      values.bonuses = bonuses;
+    }
+    if (form.elements["weaponRange:clinch"]) values.rangeReduction = normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key]) => [key, data["weaponRange:" + key]])));
     if (form.querySelector("[data-abilities]")) values.abilities = [...form.querySelectorAll(".od-ability-row")].map((row, index) => ({ id: existing.abilities?.[index]?.id || crypto.randomUUID(), name: row.querySelector('[name="abilityName"]').value, level: Number(row.querySelector('[name="abilityLevel"]').value) || 0, description: row.querySelector('[name="abilityDescription"]').value })).filter((a) => a.name.trim());
     values.ammoIds = [...form.querySelectorAll('[name="ammoCompatible"]:checked')].map((e) => e.value);
   }
@@ -1517,6 +1559,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     if (kind === "weapon") {
       html += select("weaponKind", "Weapon type", [["melee", "Melee"], ["ranged", "Ranged"]], values.weaponKind || "melee") + field("accuracy", "Accuracy", values.accuracy ?? 0, "number");
       if (values.weaponKind === "ranged") {
+        html += select("weaponCategory", "Weapon category", WEAPON_CATEGORIES, values.weaponCategory || "") + rangeEditor("weaponRange:", values.rangeReduction);
         html += checkbox("acceptsMagazines", "Accepts detachable magazines", values.acceptsMagazines);
         if (values.acceptsMagazines) html += "<fieldset><legend>Compatible magazines</legend>" + magazineChoices.map((m) => checkbox("magazineCompatible", m.name + " \xB7 " + m.capacity + " rounds", values.acceptedMagazineIds.some((id) => magazines.some((reference) => reference.id === id && reference.name === m.name && reference.capacity === m.capacity))).replace('name="magazineCompatible"', 'name="magazineCompatible" value="' + esc(m.id) + '"')).join("") + (magazines.length ? "" : '<p class="cp-muted">Create a magazine in Items first.</p>') + "</fieldset>";
         else html += field("capacity", "Built-in magazine capacity", values.capacity || 6, "number") + field("loaded", "Loaded rounds \xB7 GM correction", values.loaded || 0, "number") + select("loadedAmmoId", "Loaded ammunition", [["", "Empty"], ...ammunition.map((a) => [a.id, a.name])], values.loadedAmmoId || "") + "<fieldset><legend>Compatible ammunition</legend>" + ammunition.map((a) => checkbox("ammoCompatible", a.name, (values.ammoIds || []).includes(a.id)).replace('name="ammoCompatible"', 'name="ammoCompatible" value="' + esc(a.id) + '"')).join("") + "</fieldset>";
@@ -1528,6 +1571,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
       if (kind === "implant") html += checkbox("playerRemovable", "Player may equip / remove this implant", values.playerRemovable) + bonusEditor(values.bonuses) + `<fieldset><legend>Granted abilities \xB7 available only while equipped</legend><div data-abilities>${(values.abilities || []).map(abilityRow).join("")}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
     }
     host.innerHTML = html;
+    if (form.elements.weaponCategory && !existing.id) form.elements.weaponCategory.required = true;
     for (const input of host.querySelectorAll('[name^="attr:"],[name^="skill:"]')) input.min = "-999";
     form.elements.quantity.closest("label").hidden = kind === "weapon" || kind === "magazine" && !!existing.id;
   }
@@ -1596,7 +1640,7 @@ function skillEditor(o, key) {
   const existing = key && Object.hasOwn(o.skills, key), core = ["Melee", "Parry"].includes(key);
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog";
-  dialog.innerHTML = `<form><h2>${existing ? "Edit skill" : "New skill"}</h2><label>Name<input name="name" required maxlength="40" value="${esc(existing ? o.skillLabels[key] || key : "")}"></label><label>Base level<input name="level" type="number" min="0" max="10" value="${existing ? o.skills[key] : 0}"></label><label>Category<select name="category">${["combat", "abilities", "applied"].map((c) => `<option ${o.skillCategories[key] === c ? "selected" : ""}>${c}</option>`).join("")}</select></label><label class="od-check"><input name="strength" type="checkbox" ${o.skillStrengthBonuses[key] ? "checked" : ""}>Strength bonus for attack damage</label><fieldset><legend>Perks</legend><div data-perks></div><button type="button" data-add-perk>+ Perk</button></fieldset><div class="cp-row"><button type="button" data-cancel>Cancel</button>${existing && !core ? '<button type="button" class="danger" data-delete>Delete skill</button>' : ""}<button type="submit">Save</button></div></form>`;
+  dialog.innerHTML = `<form><h2>${existing ? "Edit skill" : "New skill"}</h2><label>Name<input name="name" required maxlength="40" value="${esc(existing ? o.skillLabels[key] || key : "")}"></label><label>Base level<input name="level" type="number" min="0" max="10" value="${existing ? o.skills[key] : 0}"></label><label>Category<select name="category">${["combat", "abilities", "applied"].map((c) => `<option ${o.skillCategories[key] === c ? "selected" : ""}>${c}</option>`).join("")}</select></label><label class="od-check"><input name="strength" type="checkbox" ${o.skillStrengthBonuses[key] ? "checked" : ""}>Strength bonus for attack damage</label><fieldset><legend>Perks</legend><p class="cp-muted">Combined perk relief for attacks using this skill. Enter each distance band separately.</p>${RANGE_BANDS.map(([band, label]) => `<label>${esc(label)} \xB7 penalty reduction<input name="perkRange:${band}" type="number" min="0" max="999" value="${o.skillRangeReduction?.[key]?.[band] || 0}"></label>`).join("")}<div data-perks></div><button type="button" data-add-perk>+ Perk</button></fieldset><div class="cp-row"><button type="button" data-cancel>Cancel</button>${existing && !core ? '<button type="button" class="danger" data-delete>Delete skill</button>' : ""}<button type="submit">Save</button></div></form>`;
   const list = dialog.querySelector("[data-perks]");
   const add = (value) => list.insertAdjacentHTML("beforeend", `<div class="cp-row"><input name="perk" maxlength="40" value="${esc(value)}" aria-label="Perk"><button type="button" data-remove-perk aria-label="Remove perk">\xD7</button></div>`);
   for (const p of o.skillPerks[key] || []) add(p);
@@ -1620,7 +1664,7 @@ function skillEditor(o, key) {
     dialog.querySelector("form").onsubmit = (e) => {
       e.preventDefault();
       const f = e.target;
-      finish({ name: f.elements.name.value.trim(), level: Number(f.elements.level.value), category: f.elements.category.value, strength: f.elements.strength.checked, perks: [...list.querySelectorAll("input")].map((e2) => e2.value.trim()).filter(Boolean) });
+      finish({ name: f.elements.name.value.trim(), level: Number(f.elements.level.value), category: f.elements.category.value, strength: f.elements.strength.checked, rangeReduction: normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([band]) => [band, f.elements["perkRange:" + band].value]))), perks: [...list.querySelectorAll("input")].map((e2) => e2.value.trim()).filter(Boolean) });
     };
     dialog.showModal();
   });
@@ -1646,6 +1690,8 @@ function sanitizeAmmunition(raw) {
 function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    weaponCategory: normalizeWeaponCategory(weapon.weaponCategory),
+    rangeReduction: normalizeRangeReduction(weapon.rangeReduction),
     acceptsMagazines: weapon.acceptsMagazines !== false,
     ...Array.isArray(weapon.acceptedMagazineIds) ? { acceptedMagazineIds: [...new Set(weapon.acceptedMagazineIds.filter((id) => typeof id === "string"))].slice(0, 200) } : {},
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
@@ -5351,7 +5397,7 @@ var LIBRARY_FORMAT = "odyssey-template-library";
 var TEMPLATE_FORMAT = "odyssey-character-template";
 var LIBRARY_ITEM_KEY = "com.codex.body-hp/template-library";
 var LIBRARY_STORAGE_KEY = "odyssey.templates.v1";
-var profileFields = ["skills", "skillCategories", "skillStrengthBonuses", "skillLabels", "skillPerks", "attributes", "weapons", "ammunition", "inventory"];
+var profileFields = ["skills", "skillCategories", "skillStrengthBonuses", "skillLabels", "skillPerks", "skillRangeReduction", "attributes", "weapons", "ammunition", "inventory"];
 function profileData(tracker) {
   return {
     enabled: true,
@@ -5674,7 +5720,7 @@ function installCharacterTools(host) {
         if (key && !Object.hasOwn(d.skills, key)) throw new Error("Skill no longer exists.");
         if (value.delete) {
           if (["Melee", "Parry"].includes(key)) throw new Error("Core combat skill cannot be removed.");
-          for (const field of ["skills", "skillLabels", "skillCategories", "skillStrengthBonuses", "skillPerks"]) delete d[field][key];
+          for (const field of ["skills", "skillLabels", "skillCategories", "skillStrengthBonuses", "skillPerks", "skillRangeReduction"]) delete d[field][key];
           return;
         }
         d.skills[skillKey] = value.level;
@@ -5682,6 +5728,8 @@ function installCharacterTools(host) {
         d.skillCategories[skillKey] = value.category;
         d.skillStrengthBonuses[skillKey] = value.strength;
         d.skillPerks[skillKey] = value.perks;
+        d.skillRangeReduction ?? (d.skillRangeReduction = {});
+        d.skillRangeReduction[skillKey] = value.rangeReduction;
       }, true);
     } else if (action === "edit-training") {
       check(tokenId, true);
@@ -5972,6 +6020,7 @@ var DEFAULT_TRACKER_DATA = {
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     skillLabels: {},
     skillPerks: {},
+    skillRangeReduction: {},
     attributes: {
       Strength: 0,
       Agility: 0,
@@ -6169,7 +6218,10 @@ function sanitizeOdysseyData(raw) {
     const fallbackValue = key === "Magic" ? raw.attributes?.[key] ?? raw.attributes?.Psionics ?? 0 : raw.attributes?.[key] ?? 0;
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
+  next.skillRangeReduction = {};
   for (const skillName of Object.keys(next.skills)) {
+    const reduction = sanitizeMagazine({ rangeReduction: raw.skillRangeReduction?.[skillName] }).rangeReduction;
+    if (Object.keys(reduction).length) next.skillRangeReduction[skillName] = reduction;
     next.skillLabels[skillName] = String(rawSkillLabels[skillName] ?? skillName).trim().slice(0, 40) || skillName;
     next.skillPerks[skillName] = Array.isArray(rawSkillPerks[skillName]) ? rawSkillPerks[skillName].map((perk) => String(perk ?? "").trim().slice(0, 40)).filter(Boolean).slice(0, 12) : [];
   }
@@ -6940,6 +6992,23 @@ var targetDistance = null;
 function paintTargetDistance(reading) {
   measuredTargetDistance = reading;
   for (const node of document.querySelectorAll("[data-target-distance]")) node.textContent = reading?.sourceId === activeTokenId ? reading.label : "\u2014";
+  paintRangeAdjustments();
+}
+function paintRangeAdjustments() {
+  const token = getCharacterById(activeTokenId);
+  if (!token) return;
+  const odyssey = getOdysseyData(token);
+  for (const node of document.querySelectorAll("[data-range-modifier]")) {
+    const manual = node.dataset.rangeModifier === "manual", prefix = manual ? "data-manual-attack-field" : "data-attack-field";
+    const weapon = getWeaponByName(token, getActionFieldValue(`[${prefix}="weaponName"]`));
+    const skill = getActionFieldValue(`[${prefix}="skill"]`), raw = getActionFieldValue('[data-manual-attack-field="distanceMeters"]');
+    const meters = manual ? String(raw ?? "").trim() === "" ? null : Number(raw) : measuredTargetDistance?.sourceId === token.id ? measuredTargetDistance.meters : null;
+    const result = rangeAdjustment(weapon, meters, odyssey, skill);
+    node.hidden = !result.category;
+    node.textContent = rangeAdjustmentLabel(result);
+    node.classList.toggle("bad", result.modifier < 0);
+    node.classList.toggle("good", result.modifier > 0);
+  }
 }
 function refreshTargetDistance() {
   if (!targetDistance) return;
@@ -7461,6 +7530,7 @@ function startSelectionPolling() {
   }, 1500);
 }
 function formatAttackDebug({
+  range,
   distance,
   attackerName,
   targetName,
@@ -7521,6 +7591,7 @@ function formatAttackDebug({
     ["Attack Skill", `${attackSkillName} (${attackSkillValue})`],
     ["Strength Bonus", strengthBonus],
     ["Weapon Accuracy", weaponAccuracy],
+    ...range?.category ? [["Weapon range", rangeAdjustmentLabel(range)]] : [],
     ["Manual Attack Bonus", manualAttackBonuses],
     ["Total Attack Bonus", totalAttackBonuses],
     ["Manual Attack Penalty", manualAttackPenalties],
@@ -7806,6 +7877,7 @@ function getAttackDraft(token, data, targetCharacters) {
     manualAttackPenalties: stored.manualAttackPenalties ?? stored.attackPenalties ?? "0",
     defenseBonuses: stored.defenseBonuses ?? "0",
     defensePenalties: stored.defensePenalties ?? "0",
+    distanceMeters: stored.distanceMeters ?? "",
     manualArmor: stored.manualArmor ?? "0",
     manualParry: stored.manualParry ?? "0",
     rounds: stored.rounds ?? "1",
@@ -7821,6 +7893,7 @@ function saveAttackDraftValue(tokenId, field, value) {
   });
 }
 function getSharedAttackDraftField(manualField) {
+  if (manualField === "distanceMeters") return "distanceMeters";
   if (manualField === "rounds") return "rounds";
   if (manualField === "targetPart") return "targetPart";
   if (manualField === "skill") return "skill";
@@ -8629,6 +8702,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Weapon</span>
           <select data-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
+          <span class="od-range-readout cp-muted" data-range-modifier="attack"></span>
         </label>
         <label class="field-stack">
           <span class="field-label">Current Target</span>
@@ -8720,7 +8794,9 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
         <label class="field-stack">
           <span class="field-label">Weapon</span>
           <select data-manual-attack-field="weaponName" ${disabledAttr}>${weaponOptions}</select>
+          <span class="od-range-readout cp-muted" data-range-modifier="manual"></span>
         </label>
+        <label class="field-stack"><span class="field-label">Distance \xB7 metres</span><input type="number" min="0" step="0.1" value="${escapeHtml(draft2.distanceMeters)}" data-manual-attack-field="distanceMeters" ${disabledAttr}></label>
         <label class="field-stack ${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? "hidden" : ""}">
           <span class="field-label">Weapon Damage</span>
           <input type="number" value="${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? 0 : draft2.weaponDamage}" data-manual-attack-field="weaponDamage" ${disabledAttr} ${getWeaponByName(token, draft2.weaponName).rangedIndex != null ? "disabled" : ""}>
@@ -8932,6 +9008,7 @@ function renderSelectedToken() {
     if (e instanceof HTMLButtonElement) e.disabled = true;
   });
   arrangeCombatPanels(ui.selectedTokenPanel);
+  paintRangeAdjustments();
   refreshTargetDistance();
   restoreSelectedPanelState(panelState);
 }
@@ -9595,14 +9672,19 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     manualDefense ? getActionFieldValue('[data-manual-attack-field="attackBonuses"]') || getActionFieldValue('[data-attack-field="attackBonuses"]') : getActionFieldValue('[data-attack-field="attackBonuses"]')
   ) || 0;
   const weaponAccuracy = Number(selectedWeapon?.accuracy) || 0;
-  const attackBonuses = manualAttackBonuses + weaponAccuracy;
+  const attackDistance = target && targetDistance ? await targetDistance.measure(attacker, target) : null;
+  const enteredDistance = manualDefense ? getActionFieldValue('[data-manual-attack-field="distanceMeters"]') : null;
+  const meters = manualDefense ? String(enteredDistance ?? "").trim() === "" ? null : Number(enteredDistance) : attackDistance?.meters;
+  const range = rangeAdjustment(selectedWeapon, meters, attackerOdyssey, skillName);
+  if (range.required) throw new Error(manualDefense ? "Enter distance in metres for this weapon." : "Set scene ruler units to metres or feet to calculate weapon range.");
+  const attackBonuses = manualAttackBonuses + weaponAccuracy + Math.max(0, range.modifier);
   const manualAttackPenalties = Number(
     manualDefense ? getActionFieldValue('[data-manual-attack-field="attackPenalties"]') || getActionFieldValue('[data-attack-field="attackPenalties"]') : getActionFieldValue('[data-attack-field="attackPenalties"]')
   ) || 0;
   const availableTargetParts = getTargetableBodyParts(targetData, isEditable());
   const targetPart = manualDefense ? "Torso" : availableTargetParts.includes(requestedTargetPart) ? requestedTargetPart : "Torso";
   const automaticTargetPenalty = manualDefense ? 0 : getBodyPartAttackPenalty(targetData, targetPart);
-  const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
+  const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty + Math.max(0, -range.modifier);
   const defenseBonuses = Number(getActionFieldValue('[data-attack-field="defenseBonuses"]')) || 0;
   const defensePenalties = Number(getActionFieldValue('[data-attack-field="defensePenalties"]')) || 0;
   const manualArmor = clamp(
@@ -9759,7 +9841,8 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   await pushDebugEntry(
     `${getAttackOutcomeIcon(result.outcome)} ${getCharacterName(attacker)} attacks ${resolvedTargetName}`,
     formatAttackDebug({
-      distance: target && targetDistance ? await targetDistance.measure(attacker, target) : null,
+      distance: attackDistance || (Number.isFinite(meters) ? { label: meters + " m (manual)" } : null),
+      range,
       attackerName: getCharacterName(attacker),
       targetName: resolvedTargetName,
       targetPart,
@@ -10352,6 +10435,7 @@ function bindUiEvents() {
   document.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    if (target.dataset.attackField || target.dataset.manualAttackField || target.dataset.hudAttackField) queueMicrotask(paintRangeAdjustments);
     if (target.dataset.hudAttackField) {
       const field2 = target.dataset.hudAttackField;
       const original = ui.selectedTokenPanel.querySelector(`[data-attack-field="${field2}"]`);
@@ -10516,6 +10600,7 @@ function bindUiEvents() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (!activeTokenId) return;
+    if (target.dataset.attackField || target.dataset.manualAttackField || target.dataset.hudAttackField) queueMicrotask(paintRangeAdjustments);
     if (target.dataset.hudAttackField) {
       const field = target.dataset.hudAttackField;
       const original = ui.selectedTokenPanel.querySelector(`[data-attack-field="${field}"]`);

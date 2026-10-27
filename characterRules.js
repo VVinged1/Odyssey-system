@@ -1,10 +1,12 @@
+import {normalizeRangeReduction,RANGE_BANDS} from './rangeRules.js';
 // Derived character values. Base attributes/skills are never overwritten by effects.
 export const ARMOR_TRAINING = {light_armor:'Light Armor',medium_armor:'Medium Armor',heavy_armor:'Heavy Armor',superheavy_armor:'Superheavy Armor'};
 export const ATTRIBUTES = ['Strength','Agility','Reaction','Endurance','Perception','Intelligence','Charisma','Willpower','Magic'];
 const n = v => Math.max(-999,Math.min(999,Math.trunc(Number(v)||0)));
 export function normalizeBonuses(raw) {
   const clean=(rows,attributes=false)=>Object.fromEntries(Object.entries(rows||{}).filter(([k,v])=>k.length<=80&&!['__proto__','constructor','prototype'].includes(k)&&(!attributes||ATTRIBUTES.includes(k))&&n(v)).slice(0,80).map(([k,v])=>[k,n(v)]));
-  return {attributes:clean(raw?.attributes,true),skills:clean(raw?.skills)};
+  const rangeReduction=normalizeRangeReduction(raw?.rangeReduction);
+  return {attributes:clean(raw?.attributes,true),skills:clean(raw?.skills),...(Object.keys(rangeReduction).length?{rangeReduction}:{})};
 }
 export function normalizeEffects(raw) {
   const seen=new Set();return (Array.isArray(raw)?raw:[]).slice(0,100).filter(e=>e&&typeof e.id==='string'&&!seen.has(e.id)&&seen.add(e.id)).map(e=>({id:e.id.slice(0,120),name:String(e.name||'Effect').slice(0,120),bonuses:normalizeBonuses(e.bonuses)}));
@@ -44,7 +46,8 @@ export function effectiveOdyssey(base) {
   o.modifiers={attributes:{},skills:skillMods};
   for(const row of rows)for(const [k,v] of Object.entries(row.bonuses?.attributes||{}))o.modifiers.attributes[k]=(o.modifiers.attributes[k]||0)+v;
   for(const k of ATTRIBUTES)o.attributes[k]=Math.max(0,(base.attributes[k]||0)+(o.modifiers.attributes[k]||0));
-  o.effectRows=rows.filter(r=>Object.keys(r.bonuses?.attributes||{}).length||Object.keys(r.bonuses?.skills||{}).length);o.armorSummary={...armor,trained};return o;
+  o.rangeReduction=Object.fromEntries(RANGE_BANDS.map(([key])=>[key,rows.reduce((sum,row)=>sum+(normalizeRangeReduction(row.bonuses?.rangeReduction)[key]||0),0)]));
+  o.effectRows=rows.filter(r=>Object.keys(r.bonuses?.attributes||{}).length||Object.keys(r.bonuses?.skills||{}).length||Object.keys(r.bonuses?.rangeReduction||{}).length);o.armorSummary={...armor,trained};return o;
 }
 export function reconcileEquipment(tracker) {
   const inv=tracker.odyssey.inventory;if(!inv)return;

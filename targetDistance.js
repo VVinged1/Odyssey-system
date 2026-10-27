@@ -1,3 +1,4 @@
+import {distanceMeters} from './rangeRules.js';
 // Uses Owlbear's own grid measurement, including hex grids and diagonal rules.
 export function distanceLabel(cells,scale) {
   if(!Number.isFinite(cells)||cells<0)throw new Error('Distance is unavailable.');
@@ -18,7 +19,7 @@ export function createTargetDistance({OBR,buildRuler,onRead,context='main'}) {
       if(cache.size>=32)cache.clear();
       const promise=(async()=>{
         const [from,to,scale]=await Promise.all([center(source),center(target),scalePromise??=(OBR.scene.grid.getScale())]);
-        const cells=await OBR.scene.grid.getDistance(from,to);return {sourceId:source.id,targetId:target.id||'',from,to,cells,label:distanceLabel(cells,scale)};
+        const cells=await OBR.scene.grid.getDistance(from,to);return {sourceId:source.id,targetId:target.id||'',from,to,cells,meters:distanceMeters(cells,scale),label:distanceLabel(cells,scale)};
       })();cache.set(cacheKey,promise);promise.catch(()=>{if(cache.get(cacheKey)===promise)cache.delete(cacheKey);});
     }
     return cache.get(cacheKey);

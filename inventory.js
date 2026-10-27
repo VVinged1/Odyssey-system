@@ -1,3 +1,4 @@
+import {normalizeWeaponCategory,normalizeRangeReduction} from './rangeRules.js';
 import { normalizeBonuses, reconcileEquipment, equipmentFits } from "./characterRules.js";
 // Token-owned inventory. Equipped magazines mirror the V1 weapon fields so
 // attacks/reloads keep using ammunition.js without a second source of damage math.
@@ -204,6 +205,7 @@ export function saveInventoryEntry(tracker,origin,values,id) {
     if([...o.weapons.melee,...o.weapons.ranged].some(w=>w!==same&&w.name===values.name))throw new Error('A weapon with this name already exists.');
     const row={id,name:values.name,accuracy:Number(values.accuracy)||0,damage:Number(values.damage)||0};
     if(weaponKind==='ranged') {
+      row.weaponCategory=normalizeWeaponCategory(values.weaponCategory);row.rangeReduction=normalizeRangeReduction(values.rangeReduction);
       const acceptsMagazines=values.acceptsMagazines!==false;
       if(same&&(same.acceptsMagazines!==false)!==acceptsMagazines&&same.loaded>0)throw new Error('Empty or detach the current magazine before changing magazine type.');
       if(acceptsMagazines) {

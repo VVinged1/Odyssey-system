@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {distanceMeters,distanceBand,normalizeWeaponCategory,rangeAdjustment,normalizeRangeReduction} from '../rangeRules.js';
+import {sanitizeMagazine} from '../ammunition.js';
+import {poolCategoryPaths} from '../poolCategories.js';
+for(const [m,band] of [[0,'clinch'],[2,'clinch'],[2.001,'short'],[15,'short'],[15.001,'medium'],[50,'medium'],[50.001,'long'],[null,null],[NaN,null],[-1,null]])assert.equal(distanceBand(m),band);
+assert.equal(distanceMeters(10,{parsed:{multiplier:5,unit:'ft'}}),15.24);
+assert.equal(distanceMeters(10,{parsed:{multiplier:1,unit:'m'}}),10);
+assert.equal(distanceMeters(10,{parsed:{multiplier:1,unit:'cells'}}),null);
+assert.equal(distanceMeters(10,{parsed:{multiplier:0,unit:'m'}}),null);
+assert.equal(normalizeWeaponCategory('invented'),'');assert.equal(sanitizeMagazine({weaponCategory:'sniper'}).weaponCategory,'sniper');
+assert.deepEqual(poolCategoryPaths({values:{kind:'weapon',weaponKind:'ranged',weaponCategory:'smg'}}),[['Weapons','Ranged','SMG']]);
+console.log('Range categories, boundaries and scene units passed.');
+
+const bands=[1,10,30,60],expected={pistol:[-15,0,-5,-10],smg:[-25,15,0,-10],shotgun:[-25,30,-15,-50],assault:[-30,0,0,0],sniper:[-50,-30,0,10]};
+for(const [category,mods]of Object.entries(expected))for(let i=0;i<bands.length;i++)assert.equal(rangeAdjustment({weaponCategory:category},bands[i]).modifier,mods[i],category+' '+bands[i]);
+for(const [meters,mod]of [[50.001,10],[75,10],[75.001,20],[100,20],[100.001,30],[125,30],[150,40],[150.001,50],[10000,50]])for(const category of ['pistol','smg','sniper'])assert.equal(rangeAdjustment({weaponCategory:category},meters).modifier,category==='sniper'?mod:-mod);
+assert.equal(rangeAdjustment({weaponCategory:'smg'},null).required,true);assert.equal(rangeAdjustment({},null).required,false);
+const weapon={weaponCategory:'smg',rangeReduction:{long:5,short:999}},o={skillRangeReduction:{Shoot:{long:10},Other:{long:999}},rangeReduction:{long:2}};
+assert.equal(rangeAdjustment(weapon,90,o,'Shoot').modifier,-3);assert.equal(rangeAdjustment(weapon,90,o,'Other').modifier,0);assert.equal(rangeAdjustment(weapon,90,o,'Melee').modifier,-13);
+assert.equal(rangeAdjustment(weapon,10,o,'Shoot').modifier,15);assert.equal(rangeAdjustment(weapon,1,o,'Shoot').modifier,-25);
+assert.deepEqual(normalizeRangeReduction({long:-5,short:2.9,clinch:9999,other:999}),{clinch:999,short:2});
+console.log('All 20 category/band modifiers, 25 m steps, cap, stacking and positive bonuses passed.');

@@ -105,8 +105,8 @@ export function installCharacterTools(host) {
       const value=await skillEditor(o,key);if(!value)return;
       const skillKey=key||newId();await mutate(tokenId,t=>{
         const d=t.odyssey;if(key&&!Object.hasOwn(d.skills,key))throw new Error('Skill no longer exists.');
-        if(value.delete){if(['Melee','Parry'].includes(key))throw new Error('Core combat skill cannot be removed.');for(const field of ['skills','skillLabels','skillCategories','skillStrengthBonuses','skillPerks'])delete d[field][key];return;}
-        d.skills[skillKey]=value.level;d.skillLabels[skillKey]=value.name;d.skillCategories[skillKey]=value.category;d.skillStrengthBonuses[skillKey]=value.strength;d.skillPerks[skillKey]=value.perks;
+        if(value.delete){if(['Melee','Parry'].includes(key))throw new Error('Core combat skill cannot be removed.');for(const field of ['skills','skillLabels','skillCategories','skillStrengthBonuses','skillPerks','skillRangeReduction'])delete d[field][key];return;}
+        d.skills[skillKey]=value.level;d.skillLabels[skillKey]=value.name;d.skillCategories[skillKey]=value.category;d.skillStrengthBonuses[skillKey]=value.strength;d.skillPerks[skillKey]=value.perks;d.skillRangeReduction??={};d.skillRangeReduction[skillKey]=value.rangeReduction;
       },true);
     } else if(action==='edit-training') {
       check(tokenId,true);const o=host.tracker(token).odyssey;

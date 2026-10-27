@@ -1,3 +1,4 @@
+import {rangeAdjustment} from './rangeRules.js';
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -38,24 +39,26 @@ assert.equal(sanitizeMagazine({}).loaded, 0);
 const main = readFileSync(new URL("./main.js", import.meta.url), "utf8");
 const handler = main.slice(main.indexOf("let attackPending = false;"), main.indexOf("async function performRollDice"));
 assert.ok(handler.includes("async function performAttackOnce"));
-for (const manualDefense of [false, true]) {
+for (const category of ["","smg"]) for (const manualDefense of [false, true]) {
   const state = { odyssey: inventory(), history: [] };
   state.odyssey.skills = { Shoot: 5 };
+  state.odyssey.weapons.ranged[0].weaponCategory=category;state.odyssey.weapons.ranged[0].rangeReduction={long:5};state.odyssey.skillRangeReduction={Shoot:{long:10}};
   state.odyssey.attributes = { Strength: 20 };
   reloadMagazine(state.odyssey, 0, "ball");
   const token = { id: "attacker" };
   const target = { id: "target" };
+  let distanceValue=90;
   let resolved;
   let calls = 0;
   const context = vm.createContext({
-    structuredClone, targetDistance:null, activeTokenId: token.id, playerName: "Player", SPECIAL_PART_NAME: "Special", PARRY_SKILL_NAME: "Parry",
+    structuredClone, rangeAdjustment, targetDistance:{measure:async()=>({meters:distanceValue,label:"90 m"})}, activeTokenId: token.id, playerName: "Player", SPECIAL_PART_NAME: "Special", PARRY_SKILL_NAME: "Parry",
     getCharacterById: (id) => id === token.id ? token : target,
     canUseToken: () => true, isEditable: () => true,
     getOdysseyData: () => state.odyssey,
     getTrackerData: () => ({ body: { Torso: { armor: 10, current: 5 } } }),
     getActionFieldValue: (selector) => {
       const field = selector.match(/="([^"]+)"/)[1];
-      return ({targetTokenId: "target", skill: "Shoot", weaponName: "Rifle", ammoId: "ball", rounds: "3", targetPart: "Torso", manualArmor: "10", weaponDamage: "999", parryMode: "off"})[field] ?? "0";
+      return ({distanceMeters:distanceValue==null?"":String(distanceValue),targetTokenId: "target", skill: "Shoot", weaponName: "Rifle", ammoId: "ball", rounds: "3", targetPart: "Torso", manualArmor: "10", weaponDamage: "999", parryMode: "off"})[field] ?? "0";
     },
     getWeaponByName: () => ({ ...state.odyssey.weapons.ranged[0], rangedIndex: 0 }),
     getAmmoShot, consumeAmmo, effectiveArmor,
@@ -71,9 +74,11 @@ for (const manualDefense of [false, true]) {
     getAttackOutcomeIcon: () => "", formatAttackDebug: () => "", setStatus: () => {}, scheduleRender: () => {},
   });
   vm.runInContext(handler, context);
+  if(category){distanceValue=null;await assert.rejects(context.performAttack({manualDefense}));assert.equal(calls,0);assert.equal(state.odyssey.weapons.ranged[0].loaded,6);distanceValue=90;}
   await context.performAttack({ manualDefense });
   assert.equal(calls, 1);
   assert.equal(resolved.weaponDamage, 36);
+  assert.equal(resolved.attackPenalties,category?5:0);assert.equal(resolved.attackBonuses,0);
   assert.equal(resolved.targetArmor, 5);
   assert.equal(state.odyssey.weapons.ranged[0].loaded, 3, "A miss must consume rounds");
   await context.performAttack({ manualDefense });

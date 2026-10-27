@@ -8,6 +8,7 @@ Base: TARGET `2737c0dea4de50cb8950f291f9e7991bc8803870`. SOURCE is a read-only v
 - Assigned players can view and roll their character; GM-only value/skill editors remain separate. Old forms and cards call the same V1 checks.
 - Compact weapon/target/action HUD in the console and an optional floating popover, using the existing attack command and target picker.
 - Token metadata inventory: generic/consumable/medical/resource/tool items, armor, shields and implants; quantity/description editing; equip/unequip and use-one actions.
+- GM direct round correction for mounted and reserve magazines: **GM · Set rounds…** accepts an integer from zero to capacity and an ammunition type. This is an administrative correction, not a reload: reserve quantities stay unchanged. Mounted weapon fields are updated in the same token mutation; GM permission is rechecked after the dialog.
 - Individual magazines: legacy conversion, detached reserve magazines, fill/empty, mount/swap, compatibility and exclusivity checks.
 - Character templates: save, rename, duplicate, remove, apply, JSON import/export, browser-local library and explicit save/load through the Owlbear Assets scene picker.
 - GM presentation refresh, restored private-results container and bounded visibility checkbox hit area.

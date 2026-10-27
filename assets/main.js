@@ -410,7 +410,7 @@ function inventoryView(tracker, gm) {
   const itemRows = inv.items.map((i) => `<article class="cp-card"><div class="cp-row"><b>${esc(i.name)}</b><span class="cp-pill">${esc(i.kind)}</span><span class="cp-pill">\xD7${i.quantity}</span>${i.armor ? `<span class="cp-pill">Armor ${i.armor}</span>` : ""}</div><p class="cp-muted cp-description">${esc(i.description)}</p><div class="cp-row">${i.equippedPart ? `<span>Equipped: ${esc(tracker.body[i.equippedPart]?.label || i.equippedPart)}</span><button type="button" data-od-action="unequip" data-id="${esc(i.id)}">Unequip</button>` : ["armor", "shield", "implant"].includes(i.kind) ? `<label>Body part <select data-equip-part="${esc(i.id)}">${Object.entries(tracker.body).filter(([, p]) => gm || !p.hidden).map(([k, p]) => `<option value="${esc(k)}">${esc(p.label || k)}</option>`).join("")}</select></label><button type="button" data-od-action="equip" data-id="${esc(i.id)}" ${!i.quantity ? "disabled" : ""}>Equip</button>` : ["consumable", "medical", "resource"].includes(i.kind) ? `<button type="button" data-od-action="consume" data-id="${esc(i.id)}" ${!i.quantity ? "disabled" : ""}>Use one</button>` : ""}${gm ? `<button type="button" class="secondary" data-od-action="edit-item" data-id="${esc(i.id)}">Edit</button><button type="button" class="danger" data-od-action="delete-item" data-id="${esc(i.id)}">Remove</button>` : ""}</div></article>`).join("");
   const mags = inv.magazines.map((m) => {
     const w = o.weapons.ranged.find((w2) => w2.magazineId === m.id), a = o.ammunition.find((a2) => a2.id === m.loadedAmmoId);
-    return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name || "Empty")} ${w ? `\xB7 ${esc(w.name)}` : "\xB7 Reserve magazine"}</span></div>${gm && !w ? `<div class="cp-row"><label>Ammo <select data-mag-ammo="${esc(m.id)}">${o.ammunition.map((a2) => `<option value="${esc(a2.id)}">${esc(a2.name)} (${a2.quantity})</option>`).join("")}</select></label><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button><button type="button" class="danger" data-od-action="delete-mag" data-id="${esc(m.id)}">Remove</button></div>` : ""}</article>`;
+    return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name || "Empty")} ${w ? `\xB7 ${esc(w.name)}` : "\xB7 Reserve magazine"}</span>${gm ? `<button type="button" class="secondary" data-od-action="set-mag-rounds" data-id="${esc(m.id)}">GM \xB7 Set rounds\u2026</button>` : ""}</div>${gm && !w ? `<div class="cp-row"><label>Ammo <select data-mag-ammo="${esc(m.id)}">${o.ammunition.map((a2) => `<option value="${esc(a2.id)}">${esc(a2.name)} (${a2.quantity})</option>`).join("")}</select></label><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button><button type="button" class="danger" data-od-action="delete-mag" data-id="${esc(m.id)}">Remove</button></div>` : ""}</article>`;
   }).join("");
   const mounts = o.weapons.ranged.map((w, index) => `<div class="cp-card cp-row"><b>${esc(w.name)}</b><span>${w.loaded}/${w.capacity}</span>${gm ? `<label>Magazine <select data-weapon-mag="${index}"><option value="">Detached</option>${inv.magazines.filter((m) => m.id === w.magazineId || !o.weapons.ranged.some((x) => x.magazineId === m.id) && m.capacity === w.capacity && (!m.loaded || w.ammoIds.includes(m.loadedAmmoId))).map((m) => `<option value="${esc(m.id)}" ${m.id === w.magazineId ? "selected" : ""}>${esc(m.name)} \xB7 ${m.loaded}/${m.capacity}</option>`).join("")}</select></label><button type="button" data-od-action="mount-mag" data-index="${index}">Apply</button>` : ""}</div>`).join("");
   return `<div class="cp-screen"><div class="cp-section-title">Items & equipment</div><div class="cp-list">${itemRows || '<p class="cp-muted">No items yet.</p>'}</div>${gm ? '<button type="button" data-od-action="add-item">+ Item / armor / implant</button>' : ""}<div class="cp-section-title">Magazines</div><div class="cp-list">${mags || '<p class="cp-muted">No magazines.</p>'}${mounts}</div>${gm ? '<button type="button" data-od-action="add-mag">+ Magazine</button>' : ""}<p class="cp-muted">Weapon reload and ammunition reserve remain in Weapons / Ammunition. Using a medical item consumes one; healing remains a GM action. Armor replaces the chosen part\u2019s armor value while equipped.</p></div>`;
@@ -4121,6 +4121,26 @@ function fillMagazine(odyssey, id, ammoId) {
   mag.loaded += count;
   ammo.quantity -= count;
 }
+function setMagazineRounds(odyssey, id, rounds, ammoId) {
+  const mag = odyssey.inventory.magazines.find((m) => m.id === id);
+  if (!mag) throw new Error("Magazine no longer exists.");
+  if (!Number.isInteger(rounds) || rounds < 0 || rounds > mag.capacity) {
+    throw new Error(`Rounds must be a whole number from 0 to ${mag.capacity}.`);
+  }
+  const selectedAmmoId = String(ammoId ?? mag.loadedAmmoId ?? "");
+  const ammo = odyssey.ammunition.find((a) => a.id === selectedAmmoId);
+  const weapon = magazineWeapon(odyssey, id);
+  if ((rounds > 0 || selectedAmmoId) && !ammo) throw new Error("Choose a valid ammunition type.");
+  if (weapon && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
+    throw new Error("This ammunition is incompatible with the mounted weapon.");
+  }
+  mag.loaded = rounds;
+  mag.loadedAmmoId = selectedAmmoId;
+  if (weapon) {
+    weapon.loaded = rounds;
+    weapon.loadedAmmoId = selectedAmmoId;
+  }
+}
 function emptyMagazine(odyssey, id) {
   const mag = odyssey.inventory.magazines.find((m) => m.id === id);
   if (!mag) throw new Error("Magazine no longer exists.");
@@ -4312,7 +4332,7 @@ function installCharacterTools(host) {
   async function handle(action, node) {
     const token = check();
     const tokenId = token.id, panel = node.closest("#selectedTokenPanel"), id = node.dataset.id;
-    const gmActions = ["add-item", "edit-item", "delete-item", "add-mag", "fill-mag", "empty-mag", "delete-mag", "mount-mag", "apply-template"];
+    const gmActions = ["add-item", "edit-item", "delete-item", "add-mag", "fill-mag", "set-mag-rounds", "empty-mag", "delete-mag", "mount-mag", "apply-template"];
     if (gmActions.includes(action)) check(tokenId, true);
     if (action === "add-item" || action === "edit-item") {
       const existing = host.tracker(token).odyssey.inventory.items.find((i) => i.id === id);
@@ -4354,6 +4374,18 @@ function installCharacterTools(host) {
         if (t.odyssey.inventory.magazines.length >= 200) throw new Error("Magazine limit is 200.");
         t.odyssey.inventory.magazines.push(magazine);
       }, true);
+    } else if (action === "set-mag-rounds") {
+      const tracker = host.tracker(check(tokenId, true)), o = tracker.odyssey;
+      const mag = o.inventory.magazines.find((m) => m.id === id);
+      if (!mag) throw new Error("Magazine no longer exists.");
+      const weapon = o.weapons.ranged.find((w) => w.magazineId === id);
+      const ammo = o.ammunition.filter((a) => !weapon || weapon.ammoIds.includes(a.id));
+      const value = await formDialog("GM \xB7 Set magazine rounds", [
+        { name: "rounds", label: "Rounds (0\u2013" + mag.capacity + ")", type: "number", min: 0, max: mag.capacity, value: mag.loaded, required: true },
+        { name: "ammoId", label: "Ammunition type", value: mag.loadedAmmoId, options: [["", "Empty / no ammunition"], ...ammo.map((a) => [a.id, a.name])] }
+      ], { message: "Direct GM correction. Ammunition reserve is not changed; this is not a reload." });
+      if (!value) return;
+      await mutate(tokenId, (t) => setMagazineRounds(t.odyssey, id, Number(value.rounds), value.ammoId), true);
     } else if (action === "fill-mag") {
       const ammoId = readSelect(panel, "data-mag-ammo", id);
       await mutate(tokenId, (t) => fillMagazine(t.odyssey, id, ammoId), true);
@@ -4470,7 +4502,7 @@ function installCharacterTools(host) {
   window.addEventListener("storage", (event) => {
     if (event.key === LIBRARY_STORAGE_KEY) reload();
   });
-  const disabledWhileBusy = (html) => busy ? html.replaceAll("<button ", "<button disabled ") : html;
+  const disabledWhileBusy = (html) => busy ? html.replaceAll("<button ", "<button disabled ").replaceAll("<select ", "<select disabled ").replaceAll("<input ", "<input disabled ") : html;
   return { renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
 }
 
@@ -5804,6 +5836,9 @@ function getTransientFieldKey(field) {
   if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
+  if (field.dataset.weaponMag !== void 0) return `inventory:weapon-mag:${field.dataset.weaponMag}`;
+  if (field.dataset.magAmmo) return `inventory:mag-ammo:${field.dataset.magAmmo}`;
+  if (field.dataset.equipPart) return `inventory:equip-part:${field.dataset.equipPart}`;
   if (field.dataset.profileModifier) return `profile:${field.dataset.profileModifier}`;
   if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
   if (field.dataset.rollCharField) return `roll-char:${field.dataset.rollCharField}`;
@@ -5834,7 +5869,7 @@ function getTransientFieldKey(field) {
   return "";
 }
 function shouldPreserveFieldValue(fieldKey, focusedKey) {
-  return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("profile:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
+  return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("inventory:") || fieldKey.startsWith("profile:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
 }
 function captureSelectedPanelState() {
   const renderedTokenId = String(ui.selectedTokenPanel.dataset.tokenId ?? "").trim();

@@ -1,5 +1,5 @@
 import { buildText, buildSceneUpload } from '@owlbear-rodeo/sdk';
-import { newId, swapMagazine, fillMagazine, emptyMagazine, equipItem, unequipItem, consumeItem } from '../inventory.js';
+import { newId, swapMagazine, fillMagazine, emptyMagazine, setMagazineRounds, equipItem, unequipItem, consumeItem } from '../inventory.js';
 import { makeTemplate, instantiateTemplate, readLibrary, writeLibrary, emptyLibrary, mergeLibraries, normalizeLibrary, libraryFromScenes, LIBRARY_ITEM_KEY, LIBRARY_STORAGE_KEY } from '../profiles.js';
 import { inventoryView, templatesView, esc } from './characterView.js';
 
@@ -35,7 +35,7 @@ export function installCharacterTools(host) {
   const readSelect=(root,attribute,value)=>Array.from(root.querySelectorAll(`[${attribute}]`)).find(e=>e.getAttribute(attribute)===String(value))?.value || '';
   async function handle(action,node) {
     const token=check(); const tokenId=token.id, panel=node.closest('#selectedTokenPanel'), id=node.dataset.id;
-    const gmActions=['add-item','edit-item','delete-item','add-mag','fill-mag','empty-mag','delete-mag','mount-mag','apply-template'];
+    const gmActions=['add-item','edit-item','delete-item','add-mag','fill-mag','set-mag-rounds','empty-mag','delete-mag','mount-mag','apply-template'];
     if(gmActions.includes(action)) check(tokenId,true);
     if(action==='add-item'||action==='edit-item') {
       const existing=host.tracker(token).odyssey.inventory.items.find(i=>i.id===id);
@@ -65,6 +65,18 @@ export function installCharacterTools(host) {
       const value=await formDialog('New magazine',[{name:'name',label:'Name',required:true,value:'Magazine'},{name:'capacity',label:'Capacity',type:'number',min:1,max:999,value:6}]);if(!value)return;
       const magazine={id:newId(),name:value.name,capacity:Number(value.capacity),loaded:0,loadedAmmoId:''};
       await mutate(tokenId,t=>{if(t.odyssey.inventory.magazines.length>=200)throw new Error('Magazine limit is 200.');t.odyssey.inventory.magazines.push(magazine);},true);
+    } else if(action==='set-mag-rounds') {
+      const tracker=host.tracker(check(tokenId,true)), o=tracker.odyssey;
+      const mag=o.inventory.magazines.find(m=>m.id===id);
+      if(!mag)throw new Error('Magazine no longer exists.');
+      const weapon=o.weapons.ranged.find(w=>w.magazineId===id);
+      const ammo=o.ammunition.filter(a=>!weapon||weapon.ammoIds.includes(a.id));
+      const value=await formDialog('GM · Set magazine rounds',[
+        {name:'rounds',label: 'Rounds (0–'+mag.capacity+')',type:'number',min:0,max:mag.capacity,value:mag.loaded,required:true},
+        {name:'ammoId',label:'Ammunition type',value:mag.loadedAmmoId,options:[['','Empty / no ammunition'],...ammo.map(a=>[a.id,a.name])]},
+      ],{message:'Direct GM correction. Ammunition reserve is not changed; this is not a reload.'});
+      if(!value)return;
+      await mutate(tokenId,t=>setMagazineRounds(t.odyssey,id,Number(value.rounds),value.ammoId),true);
     } else if(action==='fill-mag') {const ammoId=readSelect(panel,'data-mag-ammo',id);await mutate(tokenId,t=>fillMagazine(t.odyssey,id,ammoId),true);}
     else if(action==='empty-mag') await mutate(tokenId,t=>emptyMagazine(t.odyssey,id),true);
     else if(action==='delete-mag') await mutate(tokenId,t=>{emptyMagazine(t.odyssey,id);t.odyssey.inventory.magazines=t.odyssey.inventory.magazines.filter(m=>m.id!==id);},true);
@@ -114,6 +126,6 @@ export function installCharacterTools(host) {
   });
   const reload=()=>{try {library=readLibrary(window.localStorage,sanitize);storageError='';render();}catch(e){storageError=e.message;render();}};
   window.addEventListener('storage',event=>{if(event.key===LIBRARY_STORAGE_KEY)reload();});
-  const disabledWhileBusy=html=>busy?html.replaceAll('<button ', '<button disabled '):html;
+  const disabledWhileBusy=html=>busy?html.replaceAll('<button ', '<button disabled ').replaceAll('<select ', '<select disabled ').replaceAll('<input ', '<input disabled '):html;
   return {renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
 }

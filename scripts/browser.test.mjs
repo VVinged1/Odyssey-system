@@ -36,7 +36,32 @@ try{
  assert.equal(await page.locator('[data-action="profile-roll-skill"]').count(),0);
  await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-action="profile-roll-char"]').first().waitFor();
  console.log('Roles and rolls passed'); const openSection=async text=>{const summary=page.locator('summary').filter({hasText:text}).first();const detail=summary.locator('..');if(!await detail.evaluate(e=>e.open))await summary.click();};
- await openSection('Inventory');await page.locator('[data-od-action="add-item"]').click();await page.locator('dialog input[name="name"]').fill('Armor <script>');await page.locator('dialog select[name="kind"]').selectOption('armor');await page.locator('dialog input[name="armor"]').fill('12');await page.locator('dialog button[type="submit"]').click();
+ await openSection('Inventory');
+ const magazineId=(await data()).odyssey.inventory.magazines[0].id;
+ const reserves=JSON.stringify((await data()).odyssey.ammunition);
+ async function correctRounds(rounds,ammoId) {
+   await page.locator('[data-od-action="set-mag-rounds"]').first().click();
+   await page.locator('dialog input[name="rounds"]').fill(String(rounds));
+   await page.locator('dialog select[name="ammoId"]').selectOption(ammoId);
+   await page.locator('dialog button[type="submit"]').click();
+   await page.waitForFunction(n=>window.odysseyTest.data().odyssey.inventory.magazines[0].loaded===n,rounds);
+ }
+ await correctRounds(2,'ball');assert.equal((await data()).odyssey.weapons.ranged[0].loaded,2);
+ await correctRounds(0,'');assert.equal((await data()).odyssey.weapons.ranged[0].loaded,0);
+ await correctRounds(3,'ball');
+ await page.locator('[data-weapon-mag="0"]').selectOption('');await page.locator('[data-od-action="mount-mag"]').click();
+ await page.waitForFunction(()=>!window.odysseyTest.data().odyssey.weapons.ranged[0].magazineId);
+ await correctRounds(1,'ball');assert.equal((await data()).odyssey.weapons.ranged[0].loaded,0);
+ await page.locator('[data-weapon-mag="0"]').selectOption(magazineId);await page.locator('[data-od-action="mount-mag"]').click();
+ await page.waitForFunction(()=>window.odysseyTest.data().odyssey.weapons.ranged[0].loaded===1);
+ assert.equal(JSON.stringify((await data()).odyssey.ammunition),reserves);
+ // Recheck GM permission after the dialog, not only when it opens.
+ await page.locator('[data-od-action="set-mag-rounds"]').first().click();
+ await page.locator('dialog input[name="rounds"]').fill('5');await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));
+ await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>document.querySelector('#statusBox').textContent.includes('Only the GM'));
+ assert.equal((await data()).odyssey.weapons.ranged[0].loaded,1);
+ assert.equal(await page.locator('[data-od-action="set-mag-rounds"]').count(),0);
+ await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-od-action="add-item"]').click();await page.locator('dialog input[name="name"]').fill('Armor <script>');await page.locator('dialog select[name="kind"]').selectOption('armor');await page.locator('dialog input[name="armor"]').fill('12');await page.locator('dialog button[type="submit"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data().odyssey.inventory?.items.length===1);
  assert.equal(await page.locator('script').count(),1);
  await page.locator('[data-od-action="equip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===12);

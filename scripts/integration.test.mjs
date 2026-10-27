@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { normalizeInventory, swapMagazine, fillMagazine, emptyMagazine, equipItem, unequipItem, consumeItem, inventoryAmmoTotal } from '../inventory.js';
+import { normalizeInventory, swapMagazine, fillMagazine, emptyMagazine, setMagazineRounds, equipItem, unequipItem, consumeItem, inventoryAmmoTotal } from '../inventory.js';
 import { sanitizeAmmunition, sanitizeMagazine, reloadMagazine, getAmmoShot, consumeAmmo } from '../ammunition.js';
 import { makeTemplate, instantiateTemplate, profileData, normalizeLibrary, emptyLibrary, mergeLibraries, readLibrary, writeLibrary, libraryFromScenes, LIBRARY_ITEM_KEY, LIBRARY_STORAGE_KEY } from '../profiles.js';
 import { attributeCards, skillCards, inventoryView } from '../ui/characterView.js';
@@ -31,6 +31,25 @@ test('Magazine exclusivity, compatibility and failed operations preserve ammo',(
  o.weapons.ranged.push({id:'gun2',name:'Second',capacity:6,loaded:0,loadedAmmoId:'',ammoIds:['ball'],magazineId:''});
  assert.throws(()=>swapMagazine(o,1,id),/already mounted/);assert.throws(()=>fillMagazine(o,id,'ap'),/Detach/);
  swapMagazine(o,0,'');o.weapons.ranged[1].capacity=5;assert.throws(()=>swapMagazine(o,1,id),/capacity/);assert.equal(inventoryAmmoTotal(o),22);
+});
+test('GM correction changes mounted and reserve magazines without spending reserve',()=>{
+ let t=sanitize(legacy()),o=t.odyssey,id=o.weapons.ranged[0].magazineId;
+ const reserve=JSON.stringify(o.ammunition);
+ setMagazineRounds(o,id,2,'ball');t=sanitize(t);o=t.odyssey;
+ assert.equal(o.weapons.ranged[0].loaded,2);assert.equal(o.inventory.magazines[0].loaded,2);
+ assert.equal(JSON.stringify(o.ammunition),reserve);
+ setMagazineRounds(o,id,6,'ap');t=sanitize(t);o=t.odyssey;
+ assert.equal(o.weapons.ranged[0].loadedAmmoId,'ap');assert.equal(o.inventory.magazines[0].loaded,6);
+ for(const invalid of [-1,7,1.5,NaN,Infinity,'2',null]) {
+   const before=JSON.stringify(o);assert.throws(()=>setMagazineRounds(o,id,invalid,'ap'));assert.equal(JSON.stringify(o),before);
+ }
+ assert.throws(()=>setMagazineRounds(o,id,2,'missing'),/valid ammunition/);
+ o.ammunition.push({id:'incompatible',name:'Other',quantity:0,damage:1,penetration:0});
+ assert.throws(()=>setMagazineRounds(o,id,2,'incompatible'),/incompatible/);
+ setMagazineRounds(o,id,0,'');assert.equal(o.weapons.ranged[0].loaded,0);assert.equal(o.weapons.ranged[0].loadedAmmoId,'');
+ swapMagazine(o,0,'');setMagazineRounds(o,id,3,'incompatible');t=sanitize(t);o=t.odyssey;
+ assert.equal(o.inventory.magazines[0].loaded,3);assert.equal(o.weapons.ranged[0].loaded,0);
+ assert.equal(o.ammunition.find(a=>a.id==='incompatible').quantity,0);
 });
 test('Equipment uses one armor value and restores manual baseline; use consumes only one',()=>{
  const t=sanitize(legacy());t.odyssey.inventory.items=[{id:'armor',name:'Vest',kind:'armor',quantity:1,armor:12,equippedPart:'',previousArmor:0},{id:'med',kind:'medical',quantity:2}];

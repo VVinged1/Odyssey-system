@@ -340,6 +340,9 @@ function getTransientFieldKey(field) {
   if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
+  if (field.dataset.weaponMag !== undefined) return `inventory:weapon-mag:${field.dataset.weaponMag}`;
+  if (field.dataset.magAmmo) return `inventory:mag-ammo:${field.dataset.magAmmo}`;
+  if (field.dataset.equipPart) return `inventory:equip-part:${field.dataset.equipPart}`;
   if (field.dataset.profileModifier) return `profile:${field.dataset.profileModifier}`;
   if (field.dataset.rollField) return `roll:${field.dataset.rollField}`;
   if (field.dataset.rollCharField) return `roll-char:${field.dataset.rollCharField}`;
@@ -377,6 +380,7 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
     fieldKey === focusedKey ||
     fieldKey.startsWith("attack:") ||
     fieldKey.startsWith("manual-attack:") ||
+    fieldKey.startsWith("inventory:") ||
     fieldKey.startsWith("profile:") ||
     fieldKey.startsWith("roll:") ||
     fieldKey.startsWith("roll-char:") ||

@@ -66,6 +66,28 @@ export function fillMagazine(odyssey, id, ammoId) {
   if (count < 1) throw new Error('Magazine is full or reserve is empty.');
   mag.loadedAmmoId = ammoId; mag.loaded += count; ammo.quantity -= count;
 }
+// GM correction: adjusts the magazine count without transferring reserve ammo.
+// Permissions are checked again at the controller's mutation boundary.
+export function setMagazineRounds(odyssey, id, rounds, ammoId) {
+  const mag = odyssey.inventory.magazines.find(m => m.id === id);
+  if (!mag) throw new Error('Magazine no longer exists.');
+  if (!Number.isInteger(rounds) || rounds < 0 || rounds > mag.capacity) {
+    throw new Error(`Rounds must be a whole number from 0 to ${mag.capacity}.`);
+  }
+  const selectedAmmoId = String(ammoId ?? mag.loadedAmmoId ?? '');
+  const ammo = odyssey.ammunition.find(a => a.id === selectedAmmoId);
+  const weapon = magazineWeapon(odyssey, id);
+  if ((rounds > 0 || selectedAmmoId) && !ammo) throw new Error('Choose a valid ammunition type.');
+  if (weapon && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
+    throw new Error('This ammunition is incompatible with the mounted weapon.');
+  }
+  mag.loaded = rounds;
+  mag.loadedAmmoId = selectedAmmoId;
+  if (weapon) {
+    weapon.loaded = rounds;
+    weapon.loadedAmmoId = selectedAmmoId;
+  }
+}
 export function emptyMagazine(odyssey, id) {
   const mag = odyssey.inventory.magazines.find(m => m.id === id);
   if (!mag) throw new Error('Magazine no longer exists.');

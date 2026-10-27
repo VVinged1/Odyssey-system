@@ -84,11 +84,11 @@ var require_events = __commonJS({
       }
       this._maxListeners = this._maxListeners || void 0;
     };
-    EventEmitter2.prototype.setMaxListeners = function setMaxListeners(n) {
-      if (typeof n !== "number" || n < 0 || NumberIsNaN(n)) {
-        throw new RangeError('The value of "n" is out of range. It must be a non-negative number. Received ' + n + ".");
+    EventEmitter2.prototype.setMaxListeners = function setMaxListeners(n2) {
+      if (typeof n2 !== "number" || n2 < 0 || NumberIsNaN(n2)) {
+        throw new RangeError('The value of "n" is out of range. It must be a non-negative number. Received ' + n2 + ".");
       }
-      this._maxListeners = n;
+      this._maxListeners = n2;
       return this;
     };
     function _getMaxListeners(that) {
@@ -330,9 +330,9 @@ var require_events = __commonJS({
     EventEmitter2.prototype.eventNames = function eventNames() {
       return this._eventsCount > 0 ? ReflectOwnKeys(this._events) : [];
     };
-    function arrayClone(arr, n) {
-      var copy = new Array(n);
-      for (var i = 0; i < n; ++i)
+    function arrayClone(arr, n2) {
+      var copy = new Array(n2);
+      for (var i = 0; i < n2; ++i)
         copy[i] = arr[i];
       return copy;
     }
@@ -393,6 +393,51 @@ var require_events = __commonJS({
   }
 });
 
+// characterRules.js
+var ARMOR_TRAINING = { light_armor: "Light Armor", medium_armor: "Medium Armor", heavy_armor: "Heavy Armor", superheavy_armor: "Superheavy Armor" };
+var ATTRIBUTES = ["Strength", "Agility", "Reaction", "Endurance", "Perception", "Intelligence", "Charisma", "Willpower", "Magic"];
+var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
+function normalizeBonuses(raw) {
+  const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills) };
+}
+function normalizeEffects(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
+}
+function itemActive(item) {
+  return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
+}
+function reconcileEquipment(tracker) {
+  const inv = tracker.odyssey.inventory;
+  if (!inv) return;
+  inv.baseArmor ?? (inv.baseArmor = {});
+  inv.baseMax ?? (inv.baseMax = {});
+  for (const [partName, part] of Object.entries(tracker.body)) {
+    const equipped = inv.items.filter((i) => ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart === partName);
+    const hpBonus = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    if (hpBonus && !Object.hasOwn(inv.baseMax, partName)) inv.baseMax[partName] = part.max;
+    if (Object.hasOwn(inv.baseMax, partName)) {
+      part.max = Math.min(999, inv.baseMax[partName] + hpBonus);
+      part.current = Math.min(part.current, part.max);
+      if (!hpBonus) delete inv.baseMax[partName];
+    }
+    if (!equipped.length) {
+      if (Object.hasOwn(inv.baseArmor, partName)) {
+        part.armor = inv.baseArmor[partName];
+        delete inv.baseArmor[partName];
+      }
+      continue;
+    }
+    if (!Object.hasOwn(inv.baseArmor, partName)) {
+      const legacy = equipped.find((i) => i.legacyEquipment);
+      inv.baseArmor[partName] = legacy ? legacy.previousArmor : part.armor;
+    }
+    part.armor = inv.baseArmor[partName] + equipped.filter(itemActive).reduce((sum, i) => sum + i.armor, 0);
+    for (const i of equipped) i.legacyEquipment = false;
+  }
+}
+
 // inventory.js
 var LIMIT = 200;
 var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
@@ -410,6 +455,15 @@ function normalizeInventory(raw, weapons = []) {
     quantity: int(r.quantity ?? 1),
     description: text(r.description, 2e3),
     armor: int(r.armor, 999),
+    subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
+    healCritical: int(r.healCritical ?? 1, 999),
+    slot: text(r.slot || "any", 40),
+    criticalMax: int(r.criticalMax, 999),
+    criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
+    playerRemovable: r.playerRemovable === true,
+    bonuses: normalizeBonuses(r.bonuses),
+    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
+    legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
     previousArmor: int(r.previousArmor, 999)
   }));
@@ -440,7 +494,7 @@ function normalizeInventory(raw, weapons = []) {
     assigned.add(id);
     Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
   }
-  return { version: 2, items, magazines };
+  return { version: 3, items, magazines, baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
 }
 
 // node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
@@ -3879,7 +3933,9 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
-    inventory: { version: 2, items: [], magazines: [] },
+    inventory: { version: 3, items: [], magazines: [], baseArmor: {}, baseMax: {} },
+    effects: [],
+    preferences: { parryMode: "off" },
     ammunition: [],
     weapons: {
       melee: [],
@@ -3908,7 +3964,7 @@ function getPartSlot(partName, source) {
 }
 function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
-  if (!raw || typeof raw !== "object") return next;
+  if (!raw || typeof raw !== "object") raw = {};
   next.enabled = raw.enabled !== false;
   next.minor = clamp(Number(raw.minor ?? 0) || 0, 0, 4);
   next.serious = clamp(Number(raw.serious ?? 0) || 0, 0, 2);
@@ -3957,11 +4013,13 @@ function sanitizeTrackerData(raw) {
       next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
     }
   }
+  reconcileEquipment(next);
   return next;
 }
 function sanitizeOdysseyData(raw) {
+  var _a;
   const next = deepClone(DEFAULT_TRACKER_DATA.odyssey);
-  if (!raw || typeof raw !== "object") return next;
+  if (!raw || typeof raw !== "object") raw = {};
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
   next.attackDraft.targetTokenId = String(raw.attackDraft?.targetTokenId ?? "").trim();
@@ -4014,11 +4072,21 @@ function sanitizeOdysseyData(raw) {
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
   next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.effects = normalizeEffects(raw.effects);
+  next.preferences = { parryMode: ["off", "1", "2", "3", "4", "5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off" };
+  for (const [key, label] of Object.entries(ARMOR_TRAINING)) {
+    next.skills[key] = clamp(Number(raw.skills?.[key]) || 0, 0, 1);
+    next.skillLabels[key] = label;
+    next.skillCategories[key] = "passive";
+    next.skillStrengthBonuses[key] = false;
+    (_a = next.skillPerks)[key] ?? (_a[key] = []);
+  }
   return next;
 }
 function sanitizeWeapons(raw, ranged = false) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
+    id: String(item.id || `legacy-${ranged ? "ranged" : "melee"}-${index}`),
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),

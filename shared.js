@@ -1,3 +1,4 @@
+import { normalizeEffects, effectiveOdyssey, reconcileEquipment, ARMOR_TRAINING } from "./characterRules.js";
 import { normalizeInventory } from "./inventory.js";
 import OBR, { Command, buildPath, isImage } from "@owlbear-rodeo/sdk";
 import { sanitizeAmmunition, sanitizeMagazine } from "./ammunition.js";
@@ -119,7 +120,8 @@ export const DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0,
     },
-    inventory: { version: 2, items: [], magazines: [] },
+    inventory: { version: 3, items: [], magazines: [], baseArmor: {}, baseMax: {} },
+    effects: [], preferences: {parryMode:"off"},
     ammunition: [],
     weapons: {
       melee: [],
@@ -215,7 +217,7 @@ function getPartSlot(partName, source) {
 
 export function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
-  if (!raw || typeof raw !== "object") return next;
+  if (!raw || typeof raw !== "object") raw = {};
 
   next.enabled = raw.enabled !== false;
   next.minor = clamp(Number(raw.minor ?? 0) || 0, 0, 4);
@@ -272,12 +274,13 @@ export function sanitizeTrackerData(raw) {
     }
   }
 
+  reconcileEquipment(next);
   return next;
 }
 
 export function sanitizeOdysseyData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA.odyssey);
-  if (!raw || typeof raw !== "object") return next;
+  if (!raw || typeof raw !== "object") raw = {};
 
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
@@ -363,6 +366,9 @@ export function sanitizeOdysseyData(raw) {
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
   next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.effects = normalizeEffects(raw.effects);
+  next.preferences = {parryMode: ["off","1","2","3","4","5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off"};
+  for (const [key,label] of Object.entries(ARMOR_TRAINING)) { next.skills[key]=clamp(Number(raw.skills?.[key])||0,0,1); next.skillLabels[key]=label;next.skillCategories[key]="passive";next.skillStrengthBonuses[key]=false;next.skillPerks[key]??=[]; }
 
   return next;
 }
@@ -372,6 +378,7 @@ function sanitizeWeapons(raw, ranged = false) {
   return raw
     .filter((item) => item && typeof item === "object")
     .map((item, index) => ({
+      id: String(item.id || `legacy-${ranged?"ranged":"melee"}-${index}`),
       name: String(item.name ?? "").trim() || "Weapon",
       damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
       accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
@@ -474,7 +481,7 @@ export function formatLastRoll(lastRoll) {
 }
 
 export function getOdysseyData(item) {
-  return sanitizeOdysseyData(getTrackerData(item).odyssey);
+  return effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey));
 }
 
 export function canPlayerControlToken(playerRole, playerId, token) {

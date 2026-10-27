@@ -426,3 +426,5 @@ select {
 .odyssey-gm .visibility-eye input { inset:0; width:100%; height:100%; margin:0; padding:0; z-index:1; cursor:pointer; }
 .odyssey-gm .visibility-eye span { pointer-events:none; }
 .odyssey-gm #privateLog { max-height:360px; overflow:auto; margin-top:10px; }
+#gmRosters .cp-list{display:grid;gap:6px;padding-top:8px}#gmRosters .cp-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}#gmRosters .cp-card{padding:8px;border:1px solid var(--line);border-radius:8px}#gmRosters .cp-pill,#gmRosters .cp-muted{font-size:11px;color:var(--muted)}
+.od-icon-button{display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 auto!important;width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;max-width:28px!important;padding:5px!important;border-radius:6px!important;vertical-align:middle}.od-icon-button svg{display:block;width:17px;height:17px;pointer-events:none}.od-icon-button:focus-visible{outline:2px solid #b49bf0;outline-offset:2px}

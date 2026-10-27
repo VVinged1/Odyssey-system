@@ -1,5 +1,7 @@
+import {installCompactButtons} from './ui/compactButtons.js';
+import {ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical} from './characterRules.js';
 import { compactHud } from "./ui/compactHud.js";
-import { attributeCards, skillCards } from "./ui/characterView.js";
+import { attributeCards, skillCards, effectChips } from "./ui/characterView.js";
 import { installCharacterTools } from "./ui/characterTools.js";
 import { profileData } from "./profiles.js";
 import { swapMagazine } from "./inventory.js";
@@ -1167,7 +1169,7 @@ function getAttackDraft(token, data, targetCharacters) {
     rounds: stored.rounds ?? "1",
     parryMode: ["off", "1", "2", "3", "4", "5"].includes(String(stored.parryMode))
       ? String(stored.parryMode)
-      : "1",
+      : (getOdysseyData(token).preferences?.parryMode || "off"),
   };
 }
 
@@ -2718,64 +2720,9 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
   );
 }
 
-function renderEnglishSkillsBlock(data, disabledAttr) {
-  const cards = skillCards(data.odyssey, [["Combat", getCombatSkillEntries(data.odyssey)], ["Abilities", getAbilitiesSkillEntries(data.odyssey)], ["Applied", getAppliedSkillEntries(data.odyssey)]], isEditable());
-  if (!isEditable()) return renderCollapsibleSection("Skills", cards, true);
-  const combatSkillRows = renderOdysseySkillRows(
-    data.odyssey,
-    getCombatSkillEntries(data.odyssey),
-    disabledAttr,
-  );
-  const abilitiesSkillRows = renderOdysseySkillRows(
-    data.odyssey,
-    getAbilitiesSkillEntries(data.odyssey),
-    disabledAttr,
-  );
-  const appliedSkillRows = renderOdysseySkillRows(
-    data.odyssey,
-    getAppliedSkillEntries(data.odyssey),
-    disabledAttr,
-  );
-
-  return renderCollapsibleSection(
-    "Skills",
-    `
-      ${cards}
-      <details class="cp-edit-skills"><summary>GM · Edit skills and perks</summary>
-      <div class="skill-group"><div class="skill-group-title">Combat</div><div class="list">${combatSkillRows || '<div class="empty">No combat skills yet.</div>'}</div></div>
-      <div class="skill-group"><div class="skill-group-title">Abilities</div><div class="list">${abilitiesSkillRows || '<div class="empty">No abilities yet.</div>'}</div></div>
-      <div class="skill-group"><div class="skill-group-title">Applied</div><div class="list">${appliedSkillRows || '<div class="empty">No applied skills yet.</div>'}</div></div>
-      ${skillAddOpen ? `<div class="skill-add-form form-grid">
-        <label class="field-stack">
-          <span class="field-label">Skill Name</span>
-          <input type="text" data-skill-field="new-name" placeholder="New skill" ${disabledAttr}>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Value</span>
-          <input type="number" min="0" max="10" value="0" data-skill-field="new-value" ${disabledAttr}>
-        </label>
-        <label class="field-stack">
-          <span class="field-label">Category</span>
-          <select data-skill-field="new-category" ${disabledAttr}>
-            <option value="${COMBAT_SKILL_CATEGORY}">Combat</option>
-            <option value="${ABILITIES_SKILL_CATEGORY}">Abilities</option>
-            <option value="${APPLIED_SKILL_CATEGORY}" selected>Applied</option>
-          </select>
-        </label>
-        <label class="field-stack checkbox-stack">
-          <span class="field-label">Add Strength Bonus?</span>
-          <label class="skill-toggle">
-            <input type="checkbox" data-skill-field="new-strength-bonus" ${disabledAttr}>
-            <span>Enable for attack damage</span>
-          </label>
-        </label>
-        <div class="skill-add-actions"><button type="button" class="square-icon-button" data-action="add-skill" title="Save skill" aria-label="Save skill" ${disabledAttr}>▣</button><button type="button" class="square-icon-button danger" data-action="close-skill-add" title="Cancel" aria-label="Cancel" ${disabledAttr}>×</button></div>
-      </div>` : ""}
-      <div class="item-toolbar item-toolbar-bottom"><button type="button" class="square-icon-button" data-action="open-skill-add" title="Add skill" aria-label="Add skill" ${disabledAttr}>+</button></div>
-      </details>
-    `,
-    true,
-  );
+function renderEnglishSkillsBlock(data) {
+  const groups=[["Combat",getCombatSkillEntries(data.odyssey)],["Abilities",getAbilitiesSkillEntries(data.odyssey)],["Applied",getAppliedSkillEntries(data.odyssey)]];
+  return renderCollapsibleSection("Skills",skillCards(data.odyssey,groups.map(([label,entries])=>[label,entries.filter(([key])=>!Object.hasOwn(ARMOR_TRAINING,key))]),isEditable()),true);
 }
 
 function renderAmmunitionBlock(odyssey) {
@@ -3376,12 +3323,13 @@ function renderSelectedToken() {
           `
           : ""
       }
+      ${canUseToken(token) ? effectChips(odyssey,isEditable()) : ""}
       ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
       ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
-      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Inventory · Armor · Magazines", characterTools.renderInventory(data), false) : ""}
+      ${canUseToken(token) && characterTools ? renderCollapsibleSection("Items", characterTools.renderInventory(data), false) : ""}
       ${canUseToken(token) && characterTools ? renderCollapsibleSection("Character Templates", characterTools.renderTemplates(), false) : ""}
-      ${isEditable() ? renderEnglishWeaponsBlock({ odyssey }, gmOnlyDisabled) : ""}
-      ${isEditable() ? renderAmmunitionBlock(odyssey) : ""}
+
+
       ${renderEnglishAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishNoTargetAttackBlock(token, { odyssey }, tokenLocked)}
       ${renderEnglishDiceBlock(token, { odyssey }, tokenLocked)}
@@ -3446,6 +3394,7 @@ function renderSelectedToken() {
       }
     </div>`;
 
+  if(characterTools?.isBusy())ui.selectedTokenPanel.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
   restoreSelectedPanelState(panelState);
 }
 
@@ -3513,15 +3462,12 @@ function renderAllCharacters() {
 
 function render() {
   ui.roleBadge.textContent = playerRole === "GM" ? "GM" : "PLAYER";
-  ui.trackedSection.classList.toggle("hidden", playerRole !== "GM");
-  ui.allTokensSection.classList.toggle("hidden", playerRole !== "GM");
+
+
   ui.clearDebugBtn?.classList.toggle("hidden", playerRole !== "GM");
   renderSelectedToken();
   renderDebugConsole();
-  if (playerRole === "GM") {
-    renderTrackedList();
-    renderAllCharacters();
-  }
+
 }
 
 async function syncState(showToast = false) {
@@ -3679,9 +3625,13 @@ async function setBodyField(partName, field, value) {
     if (field === "current") {
       part.current = clamp(numericValue, 0, part.max);
     } else if (field === "max") {
+      const inv=next.odyssey.inventory;
+      if(Object.hasOwn(inv.baseMax||{},partName))inv.baseMax[partName]=Math.max(0,numericValue-(part.max-inv.baseMax[partName]));
       part.max = numericValue;
       part.current = clamp(part.current, 0, part.max);
     } else if (field === "armor") {
+      const inv=next.odyssey.inventory;
+      if(Object.hasOwn(inv.baseArmor||{},partName))inv.baseArmor[partName]=Math.max(0,numericValue-(part.armor-inv.baseArmor[partName]));
       part.armor = numericValue;
     } else if (field === "attackPenalty") {
       part.attackPenalty = numericValue;
@@ -4295,7 +4245,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     0,
     10,
   );
-  const parryMode = getActionFieldValue('[data-attack-field="parryMode"]') || "1";
+  const parryMode = getActionFieldValue('[data-attack-field="parryMode"]') || "off";
   const parryDivisor = getParryDivisor(parryMode);
   saveAttackDraftValue(attacker.id, "skill", skillName);
   saveAttackDraftValue(attacker.id, "weaponName", weaponName);
@@ -4395,6 +4345,12 @@ async function performAttackOnce({ manualDefense = false } = {}) {
           damageAppliedLabel: "No Damage",
         };
   const projectedPartState = specialResolution.projectedTargetState;
+  const equipmentCrit=projectedPartState.critApplied||0;
+  if(target&&result.hit&&equipmentCrit) {
+    const preview=getTrackerData(target),equipment=absorbEquipmentCritical(preview,result.targetPart,equipmentCrit);
+    projectedPartState.current=Math.max(0,(targetPartState.current||0)-equipment.remaining);
+    projectedPartState.critApplied=equipment.remaining;
+  }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = target ? (projectedPartState.current ?? beforeHp) : null;
   const afterMinor = target ? (projectedPartState.minor ?? beforeMinor) : null;
@@ -4440,6 +4396,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
         next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
       }
       if (result.hit && next.body[result.targetPart]) {
+        absorbEquipmentCritical(next,result.targetPart,equipmentCrit);
         next.body[result.targetPart].current = projectedPartState.current;
         next.body[result.targetPart].minor = projectedPartState.minor;
         next.body[result.targetPart].serious = projectedPartState.serious;
@@ -4673,6 +4630,21 @@ async function performRollCharOnce(options = {}) {
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 
+async function useCharacterItem(sourceId,itemId,targetId,partName) {
+  const effectId=crypto.randomUUID();
+  await OBR.scene.items.updateItems([...new Set([sourceId,targetId])],items=>{
+    const source=items.find(t=>t.id===sourceId),target=items.find(t=>t.id===targetId);
+    if(!source||!target||!canUseToken(source))throw new Error('Character is unavailable.');
+    if(playerRole!=='GM'&&(target.visible===false||getTrackerData(target).body[partName]?.hidden))throw new Error('Target is unavailable.');
+    const sourceData=getTrackerData(source),targetData=source===target?sourceData:getTrackerData(target);
+    const item=sourceData.odyssey.inventory.items.find(i=>i.id===itemId);
+    if(!item||!['consumable','medical'].includes(item.kind)||item.quantity<1)throw new Error('No usable item available.');
+    useItemOnTracker(targetData,item,partName,effectId);item.quantity-=1;
+    source.metadata[META_KEY]=sanitizeTrackerData(sourceData);target.metadata[META_KEY]=sanitizeTrackerData(targetData);
+  });
+  await syncState();await Promise.all([...new Set([sourceId,targetId])].map(ensureOverlayForToken));scheduleRender();
+}
+
 async function performRollSkillOnce(options = {}) {
   const token = getCharacterById(activeTokenId);
   if (!token) {
@@ -4684,7 +4656,7 @@ async function performRollSkillOnce(options = {}) {
     return;
   }
 
-  const skillName = options.skill ?? getActionFieldValue('[data-roll-skill-field="skill"]');
+  const skillName = options.raw ? "Random d100" : options.skill ?? getActionFieldValue('[data-roll-skill-field="skill"]');
   if (!skillName) {
     setStatus("Choose a skill first.", "error");
     return;
@@ -4692,8 +4664,8 @@ async function performRollSkillOnce(options = {}) {
 
   const modifier = options.modifier ?? (Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
-  if (!Object.hasOwn(odyssey.skills, skillName)) throw new Error("Skill no longer exists.");
-  const result = rollSkillCheck(odyssey.skills[skillName] ?? 0, modifier);
+  if (!options.raw && !Object.hasOwn(odyssey.skills, skillName)) throw new Error("Skill no longer exists.");
+  const result = rollSkillCheck(options.raw ? 0 : (odyssey.skills[skillName] ?? 0), modifier);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
 
   await updateTrackerData(token.id, (current) => {
@@ -4814,11 +4786,11 @@ function bindUiEvents() {
       })).catch(error => setStatus(error.message,"error"));
       return;
     }
-    if (action === "profile-roll-char" || action === "profile-roll-skill") {
+    if (action === "profile-roll-char" || action === "profile-roll-skill" || action === "profile-random-skill") {
       const kind = action === "profile-roll-char" ? "attribute" : "skill";
       const modifier = clamp(Number(ui.selectedTokenPanel.querySelector(`[data-profile-modifier="${kind}"]`)?.value) || 0, -999, 999);
       actionNode.disabled = true;
-      const operation = kind === "attribute" ? performRollChar({attribute: actionNode.dataset.attribute, modifier}) : performRollSkill({skill: actionNode.dataset.skill, modifier});
+      const operation = kind === "attribute" ? performRollChar({attribute: actionNode.dataset.attribute, modifier}) : performRollSkill({skill: actionNode.dataset.skill, raw:action==="profile-random-skill", modifier});
       void operation.catch(error => setStatus(error.message, "error")).finally(() => { if (actionNode.isConnected) actionNode.disabled = false; });
       return;
     }
@@ -5143,6 +5115,7 @@ function bindUiEvents() {
         return;
       }
       saveAttackDraftValue(activeTokenId, target.dataset.attackField, target.value);
+      if(target.dataset.attackField==='parryMode')void updateTrackerData(activeTokenId,current=>{const next=structuredClone(current);next.odyssey.preferences.parryMode=target.value;return next;}).catch(e=>setStatus(e.message,'error'));
       if (target.dataset.attackField === "targetTokenId") {
         const selectedTarget = target.value ? getCharacterById(target.value) : null;
         saveAttackDraftValue(
@@ -5369,6 +5342,7 @@ function bindUiEvents() {
 }
 
 OBR.onReady(async () => {
+  installCompactButtons();
   try {
     enableActionResize(document.querySelector("[data-action-resize]"), {
       storageKey: "com.codex.body-hp/action-size",
@@ -5376,7 +5350,7 @@ OBR.onReady(async () => {
       defaultHeight: 860,
     });
     characterTools = installCharacterTools({OBR, sanitize:sanitizeTrackerData, tracker:getTrackerData,
-      getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
+      getTokens:()=>characterListCache, useItem:useCharacterItem, getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
       canControl:canUseToken, update:updateTrackerData, refreshOverlay:ensureOverlayForToken,
       render:scheduleRender, status:setStatus, download:downloadTextFile,
       resetDraft:id => { attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },

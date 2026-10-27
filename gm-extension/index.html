@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Odyssey GM Tools</title>
-    <link rel="stylesheet" href="./styles.css?v=1.1.0" />
+    <link rel="stylesheet" href="./styles.css?v=1.2.0" />
   </head>
   <body class="odyssey-gm">
     <div id="app">
@@ -127,7 +127,7 @@
                 <label class="field-stack"><span class="field-label">Attack Penalty</span><input id="attackPenalties" type="number" value="0"></label>
                 <label class="field-stack"><span class="field-label">Defense Bonus</span><input id="defenseBonuses" type="number" value="0"></label>
                 <label class="field-stack"><span class="field-label">Defense Penalty</span><input id="defensePenalties" type="number" value="0"></label>
-                <label class="field-stack"><span class="field-label">Parry Mode</span><select id="parryMode"><option value="off">Ignore Parry</option><option value="1" selected>1 Opponent</option><option value="2">2 Opponents</option><option value="3">3 Opponents</option><option value="4">4 Opponents</option><option value="5">5 Opponents</option></select></label>
+                <label class="field-stack"><span class="field-label">Parry Mode</span><select id="parryMode"><option value="off" selected>Do Not Count Parry</option><option value="1">1 Opponent</option><option value="2">2 Opponents</option><option value="3">3 Opponents</option><option value="4">4 Opponents</option><option value="5">5 Opponents</option></select></label>
               </div>
               <div class="muted">Weapon Accuracy is added automatically on top of the Attack Bonus field.</div>
               <div class="muted">The selected body part's attack penalty is applied automatically.</div>
@@ -137,12 +137,13 @@
             </div>
           </details>
         </section>
+        <div id="gmRosters"></div>
         <section class="panel"><div class="section-title">GM Private Results</div><div id="privateLog" aria-live="polite"></div></section>
       </div>
     </div>
 
     <button type="button" class="action-resize-handle" data-action-resize title="Resize window" aria-label="Resize window"></button>
 
-    <script type="module" src="./assets/main.js?v=1.1.0"></script>
+    <script type="module" src="./assets/main.js?v=1.2.0"></script>
   </body>
 </html>

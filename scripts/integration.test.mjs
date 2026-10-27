@@ -1,12 +1,13 @@
+import {normalizeEffects,effectiveOdyssey,reconcileEquipment,ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical} from '../characterRules.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { normalizeInventory, swapMagazine, fillMagazine, emptyMagazine, setMagazineRounds, equipItem, unequipItem, consumeItem, inventoryAmmoTotal } from '../inventory.js';
+import { normalizeInventory, swapMagazine, fillMagazine, emptyMagazine, setMagazineRounds, equipItem, unequipItem, consumeItem, inventoryAmmoTotal,saveInventoryEntry,deleteInventoryEntry } from '../inventory.js';
 import { sanitizeAmmunition, sanitizeMagazine, reloadMagazine, getAmmoShot, consumeAmmo } from '../ammunition.js';
 import { makeTemplate, instantiateTemplate, profileData, normalizeLibrary, emptyLibrary, mergeLibraries, readLibrary, writeLibrary, libraryFromScenes, LIBRARY_ITEM_KEY, LIBRARY_STORAGE_KEY } from '../profiles.js';
 import { attributeCards, skillCards, inventoryView } from '../ui/characterView.js';
 const source=readFileSync(new URL('../shared.js',import.meta.url),'utf8').replace(/^import .*;\r?$/gm,'').replace(/^export \{ OBR \};\r?$/gm,'').replace(/^export /gm,'');
-const ctx=vm.createContext({structuredClone,normalizeInventory,sanitizeAmmunition,sanitizeMagazine,OBR:{},console});
+const ctx=vm.createContext({structuredClone,normalizeEffects,effectiveOdyssey,reconcileEquipment,ARMOR_TRAINING,normalizeInventory,sanitizeAmmunition,sanitizeMagazine,OBR:{},console});
 vm.runInContext(source+'\nthis.sanitize=sanitizeTrackerData; this.canControl=canPlayerControlToken;',ctx);
 const sanitize=ctx.sanitize;
 const legacy=()=>({enabled:true,body:{Torso:{current:2,max:3,armor:6,minor:3,serious:1},'Tail & claw':{current:1,max:4,armor:2,slot:'other',attackPenalty:7,hidden:true,label:'Tail'}},identity:{playerId:'discord-id',characterId:'external-id'},history:[{summary:'Past roll'}],odyssey:{owner:{playerId:'owner',playerName:'Owner'},skills:{Shoot:9,Melee:4,Parry:3},skillCategories:{Shoot:'combat'},skillLabels:{Shoot:'Custom Shot'},skillPerks:{Shoot:['Accurate']},skillStrengthBonuses:{Shoot:true},attributes:{Strength:15,Magic:11},weapons:{melee:[],ranged:[{id:'gun',name:'Rifle',capacity:6,loaded:4,loadedAmmoId:'ball',ammoIds:['ball','ap']}]},ammunition:[{id:'ball',name:'Ball',quantity:10,damage:12,penetration:5},{id:'ap',name:'AP',quantity:8,damage:8,penetration:20}]}});
@@ -53,7 +54,7 @@ test('GM correction changes mounted and reserve magazines without spending reser
 });
 test('Equipment uses one armor value and restores manual baseline; use consumes only one',()=>{
  const t=sanitize(legacy());t.odyssey.inventory.items=[{id:'armor',name:'Vest',kind:'armor',quantity:1,armor:12,equippedPart:'',previousArmor:0},{id:'med',kind:'medical',quantity:2}];
- equipItem(t,'armor','Torso');assert.equal(t.body.Torso.armor,12);unequipItem(t,'armor');assert.equal(t.body.Torso.armor,6);
+ equipItem(t,'armor','Torso');assert.equal(t.body.Torso.armor,18);unequipItem(t,'armor');assert.equal(t.body.Torso.armor,6);
  equipItem(t,'armor','Torso');t.body.Torso.armor=14;unequipItem(t,'armor');assert.equal(t.body.Torso.armor,14);
  const hp=t.body.Torso.current;consumeItem(t,'med');assert.equal(t.odyssey.inventory.items[1].quantity,1);assert.equal(t.body.Torso.current,hp);
 });
@@ -103,4 +104,46 @@ test('V1 roll boundaries and modifiers remain intact',()=>{
  sequence=[.049,.4];assert.equal(c.rollSkillCheck(10,0).outcome,'critical-failure');
  sequence=[.49,.49];assert.equal(c.rollSkillCheck(9,-5).totalPrimary,135);
 });
+
+
+test('Empty skill groups vanish; pencils replace the expanded editor',()=>{
+ const html=skillCards(sanitize(legacy()).odyssey,[['Abilities',[]],['Applied',[]]],true);
+ assert.ok(!html.includes('Abilities'));assert.ok(!html.includes('Applied'));assert.ok(!html.includes('No skills.'));assert.ok(html.includes('profile-random-skill'));
+ const skills=skillCards(sanitize(legacy()).odyssey,[['Combat',[['Shoot',9]]]],true);assert.ok(skills.includes('edit-skill'));assert.ok(!skills.includes('<details'));
+});
+test('Equipment, resource and stim bonuses derive skill levels without rewriting base values',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'resource',name:'Guide',quantity:1,bonuses:{attributes:{Intelligence:2},skills:{Shoot:1}}},'guide');
+ saveInventoryEntry(t,null,{kind:'implant',name:'Eye',quantity:1,armor:3,criticalMax:2,slot:'any',bonuses:{attributes:{Perception:3},skills:{Parry:1}},abilities:[{id:'vision',name:'Night vision',level:2}]},'eye');t=sanitize(t);
+ let o=effectiveOdyssey(t.odyssey);assert.equal(o.skills.Shoot,10);assert.equal(o.skills.Parry,3);assert.equal(o.attributes.Perception,0);
+ equipItem(t,'eye','Torso');o=effectiveOdyssey(t.odyssey);assert.equal(o.skills.Parry,4);assert.equal(o.attributes.Perception,3);assert.equal(o.skills['implant:eye:vision'],2);assert.equal(t.odyssey.skills.Shoot,9);
+ useItemOnTracker(t,{subtype:'stim',name:'Focus',bonuses:{attributes:{Perception:2,Willpower:1}}},'','focus');assert.equal(effectiveOdyssey(t.odyssey).attributes.Perception,5);
+ t.odyssey.effects=[];assert.equal(effectiveOdyssey(t.odyssey).attributes.Perception,3);unequipItem(t,'eye',true);assert.equal(effectiveOdyssey(t.odyssey).skills['implant:eye:vision'],undefined);
+});
+test('Implant critical capacity belongs to the body part and cannot heal by toggling',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'implant',name:'Arm frame',quantity:1,armor:50,criticalMax:4,slot:'any'},'frame');t=sanitize(t);
+ const before=t.body.Torso.current;equipItem(t,'frame','Torso');assert.equal(t.body.Torso.max,7);assert.equal(t.body.Torso.current,before);
+ t=sanitize(sanitize(t));assert.equal(t.body.Torso.max,7);assert.equal(effectiveOdyssey(t.odyssey).armorSummary.total,0);
+ const damage=absorbEquipmentCritical(t,'Torso',2);assert.equal(damage.remaining,2);assert.equal(t.odyssey.inventory.items[0].criticalDamage,0);
+ assert.throws(()=>unequipItem(t,'frame',false),/Only the GM/);unequipItem(t,'frame',true);assert.equal(t.body.Torso.max,3);equipItem(t,'frame','Torso');assert.equal(t.body.Torso.current,before);
+ t.odyssey.inventory.items[0].playerRemovable=true;unequipItem(t,'frame',false);assert.equal(t.body.Torso.max,3);
+});
+test('Armor thresholds count only worn armor; training level one removes penalties',()=>{
+ for(const [armor,key,agility] of [[70,'light_armor',-1],[71,'medium_armor',-2],[140,'medium_armor',-2],[141,'heavy_armor',-4],[260,'heavy_armor',-4],[261,'superheavy_armor',-4],[350,'superheavy_armor',-4]]) {
+   let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'armor',name:'Vest',quantity:1,armor,slot:'any'},'vest');t=sanitize(t);equipItem(t,'vest','Torso');let o=effectiveOdyssey(t.odyssey);assert.equal(o.armorSummary.key,key);assert.equal(o.modifiers.attributes.Agility,agility);
+   t.odyssey.skills[key]=1;o=effectiveOdyssey(t.odyssey);assert.equal(o.modifiers.attributes.Agility,undefined);
+ }
+});
+test('Armor absorbs critical wounds; medkits heal body, repair kits heal armor',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'armor',name:'Vest',quantity:1,armor:12,criticalMax:2,slot:'any'},'vest');t=sanitize(t);equipItem(t,'vest','Torso');
+ assert.deepEqual(absorbEquipmentCritical(t,'Torso',3),{remaining:1,absorbed:2});assert.equal(t.body.Torso.armor,6);
+ useItemOnTracker(t,{subtype:'medkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,3);assert.equal(t.odyssey.inventory.items[0].criticalDamage,2);assert.equal(t.body.Torso.minor,3);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,3);assert.equal(t.odyssey.inventory.items[0].criticalDamage,1);assert.equal(t.body.Torso.armor,18);
+ assert.throws(()=>useItemOnTracker(t,{subtype:'grenade'},'Torso'),/placeholder/);
+});
+test('Type conversion restores body stats; loaded ammo cannot disappear',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'implant',name:'Frame',quantity:1,armor:3,criticalMax:4,slot:'any'},'frame');t=sanitize(t);equipItem(t,'frame','Torso');
+ saveInventoryEntry(t,{type:'item',id:'frame'},{kind:'resource',name:'Scrap',quantity:1},'frame');assert.equal(t.body.Torso.max,3);assert.equal(t.body.Torso.armor,6);assert.equal(t.odyssey.inventory.items[0].equippedPart,'');
+ assert.throws(()=>deleteInventoryEntry(t,'ammo','ball'),/Empty all magazines/);
+});
+
 console.log(`${count} integration checks passed.`);

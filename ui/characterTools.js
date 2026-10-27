@@ -1,13 +1,18 @@
+import {itemEditor,skillEditor} from './itemEditor.js';
+import {ARMOR_TRAINING} from '../characterRules.js';
+import {findInventoryEntry,saveInventoryEntry,deleteInventoryEntry} from '../inventory.js';
+import {reloadMagazine} from '../ammunition.js';
 import { buildText, buildSceneUpload } from '@owlbear-rodeo/sdk';
 import { newId, swapMagazine, fillMagazine, emptyMagazine, setMagazineRounds, equipItem, unequipItem, consumeItem } from '../inventory.js';
 import { makeTemplate, instantiateTemplate, readLibrary, writeLibrary, emptyLibrary, mergeLibraries, normalizeLibrary, libraryFromScenes, LIBRARY_ITEM_KEY, LIBRARY_STORAGE_KEY } from '../profiles.js';
 import { inventoryView, templatesView, esc } from './characterView.js';
 
 // A dialog lives outside the character panel so scene refreshes cannot destroy its draft.
-export function formDialog(title, fields, {danger = false, message = ''} = {}) {
+export function formDialog(title, fields, {danger = false, message = '', onChange} = {}) {
   const dialog = document.createElement('dialog'); dialog.className='od-dialog';
   dialog.innerHTML=`<form><h2>${esc(title)}</h2>${message?`<p>${esc(message)}</p>`:''}${fields.map(f=>`<label>${esc(f.label)}${f.options?`<select name="${esc(f.name)}">${f.options.map(([v,l])=>`<option value="${esc(v)}" ${v===f.value?'selected':''}>${esc(l)}</option>`).join('')}</select>`:f.type==='textarea'?`<textarea name="${esc(f.name)}" maxlength="2000">${esc(f.value)}</textarea>`:`<input name="${esc(f.name)}" type="${esc(f.type||'text')}" value="${esc(f.value ?? '')}" ${f.required?'required':''} ${f.type==='number'?`min="${f.min ?? 0}" max="${f.max ?? 999999}" step="1"`:'maxlength="120"'}>`}</label>`).join('')}<div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit" class="${danger?'danger':''}">${danger?'Apply':'Save'}</button></div></form>`;
   document.body.append(dialog);
+  if(onChange)dialog.querySelector('form').addEventListener('change',event=>onChange(event.target.form,event));
   return new Promise(resolve=>{
     let done=false; const finish=value=>{if(done)return;done=true;dialog.close();dialog.remove();resolve(value);};
     dialog.querySelector('[data-cancel]').onclick=()=>finish(null);
@@ -37,30 +42,50 @@ export function installCharacterTools(host) {
     const token=check(); const tokenId=token.id, panel=node.closest('#selectedTokenPanel'), id=node.dataset.id;
     const gmActions=['add-item','edit-item','delete-item','add-mag','fill-mag','set-mag-rounds','empty-mag','delete-mag','mount-mag','apply-template'];
     if(gmActions.includes(action)) check(tokenId,true);
-    if(action==='add-item'||action==='edit-item') {
-      const existing=host.tracker(token).odyssey.inventory.items.find(i=>i.id===id);
-      if(action==='edit-item'&&!existing) throw new Error('Item no longer exists.');
-      const value=await formDialog(existing?'Edit item':'Add item / armor',[
-        {name:'name',label:'Name',required:true,value:existing?.name},
-        {name:'kind',label:'Type',value:existing?.kind||'item',options:['item','consumable','medical','tool','resource','armor','shield','implant'].map(k=>[k,k])},
-        {name:'quantity',label:'Quantity',type:'number',value:existing?.quantity??1},
-        {name:'armor',label:'Armor value (equipment)',type:'number',max:999,value:existing?.armor??0},
-        {name:'description',label:'Description',type:'textarea',value:existing?.description},
-      ]);if(!value)return;
-      const itemId=existing?.id||newId();
-      await mutate(tokenId,t=>{
-        const rows=t.odyssey.inventory.items, i=rows.find(i=>i.id===itemId);
-        if(i?.equippedPart)throw new Error('Unequip the item before editing it.');
-        if(!i&&rows.length>=200)throw new Error('Inventory limit is 200 items.');
-        const item={id:itemId,...value,quantity:Number(value.quantity),armor:Number(value.armor),equippedPart:'',previousArmor:0};
-        if(i)Object.assign(i,item);else rows.push(item);
+    if(action==='add-item'||action==='edit-entry') {
+      check(tokenId,true);const t=host.tracker(token),o=t.odyssey,type=node.dataset.entryType||'item';
+      const existing=action==='edit-entry'?findInventoryEntry(t,type,id):null;
+      if(action==='edit-entry'&&!existing)throw new Error('Item no longer exists.');
+      const kind=type.startsWith('weapon-')?'weapon':type==='item'?(['item','tool'].includes(existing?.kind)?'resource':existing?.kind==='medical'?'consumable':existing?.kind||'resource'):type;
+      const values=await itemEditor({existing:{...existing,...(type.startsWith('weapon-')?{weaponKind:type.slice(7)}:{})},type:kind,skills:Object.entries(o.skills).map(([k])=>[k,o.skillLabels[k]||k]),parts:Object.entries(t.body).map(([k,p])=>[k,p.label||k]),ammunition:o.ammunition});if(!values)return;
+      await mutate(tokenId,t=>saveInventoryEntry(t,existing?{type,id}:null,values,existing?.id||newId()),true);
+    } else if(action==='delete-entry') {
+      check(tokenId,true);if(!await formDialog('Remove item?',[],{danger:true,message:'Remove this item from this token?'}))return;
+      await mutate(tokenId,t=>deleteInventoryEntry(t,node.dataset.entryType,id),true);
+    } else if(action==='add-skill'||action==='edit-skill') {
+      check(tokenId,true);const key=node.dataset.skill,o=host.tracker(token).odyssey;
+      const value=await skillEditor(o,key);if(!value)return;
+      const skillKey=key||newId();await mutate(tokenId,t=>{
+        const d=t.odyssey;if(key&&!Object.hasOwn(d.skills,key))throw new Error('Skill no longer exists.');
+        if(value.delete){if(['Melee','Parry'].includes(key))throw new Error('Core combat skill cannot be removed.');for(const field of ['skills','skillLabels','skillCategories','skillStrengthBonuses','skillPerks'])delete d[field][key];return;}
+        d.skills[skillKey]=value.level;d.skillLabels[skillKey]=value.name;d.skillCategories[skillKey]=value.category;d.skillStrengthBonuses[skillKey]=value.strength;d.skillPerks[skillKey]=value.perks;
       },true);
+    } else if(action==='edit-training') {
+      check(tokenId,true);const o=host.tracker(token).odyssey;
+      const value=await formDialog('Armor training',Object.entries(ARMOR_TRAINING).map(([key,label])=>({name:key,label,type:'number',min:0,max:1,value:o.skills[key]||0})));if(!value)return;
+      await mutate(tokenId,t=>{for(const key of Object.keys(ARMOR_TRAINING))t.odyssey.skills[key]=Number(value[key])>=1?1:0;},true);
+    } else if(action==='remove-effect') {
+      await mutate(tokenId,t=>{t.odyssey.effects=t.odyssey.effects.filter(e=>e.id!==id);},true);
+    } else if(action==='use-item') {
+      const item=host.tracker(token).odyssey.inventory.items.find(i=>i.id===id);if(!item)throw new Error('Item no longer exists.');
+      const targets=host.getTokens().filter(t=>getRole()==='GM'||t.visible!==false);
+      const partsFor=target=>Object.entries(host.tracker(target).body).filter(([,p])=>getRole()==='GM'||!p.hidden).map(([k,p])=>[k,p.label||k]);
+      const fields=[{name:'target',label:'Target',value:'',options:[['','Self'],...targets.filter(t=>t.id!==tokenId).map(t=>[t.id,t.name||t.id])]}];
+      if(item.subtype!=='stim')fields.push({name:'part',label:'Body part',options:partsFor(token)});
+      const value=await formDialog('Use '+item.name,fields,{onChange:(form,event)=>{
+        if(event.target.name!=='target'||!form.elements.part)return;
+        const target=host.getToken(form.elements.target.value||tokenId);form.elements.part.innerHTML=target?partsFor(target).map(([key,label])=>'<option value="'+esc(key)+'">'+esc(label)+'</option>').join(''):'';
+      }});if(!value)return;
+      check(tokenId);const target=host.getToken(value.target||tokenId);if(!target)throw new Error('Target no longer exists.');
+      await host.useItem(tokenId,id,target.id,value.part||'');
+    } else if(action==='reload-weapon') {
+      const index=Number(node.dataset.index),ammoId=readSelect(panel,'data-reload-kind',index);await mutate(tokenId,t=>reloadMagazine(t.odyssey,index,ammoId),true);
     } else if(action==='delete-item') {
       const yes=await formDialog('Remove item?',[],{danger:true,message:'This removes the item from this token.'});if(!yes)return;
       await mutate(tokenId,t=>{unequipItem(t,id);t.odyssey.inventory.items=t.odyssey.inventory.items.filter(i=>i.id!==id);},true);
     } else if(action==='consume') await mutate(tokenId,t=>consumeItem(t,id));
     else if(action==='equip') {const part=readSelect(panel,'data-equip-part',id);await mutate(tokenId,t=>equipItem(t,id,part));}
-    else if(action==='unequip') await mutate(tokenId,t=>unequipItem(t,id));
+    else if(action==='unequip') await mutate(tokenId,t=>unequipItem(t,id,getRole()==='GM'));
     else if(action==='add-mag') {
       const value=await formDialog('New magazine',[{name:'name',label:'Name',required:true,value:'Magazine'},{name:'capacity',label:'Capacity',type:'number',min:1,max:999,value:6}]);if(!value)return;
       const magazine={id:newId(),name:value.name,capacity:Number(value.capacity),loaded:0,loadedAmmoId:''};
@@ -121,11 +146,11 @@ export function installCharacterTools(host) {
   }
   document.addEventListener('click',event=>{
     const node=event.target.closest?.('[data-od-action]');if(!node||node.disabled||busy)return;
-    busy=true;node.disabled=true;
+    busy=true;document.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
     handle(node.dataset.odAction,node).catch(e=>status(e.message,'error')).finally(()=>{busy=false;render();if(node.isConnected)node.disabled=false;});
   });
   const reload=()=>{try {library=readLibrary(window.localStorage,sanitize);storageError='';render();}catch(e){storageError=e.message;render();}};
   window.addEventListener('storage',event=>{if(event.key===LIBRARY_STORAGE_KEY)reload();});
   const disabledWhileBusy=html=>busy?html.replaceAll('<button ', '<button disabled ').replaceAll('<select ', '<select disabled ').replaceAll('<input ', '<input disabled '):html;
-  return {renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
+  return {isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
 }

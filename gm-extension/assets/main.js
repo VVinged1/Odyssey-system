@@ -84,11 +84,11 @@ var require_events = __commonJS({
       }
       this._maxListeners = this._maxListeners || void 0;
     };
-    EventEmitter2.prototype.setMaxListeners = function setMaxListeners(n) {
-      if (typeof n !== "number" || n < 0 || NumberIsNaN(n)) {
-        throw new RangeError('The value of "n" is out of range. It must be a non-negative number. Received ' + n + ".");
+    EventEmitter2.prototype.setMaxListeners = function setMaxListeners(n2) {
+      if (typeof n2 !== "number" || n2 < 0 || NumberIsNaN(n2)) {
+        throw new RangeError('The value of "n" is out of range. It must be a non-negative number. Received ' + n2 + ".");
       }
-      this._maxListeners = n;
+      this._maxListeners = n2;
       return this;
     };
     function _getMaxListeners(that) {
@@ -330,9 +330,9 @@ var require_events = __commonJS({
     EventEmitter2.prototype.eventNames = function eventNames() {
       return this._eventsCount > 0 ? ReflectOwnKeys(this._events) : [];
     };
-    function arrayClone(arr, n) {
-      var copy = new Array(n);
-      for (var i = 0; i < n; ++i)
+    function arrayClone(arr, n2) {
+      var copy = new Array(n2);
+      for (var i = 0; i < n2; ++i)
         copy[i] = arr[i];
       return copy;
     }
@@ -393,6 +393,170 @@ var require_events = __commonJS({
   }
 });
 
+// ui/compactButtons.js
+var paths = {
+  plus: "M12 5v14M5 12h14",
+  close: "m6 6 12 12M18 6 6 18",
+  edit: "m4 16-1 5 5-1L20 8l-4-4Z M14 6l4 4",
+  save: "M5 3h13l3 3v15H3V3Z M7 3v6h10V3 M7 21v-8h10v8",
+  refresh: "M20 7v5h-5M4 17v-5h5 M5 8a8 8 0 0 1 13-3l2 3 M19 16a8 8 0 0 1-13 3l-2-3",
+  target: "M12 2v4m0 12v4M2 12h4m12 0h4 M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M12 10v4m-2-2h4",
+  download: "M12 3v12m-5-5 5 5 5-5 M4 16v5h16v-5",
+  upload: "M12 16V4m-5 5 5-5 5 5 M4 16v5h16v-5",
+  cloud: "M6 18a4 4 0 0 1-1-8 7 7 0 0 1 13-1 5 5 0 0 1 0 9Z M12 10v8m-3-3 3 3 3-3",
+  shield: "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z",
+  dice: "M4 4h16v16H4Z M8 8h.01 M16 8h.01 M12 12h.01 M8 16h.01 M16 16h.01",
+  attack: "m4 3 16 17m0-17L4 20 M3 15l6 6m6-18 6 6",
+  heal: "M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z",
+  book: "M3 4h7l2 2 2-2h7v15h-7l-2 2-2-2H3Z M12 6v15",
+  play: "m8 4 12 8-12 8Z",
+  box: "m3 7 9-4 9 4v13H3Z M3 7l9 4 9-4 M12 11v9",
+  window: "M3 3h18v18H3Z M3 8h18 M8 8v13",
+  copy: "M8 8h13v13H8Z M16 8V3H3v13h5"
+};
+function iconFor(text2) {
+  if (/cancel|clear|remove|delete|unequip|detach|close/i.test(text2)) return "close";
+  if (/edit|rename|set rounds|set magazine/i.test(text2)) return "edit";
+  if (/duplicate/i.test(text2)) return "copy";
+  if (/export|empty to|load from/i.test(text2)) return "download";
+  if (/import/i.test(text2)) return "upload";
+  if (/account/i.test(text2)) return "cloud";
+  if (/save/i.test(text2)) return "save";
+  if (/add|new|^\+/i.test(text2)) return "plus";
+  if (/reload|refresh|rebuild|fill|sync/i.test(text2)) return "refresh";
+  if (/select|pick|target|focus/i.test(text2)) return "target";
+  if (/roll|d100|dice/i.test(text2)) return "dice";
+  if (/attack|resolve/i.test(text2)) return "attack";
+  if (/heal|repair/i.test(text2)) return "heal";
+  if (/equip/i.test(text2)) return "shield";
+  if (/template/i.test(text2)) return "book";
+  if (/hud|window|open/i.test(text2)) return "window";
+  if (/use|apply/i.test(text2)) return "play";
+  return "box";
+}
+function installCompactButtons() {
+  const enhance = () => {
+    for (const button of document.querySelectorAll("button")) {
+      if (button.matches(".cp-attr,.cp-skill-card,.list-item") || button.querySelector("[data-compact-icon]")) continue;
+      const text2 = button.textContent.trim();
+      if (!text2 || text2.length <= 2) continue;
+      button.title = text2;
+      button.setAttribute("aria-label", text2);
+      button.classList.add("od-icon-button");
+      button.innerHTML = `<svg data-compact-icon viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[iconFor(text2)]}"></path></svg>`;
+    }
+  };
+  let scheduled = false;
+  new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      enhance();
+    });
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  enhance();
+}
+
+// characterRules.js
+var ARMOR_TRAINING = { light_armor: "Light Armor", medium_armor: "Medium Armor", heavy_armor: "Heavy Armor", superheavy_armor: "Superheavy Armor" };
+var ATTRIBUTES = ["Strength", "Agility", "Reaction", "Endurance", "Perception", "Intelligence", "Charisma", "Willpower", "Magic"];
+var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
+function normalizeBonuses(raw) {
+  const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills) };
+}
+function normalizeEffects(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
+}
+function itemActive(item) {
+  return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
+}
+function armorSummary(o) {
+  const total = (o.inventory?.items || []).filter((i) => ["armor", "shield"].includes(i.kind) && i.equippedPart && itemActive(i)).reduce((sum, i) => sum + i.armor, 0);
+  const key = total <= 0 ? null : total <= 70 ? "light_armor" : total <= 140 ? "medium_armor" : total <= 260 ? "heavy_armor" : "superheavy_armor";
+  return { total, key, name: key ? ARMOR_TRAINING[key] : "No armor" };
+}
+function effectiveOdyssey(base) {
+  const o = structuredClone(base), rows2 = [];
+  o.baseAttributes = structuredClone(base.attributes);
+  o.baseSkills = structuredClone(base.skills);
+  o.grantedSkills = {};
+  for (const i of o.inventory?.items || []) {
+    if (!itemActive(i)) continue;
+    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: i.bonuses, passive: true });
+    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
+      const key = `implant:${i.id}:${a.id}`;
+      o.skills[key] = a.level;
+      o.skillCategories[key] = "abilities";
+      o.skillLabels[key] = a.name;
+      o.skillPerks[key] = a.description ? [a.description] : [];
+      o.grantedSkills[key] = i.name;
+    }
+  }
+  rows2.push(...base.effects || []);
+  const skillMods = {};
+  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) skillMods[k] = (skillMods[k] || 0) + v;
+  for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
+  const armor = armorSummary(o), trained = !armor.key || (o.skills[armor.key] || 0) >= 1;
+  if (!trained) {
+    const penalties = armor.key === "light_armor" ? { Agility: -1, Endurance: -1 } : armor.key === "medium_armor" ? { Agility: -2, Endurance: -2, Strength: -2 } : { Agility: -4, Endurance: -5, Strength: -4 };
+    rows2.push({ id: "armor-penalty", name: `${armor.name} \xB7 untrained (${armor.total})`, bonuses: { attributes: penalties, skills: {} }, passive: true });
+  }
+  o.modifiers = { attributes: {}, skills: skillMods };
+  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.attributes || {})) o.modifiers.attributes[k] = (o.modifiers.attributes[k] || 0) + v;
+  for (const k of ATTRIBUTES) o.attributes[k] = Math.max(0, (base.attributes[k] || 0) + (o.modifiers.attributes[k] || 0));
+  o.effectRows = rows2.filter((r) => Object.keys(r.bonuses?.attributes || {}).length || Object.keys(r.bonuses?.skills || {}).length);
+  o.armorSummary = { ...armor, trained };
+  return o;
+}
+function reconcileEquipment(tracker) {
+  const inv = tracker.odyssey.inventory;
+  if (!inv) return;
+  inv.baseArmor ?? (inv.baseArmor = {});
+  inv.baseMax ?? (inv.baseMax = {});
+  for (const [partName, part] of Object.entries(tracker.body)) {
+    const equipped = inv.items.filter((i) => ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart === partName);
+    const hpBonus = equipped.filter((i) => i.kind === "implant" && itemActive(i)).reduce((sum, i) => sum + (Number(i.criticalMax) || 0), 0);
+    if (hpBonus && !Object.hasOwn(inv.baseMax, partName)) inv.baseMax[partName] = part.max;
+    if (Object.hasOwn(inv.baseMax, partName)) {
+      part.max = Math.min(999, inv.baseMax[partName] + hpBonus);
+      part.current = Math.min(part.current, part.max);
+      if (!hpBonus) delete inv.baseMax[partName];
+    }
+    if (!equipped.length) {
+      if (Object.hasOwn(inv.baseArmor, partName)) {
+        part.armor = inv.baseArmor[partName];
+        delete inv.baseArmor[partName];
+      }
+      continue;
+    }
+    if (!Object.hasOwn(inv.baseArmor, partName)) {
+      const legacy = equipped.find((i) => i.legacyEquipment);
+      inv.baseArmor[partName] = legacy ? legacy.previousArmor : part.armor;
+    }
+    part.armor = inv.baseArmor[partName] + equipped.filter(itemActive).reduce((sum, i) => sum + i.armor, 0);
+    for (const i of equipped) i.legacyEquipment = false;
+  }
+}
+function absorbEquipmentCritical(tracker, partName, critical) {
+  let remaining = Math.max(0, Number(critical) || 0), absorbed = 0;
+  const items = tracker.odyssey.inventory?.items || [];
+  for (const i of items.filter((i2) => ["armor", "shield"].includes(i2.kind) && i2.equippedPart === partName && i2.criticalMax > 0 && itemActive(i2)).sort((a, b) => (a.kind === "implant") - (b.kind === "implant"))) {
+    const amount = Math.min(remaining, i.criticalMax - i.criticalDamage);
+    i.criticalDamage += amount;
+    remaining -= amount;
+    absorbed += amount;
+    if (!remaining) break;
+  }
+  reconcileEquipment(tracker);
+  return { remaining, absorbed };
+}
+
+// ui/characterView.js
+var esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
 // inventory.js
 var LIMIT = 200;
 var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
@@ -410,6 +574,15 @@ function normalizeInventory(raw, weapons = []) {
     quantity: int(r.quantity ?? 1),
     description: text(r.description, 2e3),
     armor: int(r.armor, 999),
+    subtype: ["grenade", "medkit", "repairkit", "stim"].includes(r.subtype) ? r.subtype : r.kind === "medical" ? "medkit" : "grenade",
+    healCritical: int(r.healCritical ?? 1, 999),
+    slot: text(r.slot || "any", 40),
+    criticalMax: int(r.criticalMax, 999),
+    criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
+    playerRemovable: r.playerRemovable === true,
+    bonuses: normalizeBonuses(r.bonuses),
+    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
+    legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
     previousArmor: int(r.previousArmor, 999)
   }));
@@ -440,7 +613,7 @@ function normalizeInventory(raw, weapons = []) {
     assigned.add(id);
     Object.assign(mag, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
   }
-  return { version: 2, items, magazines };
+  return { version: 3, items, magazines, baseMax: Object.fromEntries(Object.entries(raw?.baseMax || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 99999)])), baseArmor: Object.fromEntries(Object.entries(raw?.baseArmor || {}).filter(([k]) => !["__proto__", "constructor", "prototype"].includes(k)).map(([k, v]) => [text(k, 40), int(v, 999)])) };
 }
 
 // node_modules/@owlbear-rodeo/sdk/lib/api/PlayerApi.js
@@ -3879,7 +4052,9 @@ var DEFAULT_TRACKER_DATA = {
       Willpower: 0,
       Magic: 0
     },
-    inventory: { version: 2, items: [], magazines: [] },
+    inventory: { version: 3, items: [], magazines: [], baseArmor: {}, baseMax: {} },
+    effects: [],
+    preferences: { parryMode: "off" },
     ammunition: [],
     weapons: {
       melee: [],
@@ -3963,7 +4138,7 @@ function getPartSlot(partName, source) {
 }
 function sanitizeTrackerData(raw) {
   const next = deepClone(DEFAULT_TRACKER_DATA);
-  if (!raw || typeof raw !== "object") return next;
+  if (!raw || typeof raw !== "object") raw = {};
   next.enabled = raw.enabled !== false;
   next.minor = clamp(Number(raw.minor ?? 0) || 0, 0, 4);
   next.serious = clamp(Number(raw.serious ?? 0) || 0, 0, 2);
@@ -4012,11 +4187,13 @@ function sanitizeTrackerData(raw) {
       next.body[name].attackPenalty = getSlotAttackPenalty(next.body[name].slot);
     }
   }
+  reconcileEquipment(next);
   return next;
 }
 function sanitizeOdysseyData(raw) {
+  var _a;
   const next = deepClone(DEFAULT_TRACKER_DATA.odyssey);
-  if (!raw || typeof raw !== "object") return next;
+  if (!raw || typeof raw !== "object") raw = {};
   next.owner.playerId = String(raw.owner?.playerId ?? "").trim();
   next.owner.playerName = String(raw.owner?.playerName ?? "").trim();
   next.attackDraft.targetTokenId = String(raw.attackDraft?.targetTokenId ?? "").trim();
@@ -4069,11 +4246,21 @@ function sanitizeOdysseyData(raw) {
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
   next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.effects = normalizeEffects(raw.effects);
+  next.preferences = { parryMode: ["off", "1", "2", "3", "4", "5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off" };
+  for (const [key, label] of Object.entries(ARMOR_TRAINING)) {
+    next.skills[key] = clamp(Number(raw.skills?.[key]) || 0, 0, 1);
+    next.skillLabels[key] = label;
+    next.skillCategories[key] = "passive";
+    next.skillStrengthBonuses[key] = false;
+    (_a = next.skillPerks)[key] ?? (_a[key] = []);
+  }
   return next;
 }
 function sanitizeWeapons(raw, ranged = false) {
   if (!Array.isArray(raw)) return [];
   return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
+    id: String(item.id || `legacy-${ranged ? "ranged" : "melee"}-${index}`),
     name: String(item.name ?? "").trim() || "Weapon",
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
@@ -4125,7 +4312,7 @@ function sortCharacters(items) {
   );
 }
 function getOdysseyData(item) {
-  return sanitizeOdysseyData(getTrackerData(item).odyssey);
+  return effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey));
 }
 function getBodyPartNames(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody ?? {};
@@ -4989,8 +5176,23 @@ function renderTargetState() {
 }
 function render() {
   renderRoleGate();
+  renderRosters();
   renderPrivateEntries();
   renderTargetState();
+}
+function renderRosters() {
+  const host = document.getElementById("gmRosters");
+  if (!host) return;
+  if (playerRole !== "GM") {
+    host.innerHTML = "";
+    return;
+  }
+  const chars = getCharacters();
+  const row = (t) => {
+    const data = getTrackerData(t);
+    return '<article class="cp-card cp-row"><b>' + esc(getCharacterName(t)) + '</b><span class="cp-muted">' + esc(data.odyssey.owner.playerName || "Unassigned") + '</span><button type="button" data-roster-select="' + esc(t.id) + '">Select On Map</button><span class="cp-pill">' + (isTrackedCharacter(t) ? "Initialized" : "Ready") + " \xB7 HP " + Object.values(data.body).reduce((sum, p) => sum + p.current, 0) + "/" + Object.values(data.body).reduce((sum, p) => sum + p.max, 0) + "</span></article>";
+  };
+  host.innerHTML = [["Tracked Characters", chars.filter(isTrackedCharacter)], ["All Character Tokens", chars]].map(([label, items]) => '<section class="panel"><details open><summary>' + label + " \xB7 " + items.length + '</summary><div class="cp-list">' + items.map(row).join("") + "</div></details></section>").join("");
 }
 function getParryDivisor(mode) {
   if (mode === "off") return 0;
@@ -5241,7 +5443,7 @@ async function performEnvironmentAttack() {
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(ui.defenseBonuses.value) || 0;
   const defensePenalties = Number(ui.defensePenalties.value) || 0;
-  const parryMode = ui.parryMode.value || "1";
+  const parryMode = ui.parryMode.value || "off";
   const parryDivisor = getParryDivisor(parryMode);
   const specialPartState = targetData?.body?.[SPECIAL_PART_NAME] ?? null;
   const specialWasActive = hasConfiguredSpecial(targetData) && (Number(specialPartState?.max) || 0) > 0 && (Number(specialPartState?.current) || 0) > 0;
@@ -5278,6 +5480,12 @@ async function performEnvironmentAttack() {
     damageAppliedLabel: "No Damage"
   };
   const projectedPartState = specialResolution.projectedTargetState;
+  const equipmentCrit = projectedPartState.critApplied || 0;
+  if (target && result.hit && equipmentCrit) {
+    const preview = getTrackerData(target), equipment = absorbEquipmentCritical(preview, result.targetPart, equipmentCrit);
+    projectedPartState.current = Math.max(0, (targetPartState.current || 0) - equipment.remaining);
+    projectedPartState.critApplied = equipment.remaining;
+  }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = projectedPartState.current ?? beforeHp;
   const specialAfterHp = specialWasActive ? projectedSpecialState?.current ?? specialBeforeHp : null;
@@ -5290,6 +5498,7 @@ async function performEnvironmentAttack() {
       next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
     }
     if (result.hit && next.body[result.targetPart]) {
+      absorbEquipmentCritical(next, result.targetPart, equipmentCrit);
       next.body[result.targetPart].current = projectedPartState.current;
       next.body[result.targetPart].minor = projectedPartState.minor;
       next.body[result.targetPart].serious = projectedPartState.serious;
@@ -5474,6 +5683,26 @@ async function refreshState(showStatus = false) {
   }
 }
 function bindEvents() {
+  try {
+    const mode = localStorage.getItem("odyssey-gm-parry");
+    if (["off", "1", "2", "3", "4", "5"].includes(mode)) ui.parryMode.value = mode;
+  } catch {
+  }
+  ui.parryMode.addEventListener("change", () => {
+    try {
+      localStorage.setItem("odyssey-gm-parry", ui.parryMode.value);
+    } catch {
+    }
+  });
+  document.getElementById("gmRosters").addEventListener("click", (event) => {
+    const node = event.target.closest("[data-roster-select]");
+    if (!node || playerRole !== "GM") return;
+    const action = async () => {
+      if (await lib_default.player.getRole() !== "GM") throw new Error("GM only.");
+      await lib_default.player.select([node.dataset.rosterSelect]);
+    };
+    void action().catch((e) => setStatus(e.message, "error"));
+  });
   ui.refreshBtn.addEventListener("click", () => {
     void refreshState(true).catch((error) => {
       setStatus(error?.message ?? "Refresh failed.", "error");
@@ -5506,6 +5735,7 @@ function bindEvents() {
   });
 }
 lib_default.onReady(async () => {
+  installCompactButtons();
   try {
     enableActionResize(document.querySelector("[data-action-resize]"), {
       storageKey: "com.codex.body-hp/gm-action-size",

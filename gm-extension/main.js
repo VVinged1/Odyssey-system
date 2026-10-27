@@ -1,3 +1,6 @@
+import {installCompactButtons} from '../ui/compactButtons.js';
+import {absorbEquipmentCritical} from '../characterRules.js';
+import {esc} from '../ui/characterView.js';
 import {
   BODY_ORDER,
   OBR,
@@ -14,6 +17,7 @@ import {
   getTrackerData,
   hasConfiguredSpecial,
   isCharacterToken,
+  isTrackedCharacter,
   sortCharacters,
   updateTrackerData,
 } from "../shared.js";
@@ -323,8 +327,16 @@ function renderTargetState() {
 
 function render() {
   renderRoleGate();
+  renderRosters();
   renderPrivateEntries();
   renderTargetState();
+}
+
+function renderRosters() {
+  const host=document.getElementById('gmRosters');if(!host)return;if(playerRole!=='GM'){host.innerHTML='';return;}
+  const chars=getCharacters();
+  const row=t=>{const data=getTrackerData(t);return '<article class="cp-card cp-row"><b>'+esc(getCharacterName(t))+'</b><span class="cp-muted">'+esc(data.odyssey.owner.playerName||'Unassigned')+'</span><button type="button" data-roster-select="'+esc(t.id)+'">Select On Map</button><span class="cp-pill">'+(isTrackedCharacter(t)?'Initialized':'Ready')+' · HP '+Object.values(data.body).reduce((sum,p)=>sum+p.current,0)+'/'+Object.values(data.body).reduce((sum,p)=>sum+p.max,0)+'</span></article>';};
+  host.innerHTML=[['Tracked Characters',chars.filter(isTrackedCharacter)],['All Character Tokens',chars]].map(([label,items])=>'<section class="panel"><details open><summary>'+label+' · '+items.length+'</summary><div class="cp-list">'+items.map(row).join('')+'</div></details></section>').join('');
 }
 
 function getParryDivisor(mode) {
@@ -625,7 +637,7 @@ async function performEnvironmentAttack() {
   const totalAttackPenalties = manualAttackPenalties + automaticTargetPenalty;
   const defenseBonuses = Number(ui.defenseBonuses.value) || 0;
   const defensePenalties = Number(ui.defensePenalties.value) || 0;
-  const parryMode = ui.parryMode.value || "1";
+  const parryMode = ui.parryMode.value || "off";
   const parryDivisor = getParryDivisor(parryMode);
   const specialPartState = targetData?.body?.[SPECIAL_PART_NAME] ?? null;
   const specialWasActive =
@@ -677,6 +689,12 @@ async function performEnvironmentAttack() {
         };
 
   const projectedPartState = specialResolution.projectedTargetState;
+  const equipmentCrit=projectedPartState.critApplied||0;
+  if(target&&result.hit&&equipmentCrit) {
+    const preview=getTrackerData(target),equipment=absorbEquipmentCritical(preview,result.targetPart,equipmentCrit);
+    projectedPartState.current=Math.max(0,(targetPartState.current||0)-equipment.remaining);
+    projectedPartState.critApplied=equipment.remaining;
+  }
   const projectedSpecialState = specialResolution.specialProjectedState;
   const afterHp = projectedPartState.current ?? beforeHp;
   const specialAfterHp = specialWasActive ? (projectedSpecialState?.current ?? specialBeforeHp) : null;
@@ -695,7 +713,8 @@ async function performEnvironmentAttack() {
       next.body[SPECIAL_PART_NAME].serious = projectedSpecialState.serious;
     }
     if (result.hit && next.body[result.targetPart]) {
-      next.body[result.targetPart].current = projectedPartState.current;
+      absorbEquipmentCritical(next,result.targetPart,equipmentCrit);
+        next.body[result.targetPart].current = projectedPartState.current;
       next.body[result.targetPart].minor = projectedPartState.minor;
       next.body[result.targetPart].serious = projectedPartState.serious;
     }
@@ -912,6 +931,13 @@ async function refreshState(showStatus = false) {
 }
 
 function bindEvents() {
+  try {const mode=localStorage.getItem('odyssey-gm-parry');if(['off','1','2','3','4','5'].includes(mode))ui.parryMode.value=mode;}catch{}
+  ui.parryMode.addEventListener('change',()=>{try{localStorage.setItem('odyssey-gm-parry',ui.parryMode.value);}catch{}});
+  document.getElementById('gmRosters').addEventListener('click',event=>{
+    const node=event.target.closest('[data-roster-select]');if(!node||playerRole!=='GM')return;
+    const action=async()=>{if(await OBR.player.getRole()!=='GM')throw new Error('GM only.');await OBR.player.select([node.dataset.rosterSelect]);};
+    void action().catch(e=>setStatus(e.message,'error'));
+  });
   ui.refreshBtn.addEventListener("click", () => {
     void refreshState(true).catch((error) => {
       setStatus(error?.message ?? "Refresh failed.", "error");
@@ -950,6 +976,7 @@ function bindEvents() {
 }
 
 OBR.onReady(async () => {
+  installCompactButtons();
   try {
     enableActionResize(document.querySelector("[data-action-resize]"), {
       storageKey: "com.codex.body-hp/gm-action-size",

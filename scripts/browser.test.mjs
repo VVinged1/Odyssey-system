@@ -12,7 +12,7 @@ const server=http.createServer(async(req,res)=>{try {const url=new URL(req.url,'
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{});
 try{
- const page=await browser.newPage({viewport:{width:1000,height:1100}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage({viewport:{width:1000,height:1100}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('[data-action="profile-roll-char"]').first().waitFor();
  console.log('UI mounted'); const data=()=>page.evaluate(()=>window.odysseyTest.data());
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
@@ -36,7 +36,7 @@ try{
  assert.equal(await page.locator('[data-action="profile-roll-skill"]').count(),0);
  await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-action="profile-roll-char"]').first().waitFor();
  console.log('Roles and rolls passed'); const openSection=async text=>{const summary=page.locator('summary').filter({hasText:text}).first();const detail=summary.locator('..');if(!await detail.evaluate(e=>e.open))await summary.click();};
- await openSection('Inventory');
+ await openSection('Items');
  const magazineId=(await data()).odyssey.inventory.magazines[0].id;
  const reserves=JSON.stringify((await data()).odyssey.ammunition);
  async function correctRounds(rounds,ammoId) {
@@ -64,7 +64,7 @@ try{
  await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-od-action="add-item"]').click();await page.locator('dialog input[name="name"]').fill('Armor <script>');await page.locator('dialog select[name="kind"]').selectOption('armor');await page.locator('dialog input[name="armor"]').fill('12');await page.locator('dialog button[type="submit"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data().odyssey.inventory?.items.length===1);
  assert.equal(await page.locator('script').count(),1);
- await page.locator('[data-od-action="equip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===12);
+ await page.locator('[data-od-action="equip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===18);
  await page.locator('[data-od-action="unequip"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.armor===6);
  console.log('Equipment passed'); await openSection('Character Templates');await page.locator('[data-od-action="save-template"]').click();await page.locator('dialog input[name="name"]').fill('Ranger template');await page.locator('dialog button[type="submit"]').click();await page.locator('[data-od-action="apply-template"]').waitFor();
  await page.locator('[data-od-action="account-save"]').click();await page.waitForFunction(()=>window.odysseyTest.state.accountScenes.length===1);
@@ -81,12 +81,47 @@ try{
  await page.goto(`http://127.0.0.1:${server.address().port}/?hud=1`);await page.locator('.od-hud').waitFor();assert.equal(await page.locator('[data-action="profile-roll-char"]').first().isVisible(),false);
  assert.equal(await page.locator('.od-hud').isVisible(),true);
  if(shots)await page.screenshot({path:path.join(shots,'odyssey-hud.png'),fullPage:true});
+
+ // Fresh scene: exercise typed forms, effects, implant body HP, pencils and compact actions.
+ await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('[data-od-action="edit-skill"]').first().waitFor();
+ await openSection('Items');
+ assert.equal(await page.locator('#trackedSection,#allTokensSection').count(),0);
+ assert.equal(await page.locator('.cp-section-title').filter({hasText:/^Abilities$/}).count(),0);
+ await page.locator('[data-od-action="edit-skill"][data-skill="Shoot"]').click();await page.locator('[data-add-perk]').click();await page.locator('dialog input[name="perk"]').last().fill('Steady');await page.locator('dialog button[type="submit"]').click();
+ await page.waitForFunction(()=>window.odysseyTest.data().odyssey.skillPerks.Shoot.includes('Steady'));
+ await page.locator('[data-od-action="edit-skill"][data-skill="Shoot"]').click();await page.locator('[data-remove-perk]').last().click();await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>!window.odysseyTest.data().odyssey.skillPerks.Shoot.includes('Steady'));
+ before=(await data()).history?.length||0;await page.locator('[data-action="profile-random-skill"]').click();await page.waitForFunction(n=>window.odysseyTest.data().history?.length===n+1,before);assert.ok((await data()).lastRoll.summary.includes('Random d100'));
+ console.log('Pencils and random passed');await openSection('Attack');
+ const parry=page.locator('[data-attack-field="parryMode"]');assert.equal(await parry.inputValue(),'off');
+ await parry.selectOption('2');await page.waitForFunction(()=>window.odysseyTest.data().odyssey.preferences.parryMode==='2');await page.locator('#refreshBtn').click();assert.equal(await parry.inputValue(),'2');
+ async function addTyped(name,kind,fill) {
+   await page.locator('[data-od-action="add-item"]').click();await page.locator('dialog [name="kind"]').selectOption(kind);await page.locator('dialog [name="name"]').fill(name);if(fill)await fill();await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>!document.querySelector('[data-od-action="add-item"]').disabled);
+   const rows=(await data()).odyssey.inventory.items;return rows.find(i=>i.name===name)?.id;
+ }
+ console.log('Parry persisted');
+ const stim=await addTyped('Focus stim','consumable',async()=>{await page.locator('dialog [name="subtype"]').selectOption('stim');await page.locator('dialog [name="attr:Agility"]').fill('2');await page.locator('dialog [name="attr:Willpower"]').fill('1');assert.equal(await page.locator('dialog [name="armor"]').count(),0);});
+ const implant=await addTyped('Reflex frame','implant',async()=>{await page.locator('dialog [name="criticalMax"]').fill('4');await page.locator('dialog [name="armor"]').fill('10');assert.equal(await page.locator('dialog [name="criticalDamage"]').count(),0);await page.locator('dialog [name="attr:Reaction"]').fill('2');await page.locator('[data-add-ability]').click();await page.locator('dialog [name="abilityName"]').fill('Night vision');});
+ await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));
+ await page.locator('[data-od-action="equip"][data-id="'+implant+'"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.max===7);
+ assert.equal((await data()).body.Torso.current,3);assert.equal(await page.locator('[data-od-action="unequip"][data-id="'+implant+'"]').count(),0);
+ await page.locator('[data-od-action="use-item"][data-id="'+stim+'"]').click();await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>window.odysseyTest.data().odyssey.effects?.length===1);
+ assert.equal((await data()).odyssey.attributes.Agility,12);await page.waitForFunction(()=>document.querySelector('[data-action="profile-roll-char"][data-attribute="Agility"] .cp-attr-val')?.textContent==='14');
+ assert.equal(await page.locator('[data-od-action="remove-effect"]').count(),0);
+ await page.evaluate(()=>window.odysseyTest.setRole('GM'));await page.locator('[data-od-action="remove-effect"]').click();await page.waitForFunction(()=>window.odysseyTest.data().odyssey.effects.length===0);
+ await page.locator('[data-od-action="unequip"][data-id="'+implant+'"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.max===3);
+ const med=await addTyped('First aid','consumable',async()=>{await page.locator('dialog [name="subtype"]').selectOption('medkit');await page.locator('dialog [name="healCritical"]').fill('2');});
+ await page.evaluate(()=>{window.odysseyTest.data('enemy').body.Torso.current=1;window.odysseyTest.refresh();window.odysseyTest.setRole('PLAYER');});
+ await page.locator('[data-od-action="use-item"][data-id="'+med+'"]').click();await page.locator('dialog [name="target"]').selectOption('enemy');await page.locator('dialog [name="part"]').selectOption('Torso');await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>window.odysseyTest.data('enemy').body.Torso.current===3);
+ assert.equal((await data()).odyssey.inventory.items.find(i=>i.id===med).quantity,0);assert.equal((await page.evaluate(()=>window.odysseyTest.data('enemy'))).body.Torso.armor,6);
+ assert.ok(await page.locator('.od-icon-button[title] svg').count());const actionSize=await page.locator('#refreshBtn').boundingBox();assert.equal(actionSize.width,28);assert.equal(actionSize.height,28);
+ console.log('Typed items, cross-target healing, stims, implant HP, skills and compact icons passed');
  await page.goto(`http://127.0.0.1:${server.address().port}/gm-extension/index.html`);
  await page.locator('#gmContent').waitFor();
+ assert.equal(await page.locator('#parryMode').inputValue(),'off');assert.ok((await page.locator('#gmRosters').textContent()).includes('Tracked Characters'));await page.locator('[data-roster-select="enemy"]').first().click();assert.deepEqual(await page.evaluate(()=>window.odysseyTest.state.selection),['enemy']);
  await page.locator('#publicDiceBtn').click();await page.locator('#privateLog .debug-entry').first().waitFor();
  assert.equal(await page.evaluate(()=>window.odysseyTest.state.room['com.codex.body-hp/debugLog']?.length||0),0);
  await page.locator('#publicDicePrivate').check();await page.locator('#publicDiceBtn').click();
  await page.waitForFunction(()=>window.odysseyTest.state.room['com.codex.body-hp/debugLog']?.length===1);
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));await page.locator('#gmOnlyNotice').waitFor();assert.equal(await page.locator('#gmContent').isVisible(),false);
  assert.deepEqual(errors,[]);console.log('Browser checks passed: GM/owner/outsider, click-to-roll, equipment, template/account payload, cancel, HUD and 480px layout.');
-}catch(error){console.error(error);throw error;}finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+}catch(error){console.error(error);console.error(await browser.contexts()[0]?.pages()[0]?.evaluate(()=>({dialogs:[...document.querySelectorAll('dialog')].map(d=>d.outerHTML),status:document.querySelector('#statusBox')?.textContent})));throw error;}finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

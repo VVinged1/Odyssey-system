@@ -11,6 +11,7 @@ export function profileData(tracker) {
 export function makeTemplate(name, tracker) {
   const data = profileData(tracker);
   data.minor = 0; data.serious = 0;
+  for(const item of data.odyssey.inventory.items)item.criticalDamage=0;
   for (const part of Object.values(data.body)) { part.current = part.max; part.minor = 0; part.serious = 0; }
   return {format:TEMPLATE_FORMAT, version:1, id:newId(), name:String(name || 'Character').trim().slice(0,120), updatedAt:new Date().toISOString(), data};
 }
@@ -45,6 +46,7 @@ export function instantiateTemplate(current, template, sanitize) {
     w.id = newId(); w.ammoIds = w.ammoIds.map(id => ammoIds.get(id)).filter(Boolean);
     w.loadedAmmoId = ammoIds.get(w.loadedAmmoId) || ''; w.magazineId = magIds.get(w.magazineId) || '';
   }
+  for (const w of data.odyssey.weapons.melee) w.id=newId();
   for (const item of data.odyssey.inventory.items) item.id = newId();
   // Preserve destination identity, permissions and history; never inherit source identity.
   const next = sanitize({...current, ...data, odyssey:{...current.odyssey,...data.odyssey,owner:current.odyssey.owner,attackDraft:{targetTokenId:'',targetTokenName:''}}});

@@ -393,6 +393,45 @@ var require_events = __commonJS({
   }
 });
 
+// fieldDrafts.js
+function createFieldDrafts() {
+  const tokens = /* @__PURE__ */ new Map();
+  let revision = 0;
+  return {
+    set(tokenId, key, value) {
+      if (!tokens.has(tokenId)) tokens.set(tokenId, /* @__PURE__ */ new Map());
+      const draft2 = { value, revision: ++revision };
+      tokens.get(tokenId).set(key, draft2);
+      return draft2;
+    },
+    get(tokenId, key) {
+      return tokens.get(tokenId)?.get(key);
+    },
+    finish(tokenId, key, draft2) {
+      const rows2 = tokens.get(tokenId);
+      if (rows2?.get(key) !== draft2) return;
+      rows2.delete(key);
+      if (!rows2.size) tokens.delete(tokenId);
+    },
+    clear(tokenId) {
+      tokens.delete(tokenId);
+    }
+  };
+}
+function createTokenWriteQueue() {
+  const pending = /* @__PURE__ */ new Map();
+  return (tokenId, write) => {
+    const task = (pending.get(tokenId) || Promise.resolve()).catch(() => {
+    }).then(write);
+    pending.set(tokenId, task);
+    const cleanup = () => {
+      if (pending.get(tokenId) === task) pending.delete(tokenId);
+    };
+    task.then(cleanup, cleanup);
+    return task;
+  };
+}
+
 // rangeRules.js
 var WEAPON_CATEGORIES = [["", "Unclassified"], ["pistol", "Pistol"], ["smg", "SMG"], ["shotgun", "Shotgun"], ["assault", "Assault rifle / machine gun"], ["sniper", "Sniper rifle"]];
 var normalizeWeaponCategory = (value) => WEAPON_CATEGORIES.some(([key]) => key === value) ? value : "";
@@ -7168,6 +7207,8 @@ var pendingLocalDebugClear = false;
 var collapsibleSectionState = /* @__PURE__ */ new Map();
 var attackFormDrafts = /* @__PURE__ */ new Map();
 var inputAutosaveTimers = /* @__PURE__ */ new Map();
+var pendingFieldDrafts = createFieldDrafts();
+var queueTrackerWrite = createTokenWriteQueue();
 var selectionPollTimer = null;
 var renderScheduled = false;
 var sceneSideEffectsTimer = null;
@@ -7318,6 +7359,17 @@ function getTransientFieldKey(field) {
   if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement)) {
     return "";
   }
+  if (field.dataset.bodyField) return "new-body:" + field.dataset.bodyField;
+  if (field.dataset.weaponDraft) {
+    const row = field.closest(".weapon-entry");
+    return "weapon-draft:" + (row?.dataset.weaponType || "new") + ":" + (row?.dataset.weaponIndex || "") + ":" + field.dataset.weaponDraft + ":" + (field.dataset.ammoId || "");
+  }
+  if (field.dataset.ammoDraft) {
+    const row = field.closest(".ammo-entry");
+    return "ammo-draft:" + (row?.dataset.ammoId || "new") + ":" + field.dataset.ammoDraft;
+  }
+  if (field.dataset.skillPerkField) return "new-perk:" + skillPerkAddSkill + ":" + field.dataset.skillPerkField;
+  if (field.dataset.action === "rename-body-part") return "part-label:" + field.dataset.part;
   if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
@@ -7354,7 +7406,7 @@ function getTransientFieldKey(field) {
   return "";
 }
 function shouldPreserveFieldValue(fieldKey, focusedKey) {
-  return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("inventory:") || fieldKey.startsWith("profile:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
+  return fieldKey === focusedKey || pendingFieldDrafts.get(ui.selectedTokenPanel.dataset.tokenId, fieldKey) || fieldKey.startsWith("new-body:") || fieldKey.startsWith("weapon-draft:") || fieldKey.startsWith("ammo-draft:") || fieldKey.startsWith("new-perk:") || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("inventory:") || fieldKey.startsWith("profile:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
 }
 function captureSelectedPanelState() {
   ui.selectedTokenPanel.querySelectorAll("details[data-section-key]").forEach((section) => collapsibleSectionState.set(section.dataset.sectionKey, section.open));
@@ -7378,7 +7430,7 @@ function captureSelectedPanelState() {
     if (!key || !shouldPreserveFieldValue(key, focusedKey)) return;
     fields.push([
       key,
-      field instanceof HTMLInputElement && field.type === "checkbox" ? { kind: "checkbox", checked: field.checked } : { kind: "value", value: field.value }
+      field instanceof HTMLInputElement && field.type === "checkbox" ? { kind: "checkbox", checked: field.checked } : { kind: "value", value: pendingFieldDrafts.get(renderedTokenId, key)?.value ?? field.value }
     ]);
   });
   return {
@@ -7490,15 +7542,17 @@ function applyLocalTrackerDataUpdate(tokenId, updater) {
   setSceneItems(nextItems);
 }
 async function updateTrackerData2(tokenId, updater) {
-  applyLocalTrackerDataUpdate(tokenId, updater);
-  scheduleRender();
-  try {
-    await updateTrackerData(tokenId, updater);
-  } catch (error) {
-    setSceneItems(await lib_default.scene.items.getItems());
+  return queueTrackerWrite(tokenId, async () => {
+    applyLocalTrackerDataUpdate(tokenId, updater);
     scheduleRender();
-    throw error;
-  }
+    try {
+      await updateTrackerData(tokenId, updater);
+    } catch (error) {
+      setSceneItems(await lib_default.scene.items.getItems());
+      scheduleRender();
+      throw error;
+    }
+  });
 }
 async function initializeCharacterToken(tokenId) {
   const token = getCharacterById(tokenId);
@@ -9095,9 +9149,10 @@ function renderSelectedToken() {
   });
   characterTools?.syncPool();
   arrangeCombatPanels(ui.selectedTokenPanel);
+  restoreSelectedPanelState(panelState);
+  ui.selectedTokenPanel.querySelectorAll('[data-weapon-draft="type"]').forEach(toggleWeaponDraftFields);
   paintRangeAdjustments();
   refreshTargetDistance();
-  restoreSelectedPanelState(panelState);
 }
 function render() {
   ui.roleBadge.textContent = playerRole === "GM" ? "GM" : "PLAYER";
@@ -9679,14 +9734,19 @@ function queueInputAutosave(draft2) {
     draft2.weaponIndex ?? "",
     draft2.partName ?? ""
   ].join("|");
+  const fieldKey = draft2.action === "set-field" ? "part:" + draft2.partName + ":" + draft2.field : draft2.action === "set-odyssey-attribute" ? "attribute:" + draft2.attribute : draft2.action === "set-odyssey-skill" ? "skill:" + draft2.skill : draft2.action === "set-weapon-name" ? "weapon-name:" + draft2.weaponIndex : draft2.action === "set-weapon-damage" ? "weapon-damage:" + draft2.weaponIndex : "weapon-accuracy:" + draft2.weaponIndex;
+  const pending = pendingFieldDrafts.set(draft2.tokenId, fieldKey, draft2.value);
   const existing = inputAutosaveTimers.get(key);
   if (existing) {
     clearTimeout(existing);
   }
   const timeoutId = setTimeout(() => {
     inputAutosaveTimers.delete(key);
-    void autosaveDraftField(draft2).catch((error) => {
+    void autosaveDraftField(draft2).then(() => {
+      pendingFieldDrafts.finish(draft2.tokenId, fieldKey, pending);
+    }, (error) => {
       console.warn("[Body HP] Autosave failed", error);
+      setStatus("Unable to save field. Your input is retained; edit it to retry.", "error");
     });
   }, 250);
   inputAutosaveTimers.set(key, timeoutId);
@@ -10793,6 +10853,7 @@ lib_default.onReady(async () => {
       status: setStatus,
       download: downloadTextFile,
       resetDraft: (id) => {
+        pendingFieldDrafts.clear(id);
         attackFormDrafts.delete(id);
         for (const [key, timer] of inputAutosaveTimers) {
           if (key.startsWith(id + "|")) {

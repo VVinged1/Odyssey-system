@@ -1,3 +1,4 @@
+import {createFieldDrafts,createTokenWriteQueue} from './fieldDrafts.js';
 import {rangeAdjustment,rangeAdjustmentLabel} from './rangeRules.js';
 import {createTargetDistance} from './targetDistance.js';
 import {arrangeCombatPanels} from './ui/combatLayout.js';
@@ -172,6 +173,8 @@ let pendingLocalDebugClear = false;
 const collapsibleSectionState = new Map();
 const attackFormDrafts = new Map();
 const inputAutosaveTimers = new Map();
+const pendingFieldDrafts=createFieldDrafts();
+const queueTrackerWrite=createTokenWriteQueue();
 let selectionPollTimer = null;
 let renderScheduled = false;
 let sceneSideEffectsTimer = null;
@@ -367,6 +370,11 @@ function getTransientFieldKey(field) {
     return "";
   }
 
+  if(field.dataset.bodyField)return 'new-body:'+field.dataset.bodyField;
+  if(field.dataset.weaponDraft){const row=field.closest('.weapon-entry');return 'weapon-draft:'+(row?.dataset.weaponType||'new')+':'+(row?.dataset.weaponIndex||'')+':'+field.dataset.weaponDraft+':'+(field.dataset.ammoId||'');}
+  if(field.dataset.ammoDraft){const row=field.closest('.ammo-entry');return 'ammo-draft:'+(row?.dataset.ammoId||'new')+':'+field.dataset.ammoDraft;}
+  if(field.dataset.skillPerkField)return 'new-perk:'+skillPerkAddSkill+':'+field.dataset.skillPerkField;
+  if(field.dataset.action==='rename-body-part')return 'part-label:'+field.dataset.part;
   if (field.dataset.attackField === "ammoId" || field.dataset.manualAttackField === "ammoId") return "";
   if (field.dataset.attackField) return `attack:${field.dataset.attackField}`;
   if (field.dataset.manualAttackField) return `manual-attack:${field.dataset.manualAttackField}`;
@@ -408,6 +416,8 @@ function getTransientFieldKey(field) {
 function shouldPreserveFieldValue(fieldKey, focusedKey) {
   return (
     fieldKey === focusedKey ||
+    pendingFieldDrafts.get(ui.selectedTokenPanel.dataset.tokenId,fieldKey)||
+    fieldKey.startsWith('new-body:')||fieldKey.startsWith('weapon-draft:')||fieldKey.startsWith('ammo-draft:')||fieldKey.startsWith('new-perk:')||
     fieldKey.startsWith("attack:") ||
     fieldKey.startsWith("manual-attack:") ||
     fieldKey.startsWith("inventory:") ||
@@ -454,7 +464,7 @@ function captureSelectedPanelState() {
       key,
       field instanceof HTMLInputElement && field.type === "checkbox"
         ? { kind: "checkbox", checked: field.checked }
-        : { kind: "value", value: field.value },
+        : { kind: "value", value: pendingFieldDrafts.get(renderedTokenId,key)?.value ?? field.value },
     ]);
   });
 
@@ -610,6 +620,7 @@ function applyLocalTrackerDataUpdate(tokenId, updater) {
 }
 
 async function updateTrackerData(tokenId, updater) {
+  return queueTrackerWrite(tokenId,async()=>{
   applyLocalTrackerDataUpdate(tokenId, updater);
   scheduleRender();
   try {
@@ -619,6 +630,7 @@ async function updateTrackerData(tokenId, updater) {
     scheduleRender();
     throw error;
   }
+  });
 }
 
 async function initializeCharacterToken(tokenId) {
@@ -3447,9 +3459,10 @@ function renderSelectedToken() {
   if(characterTools?.isBusy())ui.selectedTokenPanel.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
   characterTools?.syncPool();
   arrangeCombatPanels(ui.selectedTokenPanel);
+  restoreSelectedPanelState(panelState);
+  ui.selectedTokenPanel.querySelectorAll('[data-weapon-draft="type"]').forEach(toggleWeaponDraftFields);
   paintRangeAdjustments();
   refreshTargetDistance();
-  restoreSelectedPanelState(panelState);
 }
 
 function renderTrackedList() {
@@ -4170,6 +4183,8 @@ function queueInputAutosave(draft) {
     draft.weaponIndex ?? "",
     draft.partName ?? "",
   ].join("|");
+  const fieldKey=draft.action==='set-field'?'part:'+draft.partName+':'+draft.field:draft.action==='set-odyssey-attribute'?'attribute:'+draft.attribute:draft.action==='set-odyssey-skill'?'skill:'+draft.skill:draft.action==='set-weapon-name'?'weapon-name:'+draft.weaponIndex:draft.action==='set-weapon-damage'?'weapon-damage:'+draft.weaponIndex:'weapon-accuracy:'+draft.weaponIndex;
+  const pending=pendingFieldDrafts.set(draft.tokenId,fieldKey,draft.value);
   const existing = inputAutosaveTimers.get(key);
   if (existing) {
     clearTimeout(existing);
@@ -4177,9 +4192,7 @@ function queueInputAutosave(draft) {
 
   const timeoutId = setTimeout(() => {
     inputAutosaveTimers.delete(key);
-    void autosaveDraftField(draft).catch((error) => {
-      console.warn("[Body HP] Autosave failed", error);
-    });
+    void autosaveDraftField(draft).then(()=>{pendingFieldDrafts.finish(draft.tokenId,fieldKey,pending);},error=>{console.warn('[Body HP] Autosave failed',error);setStatus('Unable to save field. Your input is retained; edit it to retry.','error');});
   }, 250);
 
   inputAutosaveTimers.set(key, timeoutId);
@@ -5414,7 +5427,7 @@ OBR.onReady(async () => {
       getTokens:()=>characterListCache, useItem:useCharacterItem, getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
       canControl:canUseToken, update:updateTrackerData, refreshOverlay:ensureOverlayForToken,
       render:scheduleRender, status:setStatus, download:downloadTextFile,
-      resetDraft:id => { attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },
+      resetDraft:id => { pendingFieldDrafts.clear(id);attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },
     });
     targetDistance=createTargetDistance({OBR,buildRuler,onRead:paintTargetDistance,context:HUD_MODE?'hud':'main'});
     OBR.scene.grid.onChange(()=>{targetDistance.invalidate();refreshTargetDistance();});

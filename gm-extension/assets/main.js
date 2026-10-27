@@ -393,6 +393,39 @@ var require_events = __commonJS({
   }
 });
 
+// ui/combatLayout.js
+function arrangeCombatPanels(root = document) {
+  for (const panel of root.querySelectorAll("[data-combat-layout]:not([data-combat-arranged])")) {
+    panel.dataset.combatArranged = "true";
+    const kind = panel.dataset.combatLayout;
+    const grid = document.createElement("div");
+    grid.className = "od-combat-grid";
+    const cards = ["Weapon & skill", kind === "manual" ? "Manual defense" : "Target", "Action"].map((title) => {
+      const card = document.createElement("section");
+      card.className = "od-combat-card";
+      const heading = document.createElement("div");
+      heading.className = "od-combat-title";
+      heading.textContent = title;
+      card.append(heading);
+      grid.append(card);
+      return card;
+    });
+    for (const field of [...panel.querySelectorAll("label.field-stack")]) {
+      const control = field.querySelector("[data-attack-field],[data-manual-attack-field],input,select,button,[id],.combat-value");
+      const key = control?.dataset.attackField || control?.dataset.manualAttackField || control?.id || control?.dataset.action || "";
+      const isWeapon = ["skill", "weaponName", "weaponDamage", "ammoId", "rounds", "attackSourceName", "attackSkill", "weaponAccuracy"].includes(key) || field.querySelector("[data-weapon-accuracy-display]");
+      const isTarget = ["targetPart", "targetName", "targetTokenId", "pick-attack-target", "pickTargetBtn", "clearTargetBtn", "manualArmor", "manualParry"].includes(key) || field.querySelector(".combat-value:not([data-weapon-accuracy-display])");
+      cards[isWeapon ? 0 : isTarget ? 1 : 2].append(field);
+    }
+    for (const hidden of [...panel.querySelectorAll('input[type="hidden"]')]) cards[1].append(hidden);
+    for (const note of [...panel.querySelectorAll(".combat-notes,:scope > .muted")]) cards[2].append(note);
+    for (const action of [...panel.querySelectorAll(".combat-action,:scope > .row")]) cards[2].append(action);
+    for (const obsolete of [...panel.querySelectorAll(":scope > .combat-form-grid,:scope > .combat-modifiers")]) obsolete.remove();
+    panel.append(grid);
+    panel.classList.add("od-combat-panel");
+  }
+}
+
 // ui/compactButtons.js
 var paths = {
   plus: "M12 5v14M5 12h14",
@@ -496,6 +529,15 @@ function effectiveOdyssey(base) {
     }
   }
   rows2.push(...base.effects || []);
+  for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
+    o.skills[key] = 0;
+    o.baseSkills[key] = 0;
+    o.skillLabels[key] = key;
+    o.skillCategories[key] = "applied";
+    o.skillStrengthBonuses[key] = false;
+    o.skillPerks[key] = [];
+    o.grantedSkills[key] = row.name;
+  }
   const skillMods = {};
   for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) skillMods[k] = (skillMods[k] || 0) + v;
   for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
@@ -595,6 +637,10 @@ function normalizeInventory(raw, weapons = []) {
   }));
   const assigned = /* @__PURE__ */ new Set();
   for (const [i, weapon] of weapons.entries()) {
+    if (weapon.acceptsMagazines === false) {
+      weapon.magazineId = "";
+      continue;
+    }
     const requested = text(weapon.magazineId);
     let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
     if (!id) {
@@ -3939,6 +3985,8 @@ function sanitizeAmmunition(raw) {
 function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    acceptsMagazines: weapon.acceptsMagazines !== false,
+    ...Array.isArray(weapon.acceptedMagazineIds) ? { acceptedMagazineIds: [...new Set(weapon.acceptedMagazineIds.filter((id) => typeof id === "string"))].slice(0, 200) } : {},
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
     capacity,
     loadedAmmoId: String(weapon.loadedAmmoId || ""),
@@ -5683,6 +5731,7 @@ async function refreshState(showStatus = false) {
   }
 }
 function bindEvents() {
+  arrangeCombatPanels();
   try {
     const mode = localStorage.getItem("odyssey-gm-parry");
     if (["off", "1", "2", "3", "4", "5"].includes(mode)) ui.parryMode.value = mode;

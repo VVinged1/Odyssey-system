@@ -26,6 +26,10 @@ export function effectiveOdyssey(base) {
     }
   }
   rows.push(...(base.effects||[]));
+  // Items may grant skills absent from the character; these disappear with the item.
+  for(const row of rows)for(const key of Object.keys(row.bonuses?.skills||{}))if(!Object.hasOwn(o.skills,key)) {
+    o.skills[key]=0;o.baseSkills[key]=0;o.skillLabels[key]=key;o.skillCategories[key]='applied';o.skillStrengthBonuses[key]=false;o.skillPerks[key]=[];o.grantedSkills[key]=row.name;
+  }
   const skillMods={};for(const row of rows)for(const [k,v] of Object.entries(row.bonuses?.skills||{}))skillMods[k]=(skillMods[k]||0)+v;
   for(const [k,v] of Object.entries(skillMods))if(Object.hasOwn(o.skills,k))o.skills[k]=Math.max(0,Math.min(Object.hasOwn(ARMOR_TRAINING,k)?1:10,o.skills[k]+v));
   const armor=armorSummary(o),trained=!armor.key||(o.skills[armor.key]||0)>=1;

@@ -476,6 +476,10 @@ function normalizeInventory(raw, weapons = []) {
   }));
   const assigned = /* @__PURE__ */ new Set();
   for (const [i, weapon] of weapons.entries()) {
+    if (weapon.acceptsMagazines === false) {
+      weapon.magazineId = "";
+      continue;
+    }
     const requested = text(weapon.magazineId);
     let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
     if (!id) {
@@ -3820,6 +3824,8 @@ function sanitizeAmmunition(raw) {
 function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    acceptsMagazines: weapon.acceptsMagazines !== false,
+    ...Array.isArray(weapon.acceptedMagazineIds) ? { acceptedMagazineIds: [...new Set(weapon.acceptedMagazineIds.filter((id) => typeof id === "string"))].slice(0, 200) } : {},
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
     capacity,
     loadedAmmoId: String(weapon.loadedAmmoId || ""),

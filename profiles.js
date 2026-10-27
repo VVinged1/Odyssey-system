@@ -43,6 +43,7 @@ export function instantiateTemplate(current, template, sanitize) {
   for (const a of data.odyssey.ammunition) a.id = ammoIds.get(a.id);
   for (const mag of data.odyssey.inventory.magazines) { mag.id = magIds.get(mag.id); mag.loadedAmmoId = ammoIds.get(mag.loadedAmmoId) || ''; }
   for (const w of data.odyssey.weapons.ranged) {
+    if(w.acceptedMagazineIds)w.acceptedMagazineIds=w.acceptedMagazineIds.map(id=>magIds.get(id)).filter(Boolean);
     w.id = newId(); w.ammoIds = w.ammoIds.map(id => ammoIds.get(id)).filter(Boolean);
     w.loadedAmmoId = ammoIds.get(w.loadedAmmoId) || ''; w.magazineId = magIds.get(w.magazineId) || '';
   }

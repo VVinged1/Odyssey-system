@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Odyssey GM Tools</title>
-    <link rel="stylesheet" href="./styles.css?v=1.2.0" />
+    <link rel="stylesheet" href="./styles.css?v=1.2.1" />
+    <link rel="stylesheet" href="../ui/combatLayout.css?v=1.6.1" />
   </head>
   <body class="odyssey-gm">
     <div id="app">
@@ -87,7 +88,7 @@
         <section class="panel">
           <details class="collapsible-block" open>
             <summary class="collapsible-title">Environment Attack</summary>
-            <div class="collapsible-body">
+            <div class="collapsible-body" data-combat-layout="environment">
               <div class="combat-form-grid">
                 <label class="field-stack">
                   <span class="field-label">Source Name</span>
@@ -144,6 +145,6 @@
 
     <button type="button" class="action-resize-handle" data-action-resize title="Resize window" aria-label="Resize window"></button>
 
-    <script type="module" src="./assets/main.js?v=1.2.0"></script>
+    <script type="module" src="./assets/main.js?v=1.2.1"></script>
   </body>
 </html>

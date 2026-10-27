@@ -13,3 +13,11 @@ All character state remains in token metadata. No Supabase connection or backend
 - Character rosters are in GM Tools. Action buttons use compact icons with accessible names and hover tooltips.
 
 Validation: npm test (ammunition suite and 16 integration checks); npm run test:ui (mock SDK browser scenarios including owner permissions, healing another player's target, stim removal, implant HP, skills, magazines, templates, HUD, compact buttons and narrow layout); npm run build. Live Owlbear multi-client behavior still requires a room test.
+
+## 1.6.1
+
+Passive bonus editors can add missing skills. Such skills exist while their granting item is active and use V1 level-based rolls. Attack, No Target Attack and GM Environment Attack now use the compact three-card layout. The duplicate inline HUD is removed; the floating HUD is available from the character header.
+
+Ranged weapons choose detachable magazines or a built-in magazine. Detachable weapons store compatible magazine IDs and take capacity/ammunition from the mounted magazine. Built-in weapons store compatible ammo, capacity and rounds directly; no physical magazine is synthesized. Legacy weapons retain their previous magazine state. Switching magazine type requires emptying or detaching loaded rounds first.
+
+Validation: 19 integration checks, ammunition suite and browser tests cover both magazine modes, missing-skill rolls, targeted/manual/environment attacks and layout.

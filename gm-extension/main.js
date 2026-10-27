@@ -1,3 +1,4 @@
+import {arrangeCombatPanels} from '../ui/combatLayout.js';
 import {installCompactButtons} from '../ui/compactButtons.js';
 import {absorbEquipmentCritical} from '../characterRules.js';
 import {esc} from '../ui/characterView.js';
@@ -931,6 +932,7 @@ async function refreshState(showStatus = false) {
 }
 
 function bindEvents() {
+  arrangeCombatPanels();
   try {const mode=localStorage.getItem('odyssey-gm-parry');if(['off','1','2','3','4','5'].includes(mode))ui.parryMode.value=mode;}catch{}
   ui.parryMode.addEventListener('change',()=>{try{localStorage.setItem('odyssey-gm-parry',ui.parryMode.value);}catch{}});
   document.getElementById('gmRosters').addEventListener('click',event=>{

@@ -14,6 +14,7 @@ const browser=await chromium.launch(process.env.PLAYWRIGHT_CHANNEL?{channel:proc
 try{
  const page=await browser.newPage({viewport:{width:1000,height:1100}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('[data-action="profile-roll-char"]').first().waitFor();
+ assert.equal(await page.locator('.od-hud').count(),0);assert.equal(await page.locator('[data-combat-layout="attack"] .od-combat-card').count(),3);assert.equal(await page.locator('[data-combat-layout="manual"] .od-combat-card').count(),3);
  console.log('UI mounted'); const data=()=>page.evaluate(()=>window.odysseyTest.data());
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
  assert.ok(await page.locator('[data-action="set-odyssey-attribute"]').count());
@@ -25,11 +26,11 @@ try{
  before=(await data()).history.length;
  await page.locator('[data-action="profile-roll-skill"][data-skill="Shoot"]').click();await page.waitForFunction(n=>window.odysseyTest.data().history.length===n+1,before);
  assert.equal((await data()).odyssey.skills.Shoot,9);
- await page.locator('[data-hud-attack-field="weaponName"]').selectOption('ranged:rifle');
- await page.locator('.od-hud [data-action="pick-attack-target"]').click();
+ await page.locator('[data-attack-field="weaponName"]').selectOption('ranged:rifle');
+ await page.locator('[data-combat-layout="attack"] [data-action="pick-attack-target"]').click();
  await page.evaluate(async()=>{await window.odysseyTest.state.targetMode.onToolClick({}, {target:window.odysseyTest.state.items.find(i=>i.id==='enemy')});});
  await page.waitForFunction(()=>window.odysseyTest.data().odyssey.attackDraft.targetTokenId==='enemy');
- await page.locator('.od-hud [data-action="perform-attack"]').click();
+ await page.locator('[data-combat-layout="attack"] [data-action="perform-attack"]').click();
  await page.waitForFunction(()=>window.odysseyTest.data().odyssey.weapons.ranged[0].loaded===3);
  assert.equal((await data()).odyssey.inventory.magazines[0].loaded,3);
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER','outsider'));await page.waitForFunction(()=>!document.querySelector('[data-action="profile-roll-char"]'));
@@ -114,14 +115,32 @@ try{
  await page.locator('[data-od-action="use-item"][data-id="'+med+'"]').click();await page.locator('dialog [name="target"]').selectOption('enemy');await page.locator('dialog [name="part"]').selectOption('Torso');await page.locator('dialog button[type="submit"]').click();await page.waitForFunction(()=>window.odysseyTest.data('enemy').body.Torso.current===3);
  assert.equal((await data()).odyssey.inventory.items.find(i=>i.id===med).quantity,0);assert.equal((await page.evaluate(()=>window.odysseyTest.data('enemy'))).body.Torso.armor,6);
  assert.ok(await page.locator('.od-icon-button[title] svg').count());const actionSize=await page.locator('#refreshBtn').boundingBox();assert.equal(actionSize.width,28);assert.equal(actionSize.height,28);
+
+ await page.evaluate(()=>window.odysseyTest.setRole('GM'));
+ const resource=await addTyped('Flight manual','resource',async()=>{await page.locator('dialog [name="newBonusSkillName"]').fill('Piloting');await page.locator('dialog [name="newBonusSkillValue"]').fill('3');await page.locator('[data-add-bonus-skill]').click();assert.equal(await page.locator('dialog [name="skill:Piloting"]').inputValue(),'3');});
+ await page.locator('[data-action="profile-roll-skill"][data-skill="Piloting"]').waitFor();assert.equal((await data()).odyssey.skills.Piloting,undefined);
+ await page.locator('[data-action="profile-roll-skill"][data-skill="Piloting"]').click();await page.waitForFunction(()=>window.odysseyTest.data().lastRoll.summary.includes('Piloting'));
+ const physical=(await data()).odyssey.inventory.magazines[0].id;
+ await addTyped('Modular carbine','weapon',async()=>{await page.locator('dialog [name="weaponKind"]').selectOption('ranged');assert.equal(await page.locator('dialog [name="acceptsMagazines"]').isChecked(),true);assert.equal(await page.locator('dialog [name="capacity"]').count(),0);assert.equal(await page.locator('dialog [name="ammoCompatible"]').count(),0);await page.locator('dialog [name="magazineCompatible"][value="'+physical+'"]').check();});
+ await addTyped('Internal carbine','weapon',async()=>{await page.locator('dialog [name="weaponKind"]').selectOption('ranged');await page.locator('dialog [name="acceptsMagazines"]').uncheck();assert.equal(await page.locator('dialog [name="magazineCompatible"]').count(),0);await page.locator('dialog [name="capacity"]').fill('5');await page.locator('dialog [name="ammoCompatible"][value="ball"]').check();});
+ await page.locator('[data-reload-kind="2"]').selectOption('ball');await page.locator('[data-od-action="reload-weapon"][data-index="2"]').click();await page.waitForFunction(()=>window.odysseyTest.data().odyssey.weapons.ranged[2].loaded===5);
+ assert.equal((await data()).odyssey.inventory.magazines.length,1);assert.equal(await page.locator('[data-weapon-mag="2"]').count(),0);assert.equal(await page.locator('[data-reload-kind="1"]').count(),0);
+ await page.locator('[data-weapon-mag="0"]').selectOption('');await page.locator('[data-od-action="mount-mag"][data-index="0"]').click();await page.waitForFunction(()=>!window.odysseyTest.data().odyssey.weapons.ranged[0].magazineId);
+ await page.locator('[data-weapon-mag="1"]').selectOption(physical);await page.locator('[data-od-action="mount-mag"][data-index="1"]').click();await page.waitForFunction(()=>window.odysseyTest.data().odyssey.weapons.ranged[1].magazineId===window.odysseyTest.data().odyssey.inventory.magazines[0].id);
+ await openSection('No Target Attack');await page.locator('[data-manual-attack-field="weaponName"]').selectOption((await data()).odyssey.weapons.ranged[2].id?('ranged:'+ (await data()).odyssey.weapons.ranged[2].id):'');await page.locator('[data-action="perform-manual-attack"]').click();await page.waitForFunction(()=>window.odysseyTest.data().odyssey.weapons.ranged[2].loaded===4);
+ console.log('Granted skill, detachable and internal magazines, manual attack passed');
  console.log('Typed items, cross-target healing, stims, implant HP, skills and compact icons passed');
  await page.goto(`http://127.0.0.1:${server.address().port}/gm-extension/index.html`);
- await page.locator('#gmContent').waitFor();
+ await page.locator('#gmContent').waitFor();assert.equal(await page.locator('[data-combat-layout="environment"] .od-combat-card').count(),3);
  assert.equal(await page.locator('#parryMode').inputValue(),'off');assert.ok((await page.locator('#gmRosters').textContent()).includes('Tracked Characters'));await page.locator('[data-roster-select="enemy"]').first().click();assert.deepEqual(await page.evaluate(()=>window.odysseyTest.state.selection),['enemy']);
  await page.locator('#publicDiceBtn').click();await page.locator('#privateLog .debug-entry').first().waitFor();
  assert.equal(await page.evaluate(()=>window.odysseyTest.state.room['com.codex.body-hp/debugLog']?.length||0),0);
  await page.locator('#publicDicePrivate').check();await page.locator('#publicDiceBtn').click();
  await page.waitForFunction(()=>window.odysseyTest.state.room['com.codex.body-hp/debugLog']?.length===1);
+ await page.locator('#pickTargetBtn').click();await page.evaluate(async()=>{await window.odysseyTest.state.targetMode.onToolClick({}, {target:window.odysseyTest.state.items.find(i=>i.id==='enemy')});});
+ await page.locator('#attackSkill').fill('10');await page.locator('#weaponDamage').fill('60');await page.evaluate(()=>Math.random=()=>.5);await page.locator('#environmentAttackBtn').click();await page.waitForFunction(()=>window.odysseyTest.data('enemy').body.Torso.current<3);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+ if(shots){await page.setViewportSize({width:1000,height:1100});await page.screenshot({path:path.join(shots,'odyssey-gm-attack.png'),fullPage:true});}
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));await page.locator('#gmOnlyNotice').waitFor();assert.equal(await page.locator('#gmContent').isVisible(),false);
  assert.deepEqual(errors,[]);console.log('Browser checks passed: GM/owner/outsider, click-to-roll, equipment, template/account payload, cancel, HUD and 480px layout.');
 }catch(error){console.error(error);console.error(await browser.contexts()[0]?.pages()[0]?.evaluate(()=>({dialogs:[...document.querySelectorAll('dialog')].map(d=>d.outerHTML),status:document.querySelector('#statusBox')?.textContent})));throw error;}finally{await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}

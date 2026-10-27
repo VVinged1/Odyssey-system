@@ -1,3 +1,4 @@
+import {arrangeCombatPanels} from './ui/combatLayout.js';
 import {installCompactButtons} from './ui/compactButtons.js';
 import {ARMOR_TRAINING,useItemOnTracker,absorbEquipmentCritical} from './characterRules.js';
 import { compactHud } from "./ui/compactHud.js";
@@ -394,6 +395,7 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
 }
 
 function captureSelectedPanelState() {
+  ui.selectedTokenPanel.querySelectorAll("details[data-section-key]").forEach(section=>collapsibleSectionState.set(section.dataset.sectionKey,section.open));
   const renderedTokenId = String(ui.selectedTokenPanel.dataset.tokenId ?? "").trim();
   if (!renderedTokenId || !ui.selectedTokenPanel.childElementCount) return null;
 
@@ -2232,6 +2234,7 @@ function legacyRenderSelectedToken() {
           } - ${tokenLocked ? "Read only" : "Controllable"}</div>
         </div>
         <div class="row row-gap">
+          <button type="button" data-action="open-character-hud" class="secondary">Floating HUD</button>
           <button type="button" data-action="focus-token" class="secondary">Select On Map</button>
           <button type="button" data-action="reload-token-visuals" class="secondary" ${tokenLocked ? "disabled" : ""}>Reload Token</button>
         </div>
@@ -2992,6 +2995,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "Attack",
     `
+      <div data-combat-layout="attack">
       <div class="combat-form-grid">
         <input type="hidden" value="${escapeHtml(draft.targetTokenId)}" data-attack-field="targetTokenId">
         <label class="field-stack">
@@ -3068,6 +3072,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
       <div class="combat-action">
         <button type="button" class="success" data-action="perform-attack" ${attackDisabledAttr}>Attack</button>
       </div>
+      </div>
     `,
     true,
   );
@@ -3088,6 +3093,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "No Target Attack",
     `
+      <div data-combat-layout="manual">
       <div class="combat-form-grid">
         <label class="field-stack">
           <span class="field-label">Attack Skill</span>
@@ -3131,6 +3137,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
       </details>
       <div class="combat-action">
         <button type="button" class="success" data-action="perform-manual-attack" ${disabledAttr}>No Target Attack</button>
+      </div>
       </div>
     `,
     false,
@@ -3285,7 +3292,7 @@ function renderSelectedToken() {
   ui.selectedTokenPanel.dataset.tokenId = token.id;
   ui.selectedTokenPanel.innerHTML = `
     <div class="selected-card">
-      ${canUseToken(token) ? renderTokenHud(token, data) : ""}
+      ${HUD_MODE && canUseToken(token) ? renderTokenHud(token, data) : ""}
       <div class="selected-head">
         <div>
           <div class="token-name">${escapeHtml(getCharacterName(token))}</div>
@@ -3294,6 +3301,7 @@ function renderSelectedToken() {
           } - ${tokenLocked ? "Read only" : "Controllable"}</div>
         </div>
         <div class="row row-gap">
+          <button type="button" data-action="open-character-hud" class="secondary">Floating HUD</button>
           <button type="button" data-action="focus-token" class="secondary">Select On Map</button>
           <button type="button" data-action="reload-token-visuals" class="secondary" ${tokenLocked ? "disabled" : ""}>Reload Token</button>
         </div>
@@ -3395,6 +3403,7 @@ function renderSelectedToken() {
     </div>`;
 
   if(characterTools?.isBusy())ui.selectedTokenPanel.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
+  arrangeCombatPanels(ui.selectedTokenPanel);
   restoreSelectedPanelState(panelState);
 }
 
@@ -4759,7 +4768,7 @@ function bindUiEvents() {
     (event) => {
       const target = event.target;
       if (!(target instanceof HTMLDetailsElement)) return;
-      if (!target.dataset.sectionKey) return;
+      if (!target.isConnected || !target.dataset.sectionKey) return;
       collapsibleSectionState.set(target.dataset.sectionKey, target.open);
     },
     true,

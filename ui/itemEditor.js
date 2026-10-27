@@ -1,20 +1,25 @@
 import { esc } from './characterView.js';
 import { ATTRIBUTES } from '../characterRules.js';
 export const ITEM_TYPES=[['consumable','Usable'],['resource','Resource'],['ammo','Ammunition'],['magazine','Magazine'],['weapon','Weapon'],['armor','Armor'],['shield','Shield'],['implant','Implant']];
-export function itemEditor({existing={},type='resource',skills=[],parts=[],ammunition=[]}) {
+export function itemEditor({existing={},type='resource',skills=[],parts=[],ammunition=[],magazines=[]}) {
   const dialog=document.createElement('dialog');dialog.className='od-dialog od-item-editor';
   const field=(name,label,value='',inputType='text',max=999)=>`<label>${esc(label)}<input name="${name}" type="${inputType}" value="${esc(value)}" ${inputType==='number'?`min="${['damage','accuracy','penetration'].includes(name)?-999:0}" max="${max}" step="1"`:'maxlength="120"'}></label>`;
   const select=(name,label,options,value)=>`<label>${esc(label)}<select name="${name}">${options.map(([k,l])=>`<option value="${esc(k)}" ${k===value?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
   const checkbox=(name,label,checked)=>`<label class="od-check"><input name="${name}" type="checkbox" ${checked?'checked':''}>${esc(label)}</label>`;
-  const values={...existing,kind:type};
+  const values={...existing,kind:type,acceptsMagazines:existing.acceptsMagazines!==false};
+  values.acceptedMagazineIds??=existing.id?magazines.filter(m=>m.id===existing.magazineId||(m.capacity===existing.capacity&&(!m.loaded||(existing.ammoIds||[]).includes(m.loadedAmmoId)))).map(m=>m.id):[];
+  const skillChoices=[...skills];
+  for(const key of Object.keys(existing.bonuses?.skills||{}))if(!skillChoices.some(([k])=>k===key))skillChoices.push([key,key]);
   dialog.innerHTML=`<form><h2>${existing.id?'Edit item':'New item'}</h2>${select('kind','Type',ITEM_TYPES,type)}${field('name','Name',existing.name||'')}${field('quantity','Quantity / ammo reserve',existing.quantity??1,'number',999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description||'')}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
   const form=dialog.querySelector('form'),host=dialog.querySelector('[data-type-fields]');
   function bonusEditor(bonuses={},allowSkills=true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${ATTRIBUTES.map(k=>field('attr:'+k,k,bonuses.attributes?.[k]||0,'number')).join('')}${allowSkills?skills.map(([k,label])=>field('skill:'+k,`${label} · skill level`,bonuses.skills?.[k]||0,'number')).join(''):''}</fieldset>`;
+    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${ATTRIBUTES.map(k=>field('attr:'+k,k,bonuses.attributes?.[k]||0,'number')).join('')}${allowSkills?skillChoices.map(([k,label])=>field('skill:'+k,`${label} · skill level`,bonuses.skills?.[k]||0,'number')).join('')+`<div class="od-new-bonus-skill">${field('newBonusSkillName','New skill name')}${field('newBonusSkillValue','Level bonus',1,'number',10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>`:''}</fieldset>`;
   }
   function abilityRow(a={}) {return `<div class="od-ability-row">${field('abilityName','Ability',a.name||'')}${field('abilityLevel','Level',a.level||0,'number',10)}${field('abilityDescription','Description',a.description||'')}<button type="button" data-remove-ability aria-label="Remove ability">×</button></div>`;}
   function collect() {
     const data=Object.fromEntries(new FormData(form));Object.assign(values,data);
+    if(form.elements.acceptsMagazines)values.acceptsMagazines=form.elements.acceptsMagazines.checked;
+    if(form.querySelector('[name="magazineCompatible"]'))values.acceptedMagazineIds=[...form.querySelectorAll('[name="magazineCompatible"]:checked')].map(e=>e.value);
     values.playerRemovable=!!form.elements.playerRemovable?.checked;
     const bonuses={attributes:{},skills:{}};
     for(const input of form.querySelectorAll('[name^="attr:"],[name^="skill:"]')) {
@@ -38,7 +43,11 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     if(kind==='magazine')html+=field('capacity','Capacity',values.capacity??6,'number')+field('loaded','Rounds · GM correction',values.loaded??0,'number')+select('loadedAmmoId','Ammunition', [['','Empty'],...ammunition.map(a=>[a.id,a.name])],values.loadedAmmoId||'');
     if(kind==='weapon') {
       html+=select('weaponKind','Weapon type',[['melee','Melee'],['ranged','Ranged']],values.weaponKind||'melee')+field('accuracy','Accuracy',values.accuracy??0,'number');
-      if(values.weaponKind==='ranged')html+=field('capacity','Magazine capacity',values.capacity??6,'number')+`<fieldset><legend>Compatible ammunition</legend>${ammunition.map(a=>`<label class="od-check"><input type="checkbox" name="ammoCompatible" value="${esc(a.id)}" ${(values.ammoIds||[]).includes(a.id)?'checked':''}>${esc(a.name)}</label>`).join('')}</fieldset>`;
+      if(values.weaponKind==='ranged') {
+        html+=checkbox('acceptsMagazines','Accepts detachable magazines',values.acceptsMagazines);
+        if(values.acceptsMagazines)html+='<fieldset><legend>Compatible magazines</legend>'+magazines.map(m=>checkbox('magazineCompatible',m.name+' · '+m.capacity+' rounds',values.acceptedMagazineIds.includes(m.id)).replace('name="magazineCompatible"','name="magazineCompatible" value="'+esc(m.id)+'"')).join('')+(magazines.length?'':'<p class="cp-muted">Create a magazine in Items first.</p>')+'</fieldset>';
+        else html+=field('capacity','Built-in magazine capacity',values.capacity||6,'number')+field('loaded','Loaded rounds · GM correction',values.loaded||0,'number')+select('loadedAmmoId','Loaded ammunition',[['','Empty'],...ammunition.map(a=>[a.id,a.name])],values.loadedAmmoId||'')+'<fieldset><legend>Compatible ammunition</legend>'+ammunition.map(a=>checkbox('ammoCompatible',a.name,(values.ammoIds||[]).includes(a.id)).replace('name="ammoCompatible"','name="ammoCompatible" value="'+esc(a.id)+'"')).join('')+'</fieldset>';
+      }
       else html+=field('damage','Damage',values.damage??0,'number');
     }
     if(['armor','shield','implant'].includes(kind)) {
@@ -51,8 +60,13 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     for(const input of host.querySelectorAll('[name^="attr:"],[name^="skill:"]'))input.min='-999';
     form.elements.quantity.closest('label').hidden=['magazine','weapon'].includes(kind);
   }
-  form.addEventListener('change',e=>{if(['kind','subtype','weaponKind'].includes(e.target.name)){collect();render();}});
-  form.addEventListener('click',e=>{if(e.target.closest('[data-add-ability]')){host.querySelector('[data-abilities]').insertAdjacentHTML('beforeend',abilityRow());}e.target.closest('[data-remove-ability]')?.closest('.od-ability-row').remove();});
+  form.addEventListener('change',e=>{if(['kind','subtype','weaponKind','acceptsMagazines'].includes(e.target.name)){collect();render();}});
+  form.addEventListener('click',e=>{if(e.target.closest('[data-add-bonus-skill]')) {
+    const input=form.elements.newBonusSkillName,name=input.value.trim(),bonus=Number(form.elements.newBonusSkillValue.value)||0;
+    if(!name||name.length>40||['__proto__','constructor','prototype'].includes(name)){input.setCustomValidity('Enter a skill name (1–40 characters).');input.reportValidity();input.oninput=()=>input.setCustomValidity('');return;}
+    collect();let choice=skillChoices.find(([key,label])=>key.toLowerCase()===name.toLowerCase()||label.toLowerCase()===name.toLowerCase());
+    if(!choice){choice=[name,name];skillChoices.push(choice);}values.bonuses.skills[choice[0]]=bonus;render();return;
+  }if(e.target.closest('[data-add-ability]')){host.querySelector('[data-abilities]').insertAdjacentHTML('beforeend',abilityRow());}e.target.closest('[data-remove-ability]')?.closest('.od-ability-row').remove();});
   document.body.append(dialog);render();
   return new Promise(resolve=>{
     const finish=v=>{dialog.close();dialog.remove();resolve(v);};

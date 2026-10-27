@@ -31,6 +31,7 @@ export function normalizeInventory(raw, weapons = []) {
   }));
   const assigned = new Set();
   for (const [i, weapon] of weapons.entries()) {
+    if(weapon.acceptsMagazines===false){weapon.magazineId='';continue;}
     const requested = text(weapon.magazineId);
     // A legacy weapon's magazine gets a stable ID; reading does not spend ammo.
     let id = requested || ((!Object.hasOwn(weapon, 'magazineId') || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : '');
@@ -52,13 +53,17 @@ export function magazineWeapon(odyssey, id) {
 export function swapMagazine(odyssey, weaponIndex, magazineId) {
   const weapon = odyssey.weapons.ranged[weaponIndex];
   if (!weapon) throw new Error('Weapon no longer exists.');
+  if(weapon.acceptsMagazines===false)throw new Error('This weapon has a built-in magazine.');
   const current = odyssey.inventory.magazines.find(m => m.id === weapon.magazineId);
   if (current) Object.assign(current, {capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId});
   const next = magazineId ? odyssey.inventory.magazines.find(m => m.id === magazineId) : null;
   if (magazineId && !next) throw new Error('Magazine no longer exists.');
   if (next && magazineWeapon(odyssey, next.id) && weapon.magazineId !== next.id) throw new Error('Magazine is already mounted.');
-  if (next && next.capacity !== weapon.capacity) throw new Error('Magazine capacity must match this weapon.');
-  if (next?.loaded && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error('Magazine ammunition is incompatible.');
+  const selectedMagazines=Array.isArray(weapon.acceptedMagazineIds);
+  if(next&&selectedMagazines&&!weapon.acceptedMagazineIds.includes(next.id))throw new Error('This magazine is incompatible with the weapon.');
+  if (next && !selectedMagazines && next.capacity !== weapon.capacity) throw new Error('Magazine capacity must match this weapon.');
+  if (next?.loaded && !selectedMagazines && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error('Magazine ammunition is incompatible.');
+  if(selectedMagazines){weapon.capacity=next?.capacity||0;weapon.ammoIds=next?.loadedAmmoId?[next.loadedAmmoId]:[];}
   weapon.magazineId = next?.id || '';
   weapon.loaded = next?.loaded || 0;
   weapon.loadedAmmoId = next?.loadedAmmoId || '';
@@ -85,12 +90,13 @@ export function setMagazineRounds(odyssey, id, rounds, ammoId) {
   const ammo = odyssey.ammunition.find(a => a.id === selectedAmmoId);
   const weapon = magazineWeapon(odyssey, id);
   if ((rounds > 0 || selectedAmmoId) && !ammo) throw new Error('Choose a valid ammunition type.');
-  if (weapon && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
+  if (weapon && !Array.isArray(weapon.acceptedMagazineIds) && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
     throw new Error('This ammunition is incompatible with the mounted weapon.');
   }
   mag.loaded = rounds;
   mag.loadedAmmoId = selectedAmmoId;
   if (weapon) {
+    if(Array.isArray(weapon.acceptedMagazineIds))weapon.ammoIds=selectedAmmoId?[selectedAmmoId]:[];
     weapon.loaded = rounds;
     weapon.loadedAmmoId = selectedAmmoId;
   }
@@ -132,7 +138,7 @@ export function consumeItem(tracker, id) {
   item.quantity -= 1; // No new automatic healing or combat rules.
 }
 export function inventoryAmmoTotal(odyssey) {
-  return odyssey.ammunition.reduce((n,a) => n + a.quantity, 0) + odyssey.inventory.magazines.reduce((n,m) => n + m.loaded, 0);
+  return odyssey.weapons.ranged.filter(w=>w.acceptsMagazines===false).reduce((sum,w)=>sum+w.loaded,0)+odyssey.ammunition.reduce((n,a) => n + a.quantity, 0) + odyssey.inventory.magazines.reduce((n,m) => n + m.loaded, 0);
 }
 
 // Typed editor saves through existing V1 weapon/ammo collections; no duplicate inventory.
@@ -146,15 +152,15 @@ export function findInventoryEntry(tracker,type,id) {
 export function deleteInventoryEntry(tracker,type,id) {
   const o=tracker.odyssey;
   if(type==='ammo') {
-    if(o.inventory.magazines.some(m=>m.loadedAmmoId===id&&m.loaded))throw new Error('Empty all magazines using this ammo first.');
+    if(o.inventory.magazines.some(m=>m.loadedAmmoId===id&&m.loaded)||o.weapons.ranged.some(w=>w.acceptsMagazines===false&&w.loadedAmmoId===id&&w.loaded))throw new Error('Empty all magazines using this ammo first.');
     o.ammunition=o.ammunition.filter(a=>a.id!==id);for(const w of o.weapons.ranged)w.ammoIds=w.ammoIds.filter(a=>a!==id);return;
   }
   if(type==='magazine') {
-    const index=o.weapons.ranged.findIndex(w=>w.magazineId===id);if(index>=0)swapMagazine(o,index,'');emptyMagazine(o,id);o.inventory.magazines=o.inventory.magazines.filter(m=>m.id!==id);return;
+    const index=o.weapons.ranged.findIndex(w=>w.magazineId===id);if(index>=0)swapMagazine(o,index,'');emptyMagazine(o,id);o.inventory.magazines=o.inventory.magazines.filter(m=>m.id!==id);for(const w of o.weapons.ranged)if(w.acceptedMagazineIds)w.acceptedMagazineIds=w.acceptedMagazineIds.filter(m=>m!==id);return;
   }
   if(type?.startsWith('weapon-')) {
     const kind=type.slice(7),index=o.weapons[kind].findIndex((w,j)=>(w.id||String(j))===id);
-    if(index<0)throw new Error('Weapon no longer exists.');if(kind==='ranged'&&o.weapons.ranged[index].magazineId)swapMagazine(o,index,'');o.weapons[kind].splice(index,1);return;
+    if(index<0)throw new Error('Weapon no longer exists.');if(kind==='ranged'){const w=o.weapons.ranged[index];if(w.acceptsMagazines===false&&w.loaded){const a=o.ammunition.find(a=>a.id===w.loadedAmmoId);if(!a||a.quantity+w.loaded>999999)throw new Error('Cannot return loaded ammunition to reserve.');a.quantity+=w.loaded;}else if(w.magazineId)swapMagazine(o,index,'');}o.weapons[kind].splice(index,1);return;
   }
   const item=o.inventory.items.find(i=>i.id===id);if(!item)throw new Error('Item no longer exists.');if(item.equippedPart)unequipItem(tracker,id,true);o.inventory.items=o.inventory.items.filter(i=>i.id!==id);
 }
@@ -180,9 +186,19 @@ export function saveInventoryEntry(tracker,origin,values,id) {
     if([...o.weapons.melee,...o.weapons.ranged].some(w=>w!==same&&w.name===values.name))throw new Error('A weapon with this name already exists.');
     const row={id,name:values.name,accuracy:Number(values.accuracy)||0,damage:Number(values.damage)||0};
     if(weaponKind==='ranged') {
-      const capacity=Number(values.capacity)||0,ammoIds=values.ammoIds||[];
-      if(same&&(capacity<same.loaded||same.loaded&&!ammoIds.includes(same.loadedAmmoId)))throw new Error('Unload the weapon before changing loaded ammunition compatibility or capacity.');
-      Object.assign(row,{capacity,ammoIds,loaded:same?.loaded||0,loadedAmmoId:same?.loadedAmmoId||'',...(same?{magazineId:same.magazineId}: {})});
+      const acceptsMagazines=values.acceptsMagazines!==false;
+      if(same&&(same.acceptsMagazines!==false)!==acceptsMagazines&&same.loaded>0)throw new Error('Empty or detach the current magazine before changing magazine type.');
+      if(acceptsMagazines) {
+        const acceptedMagazineIds=[...new Set(values.acceptedMagazineIds||[])];
+        if(acceptedMagazineIds.some(id=>!o.inventory.magazines.some(m=>m.id===id)))throw new Error('Selected magazine no longer exists.');
+        if(same?.magazineId&&!acceptedMagazineIds.includes(same.magazineId))throw new Error('Detach the current magazine before removing its compatibility.');
+        Object.assign(row,{acceptsMagazines:true,acceptedMagazineIds,capacity:same?.magazineId?same.capacity:0,ammoIds:same?.magazineId?(same.ammoIds||[]):[],loaded:same?.loaded||0,loadedAmmoId:same?.loadedAmmoId||'',magazineId:same?.magazineId||''});
+      } else {
+        const capacity=Number(values.capacity),ammoIds=values.ammoIds||[],loaded=Number(values.loaded??same?.loaded??0),loadedAmmoId=String(values.loadedAmmoId??same?.loadedAmmoId??'');
+        if(!Number.isInteger(capacity)||capacity<1||capacity>999||!Number.isInteger(loaded)||loaded<0||loaded>capacity)throw new Error('Invalid built-in magazine capacity or rounds.');
+        if(loaded&&(!ammoIds.includes(loadedAmmoId)||!o.ammunition.some(a=>a.id===loadedAmmoId)))throw new Error('Choose compatible ammunition for loaded rounds.');
+        Object.assign(row,{acceptsMagazines:false,acceptedMagazineIds:[],capacity,ammoIds,loaded,loadedAmmoId:loaded?loadedAmmoId:'',magazineId:''});
+      }
     }
     if(same)Object.assign(same,row);else{if(o.weapons[weaponKind].length>=20)throw new Error('Weapon limit is 20 per type.');o.weapons[weaponKind].push(row);}return;
   }

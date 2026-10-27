@@ -47,7 +47,7 @@ export function installCharacterTools(host) {
       const existing=action==='edit-entry'?findInventoryEntry(t,type,id):null;
       if(action==='edit-entry'&&!existing)throw new Error('Item no longer exists.');
       const kind=type.startsWith('weapon-')?'weapon':type==='item'?(['item','tool'].includes(existing?.kind)?'resource':existing?.kind==='medical'?'consumable':existing?.kind||'resource'):type;
-      const values=await itemEditor({existing:{...existing,...(type.startsWith('weapon-')?{weaponKind:type.slice(7)}:{})},type:kind,skills:Object.entries(o.skills).map(([k])=>[k,o.skillLabels[k]||k]),parts:Object.entries(t.body).map(([k,p])=>[k,p.label||k]),ammunition:o.ammunition});if(!values)return;
+      const values=await itemEditor({existing:{...existing,...(type.startsWith('weapon-')?{weaponKind:type.slice(7)}:{})},type:kind,skills:Object.entries(o.skills).map(([k])=>[k,o.skillLabels[k]||k]),parts:Object.entries(t.body).map(([k,p])=>[k,p.label||k]),ammunition:o.ammunition,magazines:o.inventory.magazines});if(!values)return;
       await mutate(tokenId,t=>saveInventoryEntry(t,existing?{type,id}:null,values,existing?.id||newId()),true);
     } else if(action==='delete-entry') {
       check(tokenId,true);if(!await formDialog('Remove item?',[],{danger:true,message:'Remove this item from this token?'}))return;
@@ -95,7 +95,7 @@ export function installCharacterTools(host) {
       const mag=o.inventory.magazines.find(m=>m.id===id);
       if(!mag)throw new Error('Magazine no longer exists.');
       const weapon=o.weapons.ranged.find(w=>w.magazineId===id);
-      const ammo=o.ammunition.filter(a=>!weapon||weapon.ammoIds.includes(a.id));
+      const ammo=o.ammunition.filter(a=>!weapon||Array.isArray(weapon.acceptedMagazineIds)||weapon.ammoIds.includes(a.id));
       const value=await formDialog('GM · Set magazine rounds',[
         {name:'rounds',label: 'Rounds (0–'+mag.capacity+')',type:'number',min:0,max:mag.capacity,value:mag.loaded,required:true},
         {name:'ammoId',label:'Ammunition type',value:mag.loadedAmmoId,options:[['','Empty / no ammunition'],...ammo.map(a=>[a.id,a.name])]},

@@ -19,6 +19,8 @@ export function sanitizeAmmunition(raw) {
 export function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    acceptsMagazines: weapon.acceptsMagazines !== false,
+    ...(Array.isArray(weapon.acceptedMagazineIds)?{acceptedMagazineIds:[...new Set(weapon.acceptedMagazineIds.filter(id=>typeof id==="string"))].slice(0,200)}:{}),
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
     capacity,
     loadedAmmoId: String(weapon.loadedAmmoId || ""),

@@ -146,4 +146,29 @@ test('Type conversion restores body stats; loaded ammo cannot disappear',()=>{
  assert.throws(()=>deleteInventoryEntry(t,'ammo','ball'),/Empty all magazines/);
 });
 
+
+
+test('Passive item can grant a missing skill without changing the base character',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'resource',name:'Pilot manual',quantity:1,bonuses:{skills:{Piloting:3}}},'pilot');t=sanitize(t);
+ assert.equal(t.odyssey.skills.Piloting,undefined);assert.equal(effectiveOdyssey(t.odyssey).skills.Piloting,3);
+ t.odyssey.inventory.items[0].quantity=0;assert.equal(effectiveOdyssey(t.odyssey).skills.Piloting,undefined);
+});
+test('Built-in magazines preserve rounds without creating a physical inventory magazine',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'weapon',weaponKind:'ranged',name:'Internal rifle',acceptsMagazines:false,capacity:8,ammoIds:['ball'],loaded:2,loadedAmmoId:'ball'},'internal');t=sanitize(t);
+ let o=t.odyssey,index=o.weapons.ranged.findIndex(w=>w.id==='internal');assert.equal(o.inventory.magazines.length,1);assert.equal(o.weapons.ranged[index].loaded,2);const total=inventoryAmmoTotal(o);
+ reloadMagazine(o,index,'ball');t=sanitize(t);o=t.odyssey;assert.equal(inventoryAmmoTotal(o),total);assert.equal(o.weapons.ranged[index].loaded,8);assert.equal(o.inventory.magazines.length,1);
+ consumeAmmo(o,index,getAmmoShot(o,index,'ball',2));t=sanitize(t);o=t.odyssey;assert.equal(o.weapons.ranged[index].loaded,6);assert.equal(inventoryAmmoTotal(o),total-2);
+ assert.throws(()=>swapMagazine(o,index,o.inventory.magazines[0].id),/built-in/);deleteInventoryEntry(t,'weapon-ranged','internal');assert.equal(inventoryAmmoTotal(t.odyssey),total-2);
+});
+test('Detachable weapons accept chosen magazines with their own capacity and ammo',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'magazine',name:'Large AP',capacity:12,loaded:7,loadedAmmoId:'ap'},'large');
+ saveInventoryEntry(t,null,{kind:'weapon',weaponKind:'ranged',name:'Modular',acceptsMagazines:true,acceptedMagazineIds:['large']},'modular');t=sanitize(t);
+ const o=t.odyssey,index=o.weapons.ranged.findIndex(w=>w.id==='modular'),total=inventoryAmmoTotal(o);
+ assert.throws(()=>swapMagazine(o,index,o.inventory.magazines[0].id),/already mounted|incompatible/);
+ swapMagazine(o,index,'large');assert.equal(o.weapons.ranged[index].capacity,12);assert.equal(getAmmoShot(o,index,'ap',3).damage,24);consumeAmmo(o,index,getAmmoShot(o,index,'ap',3));t=sanitize(t);
+ assert.equal(inventoryAmmoTotal(t.odyssey),total-3);assert.equal(t.odyssey.inventory.magazines.find(m=>m.id==='large').loaded,4);
+ assert.throws(()=>saveInventoryEntry(t,{type:'weapon-ranged',id:'modular'},{kind:'weapon',weaponKind:'ranged',name:'Modular',acceptsMagazines:false,capacity:12,loaded:0,ammoIds:['ap']},'modular'),/Empty or detach/);
+ swapMagazine(t.odyssey,index,'');assert.equal(t.odyssey.weapons.ranged[index].capacity,0);assert.equal(t.odyssey.inventory.magazines.find(m=>m.id==='large').loaded,4);
+});
+
 console.log(`${count} integration checks passed.`);

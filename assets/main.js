@@ -393,6 +393,39 @@ var require_events = __commonJS({
   }
 });
 
+// ui/combatLayout.js
+function arrangeCombatPanels(root = document) {
+  for (const panel of root.querySelectorAll("[data-combat-layout]:not([data-combat-arranged])")) {
+    panel.dataset.combatArranged = "true";
+    const kind = panel.dataset.combatLayout;
+    const grid = document.createElement("div");
+    grid.className = "od-combat-grid";
+    const cards = ["Weapon & skill", kind === "manual" ? "Manual defense" : "Target", "Action"].map((title) => {
+      const card = document.createElement("section");
+      card.className = "od-combat-card";
+      const heading = document.createElement("div");
+      heading.className = "od-combat-title";
+      heading.textContent = title;
+      card.append(heading);
+      grid.append(card);
+      return card;
+    });
+    for (const field of [...panel.querySelectorAll("label.field-stack")]) {
+      const control = field.querySelector("[data-attack-field],[data-manual-attack-field],input,select,button,[id],.combat-value");
+      const key = control?.dataset.attackField || control?.dataset.manualAttackField || control?.id || control?.dataset.action || "";
+      const isWeapon = ["skill", "weaponName", "weaponDamage", "ammoId", "rounds", "attackSourceName", "attackSkill", "weaponAccuracy"].includes(key) || field.querySelector("[data-weapon-accuracy-display]");
+      const isTarget = ["targetPart", "targetName", "targetTokenId", "pick-attack-target", "pickTargetBtn", "clearTargetBtn", "manualArmor", "manualParry"].includes(key) || field.querySelector(".combat-value:not([data-weapon-accuracy-display])");
+      cards[isWeapon ? 0 : isTarget ? 1 : 2].append(field);
+    }
+    for (const hidden of [...panel.querySelectorAll('input[type="hidden"]')]) cards[1].append(hidden);
+    for (const note of [...panel.querySelectorAll(".combat-notes,:scope > .muted")]) cards[2].append(note);
+    for (const action of [...panel.querySelectorAll(".combat-action,:scope > .row")]) cards[2].append(action);
+    for (const obsolete of [...panel.querySelectorAll(":scope > .combat-form-grid,:scope > .combat-modifiers")]) obsolete.remove();
+    panel.append(grid);
+    panel.classList.add("od-combat-panel");
+  }
+}
+
 // ui/compactButtons.js
 var paths = {
   plus: "M12 5v14M5 12h14",
@@ -496,6 +529,15 @@ function effectiveOdyssey(base) {
     }
   }
   rows2.push(...base.effects || []);
+  for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
+    o.skills[key] = 0;
+    o.baseSkills[key] = 0;
+    o.skillLabels[key] = key;
+    o.skillCategories[key] = "applied";
+    o.skillStrengthBonuses[key] = false;
+    o.skillPerks[key] = [];
+    o.grantedSkills[key] = row.name;
+  }
   const skillMods = {};
   for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) skillMods[k] = (skillMods[k] || 0) + v;
   for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
@@ -618,7 +660,16 @@ function inventoryView(tracker, gm) {
     const w = o.weapons.ranged.find((w2) => w2.magazineId === m.id), a = o.ammunition.find((a2) => a2.id === m.loadedAmmoId);
     return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">Magazine ${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name || "Empty")}${w ? " \xB7 " + esc(w.name) : ""}</span>${gm ? `<button type="button" class="secondary" data-od-action="set-mag-rounds" data-id="${esc(m.id)}">GM \xB7 Set rounds\u2026</button>` : ""}${edit("magazine", m.id)}</div>${gm && !w ? `<div class="cp-row"><select aria-label="Magazine ammunition" data-mag-ammo="${esc(m.id)}">${o.ammunition.map((a2) => `<option value="${esc(a2.id)}">${esc(a2.name)} (${a2.quantity})</option>`).join("")}</select><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button></div>` : ""}</article>`;
   }).join("");
-  const weapons = ["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((w, index) => `<article class="cp-card"><div class="cp-row"><b>${esc(w.name)}</b><span class="cp-pill">${kind}</span><span class="cp-muted">ACC ${w.accuracy}${kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + w.loaded + "/" + w.capacity}</span>${edit("weapon-" + kind, w.id || String(index))}</div>${gm && kind === "ranged" ? `<div class="cp-row"><label>Magazine<select data-weapon-mag="${index}"><option value="">Detached</option>${inv.magazines.filter((m) => m.id === w.magazineId || !o.weapons.ranged.some((x) => x.magazineId === m.id) && m.capacity === w.capacity && (!m.loaded || w.ammoIds.includes(m.loadedAmmoId))).map((m) => `<option value="${esc(m.id)}" ${m.id === w.magazineId ? "selected" : ""}>${esc(m.name)} \xB7 ${m.loaded}/${m.capacity}</option>`).join("")}</select></label><button type="button" data-od-action="mount-mag" data-index="${index}">Apply</button><label>Ammo<select data-reload-kind="${index}">${o.ammunition.filter((a) => w.ammoIds.includes(a.id)).map((a) => `<option value="${esc(a.id)}" ${a.id === w.loadedAmmoId ? "selected" : ""}>${esc(a.name)} (${a.quantity})</option>`).join("")}</select></label><button type="button" data-od-action="reload-weapon" data-index="${index}">Reload</button></div>` : ""}</article>`));
+  const weapons = ["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((w, index) => {
+    let controls = "";
+    if (gm && kind === "ranged") {
+      if (w.acceptsMagazines !== false) {
+        const compatible = inv.magazines.filter((m) => m.id === w.magazineId || !o.weapons.ranged.some((x) => x.magazineId === m.id) && (Array.isArray(w.acceptedMagazineIds) ? w.acceptedMagazineIds.includes(m.id) : m.capacity === w.capacity && (!m.loaded || w.ammoIds.includes(m.loadedAmmoId))));
+        controls = '<div class="cp-row"><label>Magazine<select data-weapon-mag="' + index + '"><option value="">Detached</option>' + compatible.map((m) => '<option value="' + esc(m.id) + '" ' + (m.id === w.magazineId ? "selected" : "") + ">" + esc(m.name) + " \xB7 " + m.loaded + "/" + m.capacity + "</option>").join("") + '</select></label><button type="button" data-od-action="mount-mag" data-index="' + index + '">Apply magazine</button></div>';
+      } else controls = '<div class="cp-row"><label>Ammo<select data-reload-kind="' + index + '">' + o.ammunition.filter((a) => w.ammoIds.includes(a.id)).map((a) => '<option value="' + esc(a.id) + '" ' + (a.id === w.loadedAmmoId ? "selected" : "") + ">" + esc(a.name) + " (" + a.quantity + ")</option>").join("") + '</select></label><button type="button" data-od-action="reload-weapon" data-index="' + index + '">Reload built-in magazine</button></div>';
+    }
+    return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + kind + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
+  }));
   const group = (label, html) => html ? `<div class="cp-section-title">${label}</div><div class="cp-list">${html}</div>` : "";
   return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button></div>' : ""}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
 }
@@ -633,17 +684,20 @@ function compactHud({ token, tracker, floating, target, targetData, skills, weap
 
 // ui/itemEditor.js
 var ITEM_TYPES = [["consumable", "Usable"], ["resource", "Resource"], ["ammo", "Ammunition"], ["magazine", "Magazine"], ["weapon", "Weapon"], ["armor", "Armor"], ["shield", "Shield"], ["implant", "Implant"]];
-function itemEditor({ existing = {}, type = "resource", skills = [], parts = [], ammunition = [] }) {
+function itemEditor({ existing = {}, type = "resource", skills = [], parts = [], ammunition = [], magazines = [] }) {
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog od-item-editor";
   const field = (name, label, value = "", inputType = "text", max = 999) => `<label>${esc(label)}<input name="${name}" type="${inputType}" value="${esc(value)}" ${inputType === "number" ? `min="${["damage", "accuracy", "penetration"].includes(name) ? -999 : 0}" max="${max}" step="1"` : 'maxlength="120"'}></label>`;
   const select = (name, label, options, value) => `<label>${esc(label)}<select name="${name}">${options.map(([k, l]) => `<option value="${esc(k)}" ${k === value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
   const checkbox = (name, label, checked) => `<label class="od-check"><input name="${name}" type="checkbox" ${checked ? "checked" : ""}>${esc(label)}</label>`;
-  const values = { ...existing, kind: type };
+  const values = { ...existing, kind: type, acceptsMagazines: existing.acceptsMagazines !== false };
+  values.acceptedMagazineIds ?? (values.acceptedMagazineIds = existing.id ? magazines.filter((m) => m.id === existing.magazineId || m.capacity === existing.capacity && (!m.loaded || (existing.ammoIds || []).includes(m.loadedAmmoId))).map((m) => m.id) : []);
+  const skillChoices = [...skills];
+  for (const key of Object.keys(existing.bonuses?.skills || {})) if (!skillChoices.some(([k]) => k === key)) skillChoices.push([key, key]);
   dialog.innerHTML = `<form><h2>${existing.id ? "Edit item" : "New item"}</h2>${select("kind", "Type", ITEM_TYPES, type)}${field("name", "Name", existing.name || "")}${field("quantity", "Quantity / ammo reserve", existing.quantity ?? 1, "number", 999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description || "")}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
   const form = dialog.querySelector("form"), host = dialog.querySelector("[data-type-fields]");
   function bonusEditor(bonuses = {}, allowSkills = true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skills.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") : ""}</fieldset>`;
+    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
   }
   function abilityRow(a = {}) {
     return `<div class="od-ability-row">${field("abilityName", "Ability", a.name || "")}${field("abilityLevel", "Level", a.level || 0, "number", 10)}${field("abilityDescription", "Description", a.description || "")}<button type="button" data-remove-ability aria-label="Remove ability">\xD7</button></div>`;
@@ -651,6 +705,8 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   function collect() {
     const data = Object.fromEntries(new FormData(form));
     Object.assign(values, data);
+    if (form.elements.acceptsMagazines) values.acceptsMagazines = form.elements.acceptsMagazines.checked;
+    if (form.querySelector('[name="magazineCompatible"]')) values.acceptedMagazineIds = [...form.querySelectorAll('[name="magazineCompatible"]:checked')].map((e) => e.value);
     values.playerRemovable = !!form.elements.playerRemovable?.checked;
     const bonuses = { attributes: {}, skills: {} };
     for (const input of form.querySelectorAll('[name^="attr:"],[name^="skill:"]')) {
@@ -677,8 +733,11 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     if (kind === "magazine") html += field("capacity", "Capacity", values.capacity ?? 6, "number") + field("loaded", "Rounds \xB7 GM correction", values.loaded ?? 0, "number") + select("loadedAmmoId", "Ammunition", [["", "Empty"], ...ammunition.map((a) => [a.id, a.name])], values.loadedAmmoId || "");
     if (kind === "weapon") {
       html += select("weaponKind", "Weapon type", [["melee", "Melee"], ["ranged", "Ranged"]], values.weaponKind || "melee") + field("accuracy", "Accuracy", values.accuracy ?? 0, "number");
-      if (values.weaponKind === "ranged") html += field("capacity", "Magazine capacity", values.capacity ?? 6, "number") + `<fieldset><legend>Compatible ammunition</legend>${ammunition.map((a) => `<label class="od-check"><input type="checkbox" name="ammoCompatible" value="${esc(a.id)}" ${(values.ammoIds || []).includes(a.id) ? "checked" : ""}>${esc(a.name)}</label>`).join("")}</fieldset>`;
-      else html += field("damage", "Damage", values.damage ?? 0, "number");
+      if (values.weaponKind === "ranged") {
+        html += checkbox("acceptsMagazines", "Accepts detachable magazines", values.acceptsMagazines);
+        if (values.acceptsMagazines) html += "<fieldset><legend>Compatible magazines</legend>" + magazines.map((m) => checkbox("magazineCompatible", m.name + " \xB7 " + m.capacity + " rounds", values.acceptedMagazineIds.includes(m.id)).replace('name="magazineCompatible"', 'name="magazineCompatible" value="' + esc(m.id) + '"')).join("") + (magazines.length ? "" : '<p class="cp-muted">Create a magazine in Items first.</p>') + "</fieldset>";
+        else html += field("capacity", "Built-in magazine capacity", values.capacity || 6, "number") + field("loaded", "Loaded rounds \xB7 GM correction", values.loaded || 0, "number") + select("loadedAmmoId", "Loaded ammunition", [["", "Empty"], ...ammunition.map((a) => [a.id, a.name])], values.loadedAmmoId || "") + "<fieldset><legend>Compatible ammunition</legend>" + ammunition.map((a) => checkbox("ammoCompatible", a.name, (values.ammoIds || []).includes(a.id)).replace('name="ammoCompatible"', 'name="ammoCompatible" value="' + esc(a.id) + '"')).join("") + "</fieldset>";
+      } else html += field("damage", "Damage", values.damage ?? 0, "number");
     }
     if (["armor", "shield", "implant"].includes(kind)) {
       html += field("armor", "Armor", values.armor ?? 0, "number") + field("criticalMax", kind === "implant" ? "Body part HP bonus" : "Critical durability", values.criticalMax ?? 1, "number") + (kind === "implant" ? "" : field("criticalDamage", "Critical damage taken", values.criticalDamage ?? 0, "number")) + select("slot", "Equipment slot", [["any", "Any part"], ...parts], values.slot || "any");
@@ -690,12 +749,30 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     form.elements.quantity.closest("label").hidden = ["magazine", "weapon"].includes(kind);
   }
   form.addEventListener("change", (e) => {
-    if (["kind", "subtype", "weaponKind"].includes(e.target.name)) {
+    if (["kind", "subtype", "weaponKind", "acceptsMagazines"].includes(e.target.name)) {
       collect();
       render2();
     }
   });
   form.addEventListener("click", (e) => {
+    if (e.target.closest("[data-add-bonus-skill]")) {
+      const input = form.elements.newBonusSkillName, name = input.value.trim(), bonus = Number(form.elements.newBonusSkillValue.value) || 0;
+      if (!name || name.length > 40 || ["__proto__", "constructor", "prototype"].includes(name)) {
+        input.setCustomValidity("Enter a skill name (1\u201340 characters).");
+        input.reportValidity();
+        input.oninput = () => input.setCustomValidity("");
+        return;
+      }
+      collect();
+      let choice = skillChoices.find(([key, label]) => key.toLowerCase() === name.toLowerCase() || label.toLowerCase() === name.toLowerCase());
+      if (!choice) {
+        choice = [name, name];
+        skillChoices.push(choice);
+      }
+      values.bonuses.skills[choice[0]] = bonus;
+      render2();
+      return;
+    }
     if (e.target.closest("[data-add-ability]")) {
       host.querySelector("[data-abilities]").insertAdjacentHTML("beforeend", abilityRow());
     }
@@ -803,6 +880,10 @@ function normalizeInventory(raw, weapons = []) {
   }));
   const assigned = /* @__PURE__ */ new Set();
   for (const [i, weapon] of weapons.entries()) {
+    if (weapon.acceptsMagazines === false) {
+      weapon.magazineId = "";
+      continue;
+    }
     const requested = text(weapon.magazineId);
     let id = requested || ((!Object.hasOwn(weapon, "magazineId") || weapon.loaded > 0) && weapon.capacity > 0 ? `legacy-mag-${weapon.id || i}` : "");
     if (!id) {
@@ -829,13 +910,20 @@ function magazineWeapon(odyssey, id) {
 function swapMagazine(odyssey, weaponIndex, magazineId) {
   const weapon = odyssey.weapons.ranged[weaponIndex];
   if (!weapon) throw new Error("Weapon no longer exists.");
+  if (weapon.acceptsMagazines === false) throw new Error("This weapon has a built-in magazine.");
   const current2 = odyssey.inventory.magazines.find((m) => m.id === weapon.magazineId);
   if (current2) Object.assign(current2, { capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId });
   const next = magazineId ? odyssey.inventory.magazines.find((m) => m.id === magazineId) : null;
   if (magazineId && !next) throw new Error("Magazine no longer exists.");
   if (next && magazineWeapon(odyssey, next.id) && weapon.magazineId !== next.id) throw new Error("Magazine is already mounted.");
-  if (next && next.capacity !== weapon.capacity) throw new Error("Magazine capacity must match this weapon.");
-  if (next?.loaded && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error("Magazine ammunition is incompatible.");
+  const selectedMagazines = Array.isArray(weapon.acceptedMagazineIds);
+  if (next && selectedMagazines && !weapon.acceptedMagazineIds.includes(next.id)) throw new Error("This magazine is incompatible with the weapon.");
+  if (next && !selectedMagazines && next.capacity !== weapon.capacity) throw new Error("Magazine capacity must match this weapon.");
+  if (next?.loaded && !selectedMagazines && !weapon.ammoIds.includes(next.loadedAmmoId)) throw new Error("Magazine ammunition is incompatible.");
+  if (selectedMagazines) {
+    weapon.capacity = next?.capacity || 0;
+    weapon.ammoIds = next?.loadedAmmoId ? [next.loadedAmmoId] : [];
+  }
   weapon.magazineId = next?.id || "";
   weapon.loaded = next?.loaded || 0;
   weapon.loadedAmmoId = next?.loadedAmmoId || "";
@@ -862,12 +950,13 @@ function setMagazineRounds(odyssey, id, rounds, ammoId) {
   const ammo = odyssey.ammunition.find((a) => a.id === selectedAmmoId);
   const weapon = magazineWeapon(odyssey, id);
   if ((rounds > 0 || selectedAmmoId) && !ammo) throw new Error("Choose a valid ammunition type.");
-  if (weapon && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
+  if (weapon && !Array.isArray(weapon.acceptedMagazineIds) && selectedAmmoId && !weapon.ammoIds.includes(selectedAmmoId)) {
     throw new Error("This ammunition is incompatible with the mounted weapon.");
   }
   mag.loaded = rounds;
   mag.loadedAmmoId = selectedAmmoId;
   if (weapon) {
+    if (Array.isArray(weapon.acceptedMagazineIds)) weapon.ammoIds = selectedAmmoId ? [selectedAmmoId] : [];
     weapon.loaded = rounds;
     weapon.loadedAmmoId = selectedAmmoId;
   }
@@ -925,7 +1014,7 @@ function findInventoryEntry(tracker, type, id) {
 function deleteInventoryEntry(tracker, type, id) {
   const o = tracker.odyssey;
   if (type === "ammo") {
-    if (o.inventory.magazines.some((m) => m.loadedAmmoId === id && m.loaded)) throw new Error("Empty all magazines using this ammo first.");
+    if (o.inventory.magazines.some((m) => m.loadedAmmoId === id && m.loaded) || o.weapons.ranged.some((w) => w.acceptsMagazines === false && w.loadedAmmoId === id && w.loaded)) throw new Error("Empty all magazines using this ammo first.");
     o.ammunition = o.ammunition.filter((a) => a.id !== id);
     for (const w of o.weapons.ranged) w.ammoIds = w.ammoIds.filter((a) => a !== id);
     return;
@@ -935,12 +1024,20 @@ function deleteInventoryEntry(tracker, type, id) {
     if (index >= 0) swapMagazine(o, index, "");
     emptyMagazine(o, id);
     o.inventory.magazines = o.inventory.magazines.filter((m) => m.id !== id);
+    for (const w of o.weapons.ranged) if (w.acceptedMagazineIds) w.acceptedMagazineIds = w.acceptedMagazineIds.filter((m) => m !== id);
     return;
   }
   if (type?.startsWith("weapon-")) {
     const kind = type.slice(7), index = o.weapons[kind].findIndex((w, j) => (w.id || String(j)) === id);
     if (index < 0) throw new Error("Weapon no longer exists.");
-    if (kind === "ranged" && o.weapons.ranged[index].magazineId) swapMagazine(o, index, "");
+    if (kind === "ranged") {
+      const w = o.weapons.ranged[index];
+      if (w.acceptsMagazines === false && w.loaded) {
+        const a = o.ammunition.find((a2) => a2.id === w.loadedAmmoId);
+        if (!a || a.quantity + w.loaded > 999999) throw new Error("Cannot return loaded ammunition to reserve.");
+        a.quantity += w.loaded;
+      } else if (w.magazineId) swapMagazine(o, index, "");
+    }
     o.weapons[kind].splice(index, 1);
     return;
   }
@@ -985,9 +1082,19 @@ function saveInventoryEntry(tracker, origin, values, id) {
     if ([...o.weapons.melee, ...o.weapons.ranged].some((w) => w !== same && w.name === values.name)) throw new Error("A weapon with this name already exists.");
     const row2 = { id, name: values.name, accuracy: Number(values.accuracy) || 0, damage: Number(values.damage) || 0 };
     if (weaponKind === "ranged") {
-      const capacity = Number(values.capacity) || 0, ammoIds = values.ammoIds || [];
-      if (same && (capacity < same.loaded || same.loaded && !ammoIds.includes(same.loadedAmmoId))) throw new Error("Unload the weapon before changing loaded ammunition compatibility or capacity.");
-      Object.assign(row2, { capacity, ammoIds, loaded: same?.loaded || 0, loadedAmmoId: same?.loadedAmmoId || "", ...same ? { magazineId: same.magazineId } : {} });
+      const acceptsMagazines = values.acceptsMagazines !== false;
+      if (same && same.acceptsMagazines !== false !== acceptsMagazines && same.loaded > 0) throw new Error("Empty or detach the current magazine before changing magazine type.");
+      if (acceptsMagazines) {
+        const acceptedMagazineIds = [...new Set(values.acceptedMagazineIds || [])];
+        if (acceptedMagazineIds.some((id2) => !o.inventory.magazines.some((m) => m.id === id2))) throw new Error("Selected magazine no longer exists.");
+        if (same?.magazineId && !acceptedMagazineIds.includes(same.magazineId)) throw new Error("Detach the current magazine before removing its compatibility.");
+        Object.assign(row2, { acceptsMagazines: true, acceptedMagazineIds, capacity: same?.magazineId ? same.capacity : 0, ammoIds: same?.magazineId ? same.ammoIds || [] : [], loaded: same?.loaded || 0, loadedAmmoId: same?.loadedAmmoId || "", magazineId: same?.magazineId || "" });
+      } else {
+        const capacity = Number(values.capacity), ammoIds = values.ammoIds || [], loaded = Number(values.loaded ?? same?.loaded ?? 0), loadedAmmoId = String(values.loadedAmmoId ?? same?.loadedAmmoId ?? "");
+        if (!Number.isInteger(capacity) || capacity < 1 || capacity > 999 || !Number.isInteger(loaded) || loaded < 0 || loaded > capacity) throw new Error("Invalid built-in magazine capacity or rounds.");
+        if (loaded && (!ammoIds.includes(loadedAmmoId) || !o.ammunition.some((a) => a.id === loadedAmmoId))) throw new Error("Choose compatible ammunition for loaded rounds.");
+        Object.assign(row2, { acceptsMagazines: false, acceptedMagazineIds: [], capacity, ammoIds, loaded, loadedAmmoId: loaded ? loadedAmmoId : "", magazineId: "" });
+      }
     }
     if (same) Object.assign(same, row2);
     else {
@@ -1034,6 +1141,8 @@ function sanitizeAmmunition(raw) {
 function sanitizeMagazine(weapon) {
   const capacity = integer(weapon.capacity, 999);
   return {
+    acceptsMagazines: weapon.acceptsMagazines !== false,
+    ...Array.isArray(weapon.acceptedMagazineIds) ? { acceptedMagazineIds: [...new Set(weapon.acceptedMagazineIds.filter((id) => typeof id === "string"))].slice(0, 200) } : {},
     ammoIds: [...new Set(Array.isArray(weapon.ammoIds) ? weapon.ammoIds.filter((id) => typeof id === "string") : [])],
     capacity,
     loadedAmmoId: String(weapon.loadedAmmoId || ""),
@@ -4755,6 +4864,7 @@ function instantiateTemplate(current2, template, sanitize) {
     mag.loadedAmmoId = ammoIds.get(mag.loadedAmmoId) || "";
   }
   for (const w of data.odyssey.weapons.ranged) {
+    if (w.acceptedMagazineIds) w.acceptedMagazineIds = w.acceptedMagazineIds.map((id) => magIds.get(id)).filter(Boolean);
     w.id = newId();
     w.ammoIds = w.ammoIds.map((id) => ammoIds.get(id)).filter(Boolean);
     w.loadedAmmoId = ammoIds.get(w.loadedAmmoId) || "";
@@ -4860,7 +4970,7 @@ function installCharacterTools(host) {
       const existing = action === "edit-entry" ? findInventoryEntry(t, type, id) : null;
       if (action === "edit-entry" && !existing) throw new Error("Item no longer exists.");
       const kind = type.startsWith("weapon-") ? "weapon" : type === "item" ? ["item", "tool"].includes(existing?.kind) ? "resource" : existing?.kind === "medical" ? "consumable" : existing?.kind || "resource" : type;
-      const values = await itemEditor({ existing: { ...existing, ...type.startsWith("weapon-") ? { weaponKind: type.slice(7) } : {} }, type: kind, skills: Object.entries(o.skills).map(([k]) => [k, o.skillLabels[k] || k]), parts: Object.entries(t.body).map(([k, p]) => [k, p.label || k]), ammunition: o.ammunition });
+      const values = await itemEditor({ existing: { ...existing, ...type.startsWith("weapon-") ? { weaponKind: type.slice(7) } : {} }, type: kind, skills: Object.entries(o.skills).map(([k]) => [k, o.skillLabels[k] || k]), parts: Object.entries(t.body).map(([k, p]) => [k, p.label || k]), ammunition: o.ammunition, magazines: o.inventory.magazines });
       if (!values) return;
       await mutate(tokenId, (t2) => saveInventoryEntry(t2, existing ? { type, id } : null, values, existing?.id || newId()), true);
     } else if (action === "delete-entry") {
@@ -4944,7 +5054,7 @@ function installCharacterTools(host) {
       const mag = o.inventory.magazines.find((m) => m.id === id);
       if (!mag) throw new Error("Magazine no longer exists.");
       const weapon = o.weapons.ranged.find((w) => w.magazineId === id);
-      const ammo = o.ammunition.filter((a) => !weapon || weapon.ammoIds.includes(a.id));
+      const ammo = o.ammunition.filter((a) => !weapon || Array.isArray(weapon.acceptedMagazineIds) || weapon.ammoIds.includes(a.id));
       const value = await formDialog("GM \xB7 Set magazine rounds", [
         { name: "rounds", label: "Rounds (0\u2013" + mag.capacity + ")", type: "number", min: 0, max: mag.capacity, value: mag.loaded, required: true },
         { name: "ammoId", label: "Ammunition type", value: mag.loadedAmmoId, options: [["", "Empty / no ammunition"], ...ammo.map((a) => [a.id, a.name])] }
@@ -6388,6 +6498,7 @@ function shouldPreserveFieldValue(fieldKey, focusedKey) {
   return fieldKey === focusedKey || fieldKey.startsWith("attack:") || fieldKey.startsWith("manual-attack:") || fieldKey.startsWith("inventory:") || fieldKey.startsWith("profile:") || fieldKey.startsWith("roll:") || fieldKey.startsWith("roll-char:") || fieldKey.startsWith("roll-skill:") || fieldKey.startsWith("gm-roll:") || fieldKey.startsWith("new-skill:") || fieldKey.startsWith("new-weapon:");
 }
 function captureSelectedPanelState() {
+  ui.selectedTokenPanel.querySelectorAll("details[data-section-key]").forEach((section) => collapsibleSectionState.set(section.dataset.sectionKey, section.open));
   const renderedTokenId = String(ui.selectedTokenPanel.dataset.tokenId ?? "").trim();
   if (!renderedTokenId || !ui.selectedTokenPanel.childElementCount) return null;
   let focusedKey = "";
@@ -7795,6 +7906,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "Attack",
     `
+      <div data-combat-layout="attack">
       <div class="combat-form-grid">
         <input type="hidden" value="${escapeHtml(draft2.targetTokenId)}" data-attack-field="targetTokenId">
         <label class="field-stack">
@@ -7867,6 +7979,7 @@ function renderEnglishAttackBlock(token, data, tokenLocked) {
       <div class="combat-action">
         <button type="button" class="success" data-action="perform-attack" ${attackDisabledAttr}>Attack</button>
       </div>
+      </div>
     `,
     true
   );
@@ -7884,6 +7997,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
   return renderCollapsibleSection(
     "No Target Attack",
     `
+      <div data-combat-layout="manual">
       <div class="combat-form-grid">
         <label class="field-stack">
           <span class="field-label">Attack Skill</span>
@@ -7927,6 +8041,7 @@ function renderEnglishNoTargetAttackBlock(token, data, tokenLocked) {
       </details>
       <div class="combat-action">
         <button type="button" class="success" data-action="perform-manual-attack" ${disabledAttr}>No Target Attack</button>
+      </div>
       </div>
     `,
     false
@@ -8012,13 +8127,14 @@ function renderSelectedToken() {
   ui.selectedTokenPanel.dataset.tokenId = token.id;
   ui.selectedTokenPanel.innerHTML = `
     <div class="selected-card">
-      ${canUseToken(token) ? renderTokenHud(token, data) : ""}
+      ${HUD_MODE && canUseToken(token) ? renderTokenHud(token, data) : ""}
       <div class="selected-head">
         <div>
           <div class="token-name">${escapeHtml(getCharacterName(token))}</div>
           <div class="token-meta">${escapeHtml(token.id.slice(0, 8))} - ${tracked ? "Initialized" : "Auto-init on selection"} - ${tokenLocked ? "Read only" : "Controllable"}</div>
         </div>
         <div class="row row-gap">
+          <button type="button" data-action="open-character-hud" class="secondary">Floating HUD</button>
           <button type="button" data-action="focus-token" class="secondary">Select On Map</button>
           <button type="button" data-action="reload-token-visuals" class="secondary" ${tokenLocked ? "disabled" : ""}>Reload Token</button>
         </div>
@@ -8101,6 +8217,7 @@ function renderSelectedToken() {
   if (characterTools?.isBusy()) ui.selectedTokenPanel.querySelectorAll("[data-od-action]").forEach((e) => {
     if (e instanceof HTMLButtonElement) e.disabled = true;
   });
+  arrangeCombatPanels(ui.selectedTokenPanel);
   restoreSelectedPanelState(panelState);
 }
 function render() {
@@ -9234,7 +9351,7 @@ function bindUiEvents() {
     (event) => {
       const target = event.target;
       if (!(target instanceof HTMLDetailsElement)) return;
-      if (!target.dataset.sectionKey) return;
+      if (!target.isConnected || !target.dataset.sectionKey) return;
       collapsibleSectionState.set(target.dataset.sectionKey, target.open);
     },
     true

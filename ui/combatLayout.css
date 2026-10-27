@@ -6,3 +6,6 @@
 .od-target-distance{font-size:10px;line-height:1.5;color:#9ed5eb;overflow-wrap:anywhere;max-width:100%}
 
 .od-range-readout{font-size:10px;line-height:1.4;overflow-wrap:anywhere;display:block}.od-range-readout.bad{color:#fca5a5}.od-range-readout.good{color:#86efac}.od-range-reduction{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+
+.cp-info{width:22px;height:22px;min-width:22px;padding:2px;flex:none;border-radius:50%}.cp-perk-descriptions{margin:3px 0 2px 8px;display:flex;flex-wrap:wrap;gap:4px}.cp-perk-descriptions .cp-pill{display:inline-flex;gap:4px;align-items:center}.cp-info.od-icon-button{width:22px;height:22px;padding:2px}.od-description-dialog p{white-space:pre-wrap;overflow-wrap:anywhere}.od-bonuses>.od-range-reduction{grid-column:1/-1}
+.od-range-readout[hidden]{display:none}

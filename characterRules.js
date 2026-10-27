@@ -26,17 +26,19 @@ export function effectiveOdyssey(base) {
   const o=structuredClone(base),rows=[];o.baseAttributes=structuredClone(base.attributes);o.baseSkills=structuredClone(base.skills);o.grantedSkills={};
   for(const i of o.inventory?.items||[]) {
     if(!itemActive(i))continue;
-    if(i.kind==='resource'||(['armor','shield','implant'].includes(i.kind)&&i.equippedPart)) rows.push({id:i.id,name:i.name,bonuses:i.bonuses,passive:true});
+    if(i.kind==='resource'||(['armor','shield','implant'].includes(i.kind)&&i.equippedPart)) rows.push({id:i.id,name:i.name,bonuses:['resource','implant'].includes(i.kind)?{...i.bonuses,rangeReduction:{}}:i.bonuses,passive:true});
     if(i.kind==='implant'&&i.equippedPart)for(const a of i.abilities||[]) {
-      const key=`implant:${i.id}:${a.id}`;o.skills[key]=a.level;o.skillCategories[key]='abilities';o.skillLabels[key]=a.name;o.skillPerks[key]=a.description?[a.description]:[];o.grantedSkills[key]=i.name;
+      const key=`implant:${i.id}:${a.id}`;o.skills[key]=a.level;o.skillCategories[key]='abilities';o.skillLabels[key]=a.name;o.skillDescriptions??={};o.skillDescriptions[key]=a.description||'';o.skillPerks[key]=a.description?[a.description]:[];o.grantedSkills[key]=i.name;
     }
   }
   rows.push(...(base.effects||[]));
+  const eligibleSkills=new Set(Object.keys(o.skills));
+  for(const row of rows){const skills={};for(const [key,value]of Object.entries(row.bonuses?.skills||{})){const resolved=eligibleSkills.has(key)?key:[...eligibleSkills].find(k=>(o.skillLabels[k]||k).toLowerCase()===key.toLowerCase())||key;skills[resolved]=(skills[resolved]||0)+value;}row.bonuses={...row.bonuses,skills};}
   // Items may grant skills absent from the character; these disappear with the item.
   for(const row of rows)for(const key of Object.keys(row.bonuses?.skills||{}))if(!Object.hasOwn(o.skills,key)) {
     o.skills[key]=0;o.baseSkills[key]=0;o.skillLabels[key]=key;o.skillCategories[key]='applied';o.skillStrengthBonuses[key]=false;o.skillPerks[key]=[];o.grantedSkills[key]=row.name;
   }
-  const skillMods={};for(const row of rows)for(const [k,v] of Object.entries(row.bonuses?.skills||{}))skillMods[k]=(skillMods[k]||0)+v;
+  const skillMods={};for(const row of rows)for(const [k,v] of Object.entries(row.bonuses?.skills||{}))if(eligibleSkills.has(k))skillMods[k]=(skillMods[k]||0)+v;
   for(const [k,v] of Object.entries(skillMods))if(Object.hasOwn(o.skills,k))o.skills[k]=Math.max(0,Math.min(Object.hasOwn(ARMOR_TRAINING,k)?1:10,o.skills[k]+v));
   const armor=armorSummary(o),trained=!armor.key||(o.skills[armor.key]||0)>=1;
   if(!trained) {
@@ -115,18 +117,19 @@ export function setCombinedPartHp(tracker,partName,value) {
 export function useItemOnTracker(target,item,partName,effectId) {
   if(item.subtype==='grenade')throw new Error('Grenades are a placeholder; no action is performed.');
   if(item.subtype==='stim'){target.odyssey.effects??=[];if(target.odyssey.effects.length>=100)throw new Error('Too many active effects.');target.odyssey.effects.push({id:effectId,name:item.name,bonuses:normalizeBonuses(item.bonuses)});return;}
+  if(item.subtype==='repairkit') {
+    const gear=target.odyssey.inventory.items.find(i=>i.id===partName&&['armor','shield'].includes(i.kind)&&i.quantity>0);
+    if(!gear||!gear.criticalDamage)throw new Error('Choose damaged armor from inventory.');
+    if(!item.healCritical)throw new Error('Repair amount must be greater than zero.');
+    let repaired=gear;
+    if(gear.quantity>1){if(target.odyssey.inventory.items.length>=1000)throw new Error('Inventory is full; cannot separate a repaired unit.');if(!effectId||target.odyssey.inventory.items.some(i=>i.id===effectId))throw new Error('Repair instance ID is unavailable.');gear.quantity--;repaired={...structuredClone(gear),id:effectId,quantity:1};target.odyssey.inventory.items.push(repaired);}
+    repaired.criticalDamage=Math.max(0,repaired.criticalDamage-item.healCritical);reconcileEquipment(target);return;
+  }
   const part=target.body[partName];if(!part)throw new Error('Choose a body part.');
   if(item.subtype==='medkit') {
     const pool=armorHealth(target,partName),missing=Math.max(0,part.max-pool.max-Math.max(0,part.current-pool.remaining));
     if(!item.healCritical||!missing)throw new Error('No critical wounds to heal on this part.');
     part.current+=Math.min(missing,item.healCritical);return;
-  }
-  if(item.subtype==='repairkit') {
-    const gear=target.odyssey.inventory.items.filter(i=>i.equippedPart===partName&&['armor','shield'].includes(i.kind)&&i.quantity>0&&i.criticalDamage>0);
-    if(!gear.length)throw new Error('No damaged armor is equipped on this part.');
-    if(!item.healCritical)throw new Error('Repair amount must be greater than zero.');
-    let remaining=item.healCritical;for(const i of gear){const heal=Math.min(remaining,i.criticalDamage);i.criticalDamage-=heal;remaining-=heal;}
-    reconcileEquipment(target);return;
   }
   throw new Error('This item cannot be used.');
 }

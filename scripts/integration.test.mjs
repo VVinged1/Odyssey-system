@@ -137,7 +137,7 @@ test('Armor absorbs critical wounds; medkits heal body, repair kits heal armor',
  let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'armor',name:'Vest',quantity:1,armor:12,criticalMax:2,slot:'any'},'vest');t=sanitize(t);equipItem(t,'vest','Torso');
  assert.deepEqual(absorbEquipmentCritical(t,'Torso',3),{remaining:1,absorbed:2});assert.equal(t.body.Torso.armor,6);
  useItemOnTracker(t,{subtype:'medkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,3);assert.equal(t.odyssey.inventory.items[0].criticalDamage,2);assert.equal(t.body.Torso.minor,3);
- useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'Torso');assert.equal(t.body.Torso.current,4);assert.equal(t.odyssey.inventory.items[0].criticalDamage,1);assert.equal(t.body.Torso.armor,18);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'vest');assert.equal(t.body.Torso.current,4);assert.equal(t.odyssey.inventory.items[0].criticalDamage,1);assert.equal(t.body.Torso.armor,18);
  assert.throws(()=>useItemOnTracker(t,{subtype:'grenade'},'Torso'),/placeholder/);
 });
 test('Type conversion restores body stats; loaded ammo cannot disappear',()=>{
@@ -150,7 +150,7 @@ test('Type conversion restores body stats; loaded ammo cannot disappear',()=>{
 
 test('Passive item can grant a missing skill without changing the base character',()=>{
  let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'resource',name:'Pilot manual',quantity:1,bonuses:{skills:{Piloting:3}}},'pilot');t=sanitize(t);
- assert.equal(t.odyssey.skills.Piloting,undefined);assert.equal(effectiveOdyssey(t.odyssey).skills.Piloting,3);
+ assert.equal(t.odyssey.skills.Piloting,undefined);assert.equal(effectiveOdyssey(t.odyssey).skills.Piloting,0);
  t.odyssey.inventory.items[0].quantity=0;assert.equal(effectiveOdyssey(t.odyssey).skills.Piloting,undefined);
 });
 test('Built-in magazines preserve rounds without creating a physical inventory magazine',()=>{
@@ -190,7 +190,7 @@ test('Armor adds HP and Max, retains damage, and keeps healing and repair separa
  assert.equal(t.body.Torso.current,6);assert.equal(t.body.Torso.max,7);t=sanitize(sanitize(t));assert.equal(t.body.Torso.current,6);
  setCombinedPartHp(t,'Torso',2);assert.equal(t.odyssey.inventory.items[0].criticalDamage,4);assert.equal(t.body.Torso.current,2);
  useItemOnTracker(t,{subtype:'medkit',healCritical:5},'Torso');assert.equal(t.body.Torso.current,3);assert.throws(()=>useItemOnTracker(t,{subtype:'medkit',healCritical:1},'Torso'),/No critical wounds/);
- useItemOnTracker(t,{subtype:'repairkit',healCritical:2},'Torso');assert.equal(t.body.Torso.current,5);unequipItem(t,'vest');assert.equal(t.body.Torso.current,3);assert.equal(t.body.Torso.max,3);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:2},'vest');assert.equal(t.body.Torso.current,5);unequipItem(t,'vest');assert.equal(t.body.Torso.current,3);assert.equal(t.body.Torso.max,3);
  equipItem(t,'vest','Torso');assert.equal(t.body.Torso.current,5);assert.equal(t.body.Torso.max,7);assert.equal(t.odyssey.inventory.items[0].criticalDamage,2);
  setCombinedPartMax(t,'Torso',10);t=sanitize(t);assert.equal(t.body.Torso.max,10);unequipItem(t,'vest');assert.equal(t.body.Torso.max,6);
 });
@@ -205,7 +205,21 @@ test('Range mitigation survives sanitization, templates and equipped/passive rul
  let t=sanitize(raw);assert.equal(t.odyssey.weapons.ranged[0].weaponCategory,'pistol');assert.equal(t.odyssey.weapons.ranged[0].rangeReduction.clinch,5);assert.equal(t.odyssey.skillRangeReduction.Shoot.long,10);assert.equal(t.odyssey.skillRangeReduction.Unknown,undefined);
  saveInventoryEntry(t,null,{kind:'resource',name:'Scope training',quantity:1,bonuses:{rangeReduction:{long:3}}},'resource');
  saveInventoryEntry(t,null,{kind:'implant',name:'Eye',quantity:1,slots:['Torso'],bonuses:{rangeReduction:{long:4}}},'eye');
- assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,3);equipItem(t,'eye','Torso');assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,7);unequipItem(t,'eye','Torso');assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,3);
+ assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,0);equipItem(t,'eye','Torso');assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,0);unequipItem(t,'eye','Torso');assert.equal(effectiveOdyssey(t.odyssey).rangeReduction.long,0);
  const template=makeTemplate('Shooter',t),copy=instantiateTemplate(sanitize(legacy()),template,sanitize);assert.equal(copy.odyssey.skillRangeReduction.Shoot.long,10);assert.equal(copy.odyssey.weapons.ranged[0].rangeReduction.clinch,5);assert.equal(copy.odyssey.weapons.ranged[0].weaponCategory,'pistol');
+});
+test('Inventory repair targets a single stored unit and never heals the body',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'armor',name:'Spare',quantity:2,criticalMax:3,criticalDamage:2,slots:['Torso']},'spares');const hp=t.body.Torso.current;
+ assert.throws(()=>useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'Torso'),/inventory/);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'spares','repaired');assert.equal(t.body.Torso.current,hp);assert.equal(t.odyssey.inventory.items.find(i=>i.id==='spares').quantity,1);assert.equal(t.odyssey.inventory.items.find(i=>i.id==='spares').criticalDamage,2);assert.equal(t.odyssey.inventory.items.find(i=>i.id==='repaired').criticalDamage,1);
+ useItemOnTracker(t,{subtype:'repairkit',healCritical:99},'repaired');assert.equal(t.odyssey.inventory.items.find(i=>i.id==='repaired').criticalDamage,0);assert.throws(()=>useItemOnTracker(t,{subtype:'repairkit',healCritical:1},'repaired'),/damaged/);
+});
+test('Item-granted unknown skill stays zero; a learned skill receives bonuses by key or label',()=>{
+ let t=sanitize(legacy());saveInventoryEntry(t,null,{kind:'resource',name:'Manual',quantity:1,bonuses:{skills:{Piloting:3}}},'manual');let o=effectiveOdyssey(t.odyssey);assert.equal(o.skills.Piloting,0);assert.equal(o.modifiers.skills.Piloting,undefined);
+ t.odyssey.skills.learnedPilot=0;t.odyssey.skillLabels.learnedPilot='Piloting';o=effectiveOdyssey(t.odyssey);assert.equal(o.skills.learnedPilot,3);assert.equal(o.skills.Piloting,undefined);assert.equal(t.odyssey.skills.learnedPilot,0);
+});
+test('Descriptions survive templates, inventory and legacy string perks',()=>{
+ const raw=legacy();raw.odyssey.skillDescriptions={Shoot:'Aim & fire <safely>'};raw.odyssey.skillPerkDescriptions={Shoot:{Accurate:'Keep steady.'}};raw.odyssey.ammunition[0].description='Ammo description';raw.odyssey.weapons.ranged[0].description='Rifle description';let t=sanitize(raw);t.odyssey.inventory.magazines[0].description='Magazine description';
+ const template=makeTemplate('Descriptions',t),copy=instantiateTemplate(sanitize(legacy()),template,sanitize);assert.equal(copy.odyssey.skillDescriptions.Shoot,'Aim & fire <safely>');assert.equal(copy.odyssey.skillPerkDescriptions.Shoot.Accurate,'Keep steady.');assert.equal(copy.odyssey.ammunition[0].description,'Ammo description');assert.equal(copy.odyssey.weapons.ranged[0].description,'Rifle description');assert.equal(copy.odyssey.inventory.magazines[0].description,'Magazine description');
 });
 console.log(`${count} integration checks passed.`);

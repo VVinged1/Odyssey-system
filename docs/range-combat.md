@@ -14,6 +14,6 @@ Distances are between token centres, calculated by Owlbear's grid measurement ru
 
 Long range progresses by 10 per 25 m: (50,75] → 10; (75,100] → 20; (100,125] → 30; (125,150] → 40; over 150 → 50. Exactly 50 m is medium range.
 
-Range penalty reduction has separate Clinch / Short / Medium / Long values. GM can configure weapon upgrades in the weapon editor, combined perk relief in the skill editor, and passive relief in resource/implant bonus editors. Perks apply only when using that skill; implants must be equipped. Active effects and passive resources follow the existing availability rules. Applicable sources add together, reduce negative range modifiers to a minimum penalty of zero, and never increase a positive range bonus. Manual modifiers remain additional.
+Range penalty reduction has separate Clinch / Short / Medium / Long values. GM can configure weapon upgrades in the weapon editor, combined perk relief in the skill editor, with each band configured separately. Perks apply only when using that skill. Resources and implants do not provide range penalty reduction. Applicable sources add together, reduce negative range modifiers to a minimum penalty of zero, and never increase a positive range bonus. Manual modifiers remain additional.
 
 The attack panel and combat log show the final range modifier, base penalty and applied relief. Melee and legacy unclassified weapons retain their previous combat behaviour. Environment Attack has no ranged weapon or origin token and keeps its existing manual modifiers.

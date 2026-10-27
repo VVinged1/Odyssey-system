@@ -11,6 +11,7 @@ export function sanitizeAmmunition(raw) {
   }).map((item) => ({
     id: item.id,
     name: String(item.name || "Ammo").trim() || "Ammo",
+    description: String(item.description||'').trim().slice(0,2000),
     damage: integer(item.damage, 999),
     penetration: modifier(item.penetration),
     quantity: integer(item.quantity),

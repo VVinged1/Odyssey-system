@@ -600,6 +600,7 @@ function arrangeCombatPanels(root = document) {
 
 // ui/compactButtons.js
 var paths = {
+  info: "M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
   plus: "M12 5v14M5 12h14",
   close: "m6 6 12 12M18 6 6 18",
   edit: "m4 16-1 5 5-1L20 8l-4-4Z M14 6l4 4",
@@ -620,6 +621,7 @@ var paths = {
   copy: "M8 8h13v13H8Z M16 8V3H3v13h5"
 };
 function iconFor(text2) {
+  if (/description/i.test(text2)) return "info";
   if (/cancel|clear|remove|delete|unequip|detach|close/i.test(text2)) return "close";
   if (/edit|rename|set rounds|set magazine/i.test(text2)) return "edit";
   if (/duplicate/i.test(text2)) return "copy";
@@ -695,17 +697,28 @@ function effectiveOdyssey(base) {
   o.grantedSkills = {};
   for (const i of o.inventory?.items || []) {
     if (!itemActive(i)) continue;
-    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: i.bonuses, passive: true });
+    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true });
     if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
       const key = `implant:${i.id}:${a.id}`;
       o.skills[key] = a.level;
       o.skillCategories[key] = "abilities";
       o.skillLabels[key] = a.name;
+      o.skillDescriptions ?? (o.skillDescriptions = {});
+      o.skillDescriptions[key] = a.description || "";
       o.skillPerks[key] = a.description ? [a.description] : [];
       o.grantedSkills[key] = i.name;
     }
   }
   rows2.push(...base.effects || []);
+  const eligibleSkills = new Set(Object.keys(o.skills));
+  for (const row of rows2) {
+    const skills = {};
+    for (const [key, value] of Object.entries(row.bonuses?.skills || {})) {
+      const resolved = eligibleSkills.has(key) ? key : [...eligibleSkills].find((k) => (o.skillLabels[k] || k).toLowerCase() === key.toLowerCase()) || key;
+      skills[resolved] = (skills[resolved] || 0) + value;
+    }
+    row.bonuses = { ...row.bonuses, skills };
+  }
   for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
     o.skills[key] = 0;
     o.baseSkills[key] = 0;
@@ -716,7 +729,7 @@ function effectiveOdyssey(base) {
     o.grantedSkills[key] = row.name;
   }
   const skillMods = {};
-  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) skillMods[k] = (skillMods[k] || 0) + v;
+  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) if (eligibleSkills.has(k)) skillMods[k] = (skillMods[k] || 0) + v;
   for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
   const armor = armorSummary(o), trained = !armor.key || (o.skills[armor.key] || 0) >= 1;
   if (!trained) {
@@ -819,6 +832,22 @@ function useItemOnTracker(target, item, partName, effectId) {
     target.odyssey.effects.push({ id: effectId, name: item.name, bonuses: normalizeBonuses(item.bonuses) });
     return;
   }
+  if (item.subtype === "repairkit") {
+    const gear = target.odyssey.inventory.items.find((i) => i.id === partName && ["armor", "shield"].includes(i.kind) && i.quantity > 0);
+    if (!gear || !gear.criticalDamage) throw new Error("Choose damaged armor from inventory.");
+    if (!item.healCritical) throw new Error("Repair amount must be greater than zero.");
+    let repaired = gear;
+    if (gear.quantity > 1) {
+      if (target.odyssey.inventory.items.length >= 1e3) throw new Error("Inventory is full; cannot separate a repaired unit.");
+      if (!effectId || target.odyssey.inventory.items.some((i) => i.id === effectId)) throw new Error("Repair instance ID is unavailable.");
+      gear.quantity--;
+      repaired = { ...structuredClone(gear), id: effectId, quantity: 1 };
+      target.odyssey.inventory.items.push(repaired);
+    }
+    repaired.criticalDamage = Math.max(0, repaired.criticalDamage - item.healCritical);
+    reconcileEquipment(target);
+    return;
+  }
   const part = target.body[partName];
   if (!part) throw new Error("Choose a body part.");
   if (item.subtype === "medkit") {
@@ -827,20 +856,40 @@ function useItemOnTracker(target, item, partName, effectId) {
     part.current += Math.min(missing, item.healCritical);
     return;
   }
-  if (item.subtype === "repairkit") {
-    const gear = target.odyssey.inventory.items.filter((i) => i.equippedPart === partName && ["armor", "shield"].includes(i.kind) && i.quantity > 0 && i.criticalDamage > 0);
-    if (!gear.length) throw new Error("No damaged armor is equipped on this part.");
-    if (!item.healCritical) throw new Error("Repair amount must be greater than zero.");
-    let remaining = item.healCritical;
-    for (const i of gear) {
-      const heal = Math.min(remaining, i.criticalDamage);
-      i.criticalDamage -= heal;
-      remaining -= heal;
-    }
-    reconcileEquipment(target);
-    return;
-  }
   throw new Error("This item cannot be used.");
+}
+
+// ui/descriptions.js
+var escape = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var descriptionButton = (title, text2) => '<button type="button" class="cp-info" data-description-title="' + escape(title) + '" data-description-text="' + escape(text2 || "No description yet.") + '" aria-label="Description: ' + escape(title) + '" title="Show description">i</button>';
+function installDescriptions() {
+  document.addEventListener("click", (event) => {
+    const node = event.target.closest?.("[data-description-title]");
+    if (!node) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dialog = document.createElement("dialog");
+    dialog.className = "od-dialog od-description-dialog";
+    const title = document.createElement("h2"), body = document.createElement("p"), close = document.createElement("button");
+    title.textContent = node.dataset.descriptionTitle;
+    body.textContent = node.dataset.descriptionText || "No description yet.";
+    close.textContent = "Close";
+    close.type = "button";
+    close.setAttribute("aria-label", "Close description");
+    close.dataset.descriptionClose = "";
+    const finish = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    close.onclick = finish;
+    dialog.addEventListener("cancel", (event2) => {
+      event2.preventDefault();
+      finish();
+    });
+    dialog.append(title, body, close);
+    document.body.append(dialog);
+    dialog.showModal();
+  });
 }
 
 // inventory.js
@@ -870,7 +919,7 @@ function normalizeInventory(raw, weapons = []) {
     criticalMax: int(r.criticalMax, 999),
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
     playerRemovable: r.playerRemovable === true,
-    bonuses: normalizeBonuses(r.bonuses),
+    bonuses: normalizeBonuses(["resource", "implant"].includes(r.kind) ? { ...r.bonuses, rangeReduction: {} } : r.bonuses),
     abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
     legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
@@ -885,6 +934,7 @@ function normalizeInventory(raw, weapons = []) {
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`),
     name: text(r.name) || "Magazine",
+    description: text(r.description, 2e3),
     capacity: int(r.capacity, 999),
     loadedAmmoId: text(r.loadedAmmoId),
     loaded: int(r.loaded, int(r.capacity, 999))
@@ -906,7 +956,7 @@ function normalizeInventory(raw, weapons = []) {
     if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
     let mag = magazines.find((m) => m.id === id);
     if (!mag) {
-      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
+      mag = { id, name: `${weapon.name} magazine`, description: "", capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
       magazines.push(mag);
     }
     weapon.magazineId = id;
@@ -1077,7 +1127,7 @@ function saveInventoryEntry(tracker, origin, values, id) {
   if (origin && origin.type !== dest) deleteInventoryEntry(tracker, origin.type, origin.id);
   const same = origin?.type === dest ? existing : null;
   if (kind === "ammo") {
-    const row2 = { id, name: values.name, damage: Number(values.damage) || 0, penetration: Number(values.penetration) || 0, quantity: Number(values.quantity) || 0 };
+    const row2 = { id, name: values.name, description: text(values.description, 2e3), damage: Number(values.damage) || 0, penetration: Number(values.penetration) || 0, quantity: Number(values.quantity) || 0 };
     if (same) Object.assign(same, row2);
     else {
       if (o.ammunition.length >= 200) throw new Error("Too many ammo types.");
@@ -1093,13 +1143,14 @@ function saveInventoryEntry(tracker, origin, values, id) {
     if (same) {
       same.capacity = capacity;
       same.name = values.name;
+      same.description = text(values.description, 2e3);
       setMagazineRounds(o, same.id, loaded, values.loadedAmmoId);
     } else {
       const quantity = Number(values.quantity ?? 1);
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1e3 || o.inventory.magazines.length + quantity > 1e3) throw new Error("Invalid magazine quantity or inventory is full.");
       for (let i = 0; i < quantity; i++) {
         const magazineId = i ? id + "-copy-" + i : id;
-        o.inventory.magazines.push({ id: magazineId, name: values.name, capacity, loaded: 0, loadedAmmoId: "" });
+        o.inventory.magazines.push({ id: magazineId, name: values.name, description: text(values.description, 2e3), capacity, loaded: 0, loadedAmmoId: "" });
         setMagazineRounds(o, magazineId, loaded, values.loadedAmmoId);
       }
     }
@@ -1107,7 +1158,7 @@ function saveInventoryEntry(tracker, origin, values, id) {
   }
   if (kind === "weapon") {
     if ([...o.weapons.melee, ...o.weapons.ranged].some((w) => w !== same && w.name === values.name)) throw new Error("A weapon with this name already exists.");
-    const row2 = { id, name: values.name, accuracy: Number(values.accuracy) || 0, damage: Number(values.damage) || 0 };
+    const row2 = { id, name: values.name, description: text(values.description, 2e3), accuracy: Number(values.accuracy) || 0, damage: Number(values.damage) || 0 };
     if (weaponKind === "ranged") {
       row2.weaponCategory = normalizeWeaponCategory(values.weaponCategory);
       row2.rangeReduction = normalizeRangeReduction(values.rangeReduction);
@@ -1162,10 +1213,12 @@ function attributeCards(o, fields, editable) {
 }
 function skillCards(o, groups, editable) {
   const passives = Object.entries(ARMOR_TRAINING).filter(([k]) => Object.hasOwn(o.skills, k) && (editable || o.skills[k] === 1));
-  return `<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="skill" aria-label="Skill roll modifier"></label><button type="button" class="secondary" data-action="profile-random-skill">d100 vs d100</button>${editable ? '<button type="button" class="secondary" data-od-action="add-skill">+ Skill</button>' : ""}</div>${groups.filter(([, entries]) => entries.length).map(([label, entries]) => `<div class="cp-section-title">${esc(label)}</div><div class="cp-list">${entries.map(([k, value]) => {
+  const skillRow = ([k, value]) => {
     const name = o.skillLabels[k] || k, perks = o.skillPerks[k] || [], mod = o.modifiers?.skills?.[k] || 0;
-    return `<div class="cp-skill-row"><button class="cp-card cp-skill-card" type="button" data-action="profile-roll-skill" data-skill="${esc(k)}" aria-label="Roll ${esc(name)}"><span><b>${esc(name)}</b>${o.skillStrengthBonuses[k] ? '<span class="cp-pill">STR</span>' : ""}<span class="cp-perks">${RANGE_BANDS.filter(([band]) => o.skillRangeReduction?.[k]?.[band]).map(([band, label2]) => `<span class="cp-pill">${esc(label2.split(" \xB7 ")[0])} relief ${o.skillRangeReduction[k][band]}</span>`).join("")}${perks.map((p) => `<span class="cp-pill">${esc(p)}</span>`).join("")}</span></span><span class="cp-skill-level"><span class="cp-pips">${Array.from({ length: 10 }, (_, i) => `<i class="cp-pip ${i < value ? "on" : ""}"></i>`).join("")}</span><strong>${value}/10</strong>${mod ? `<span class="cp-mod ${mod > 0 ? "good" : "bad"}">${mod > 0 ? "+" : ""}${mod}</span>` : ""}</span></button>${editable && !o.grantedSkills?.[k] ? `<button type="button" class="cp-pencil" data-od-action="edit-skill" data-skill="${esc(k)}" aria-label="Edit ${esc(name)}">\u270E</button>` : ""}</div>`;
-  }).join("")}</div>`).join("")}${passives.length ? `<div class="cp-passives cp-row"><span class="cp-muted">Armor training</span>${passives.map(([k, label]) => `<span class="cp-pill">${esc(label)} ${o.skills[k]}</span>`).join("")}${editable ? '<button type="button" class="cp-pencil" data-od-action="edit-training" aria-label="Edit armor training">\u270E</button>' : ""}</div>` : ""}</div>`;
+    const relief = RANGE_BANDS.filter(([band]) => o.skillRangeReduction?.[k]?.[band]).map(([band, label]) => '<span class="cp-pill">' + esc(label.split(" \xB7 ")[0]) + " relief " + o.skillRangeReduction[k][band] + "</span>").join("");
+    return '<div class="cp-skill-wrap"><div class="cp-skill-row"><button class="cp-card cp-skill-card" type="button" data-action="profile-roll-skill" data-skill="' + esc(k) + '" aria-label="Roll ' + esc(name) + '"><span><b>' + esc(name) + "</b>" + (o.skillStrengthBonuses[k] ? '<span class="cp-pill">STR</span>' : "") + relief + '</span><span class="cp-skill-level"><span class="cp-pips">' + Array.from({ length: 10 }, (_, i) => '<i class="cp-pip ' + (i < value ? "on" : "") + '"></i>').join("") + "</span><strong>" + value + "/10</strong>" + (mod ? '<span class="cp-mod ' + (mod > 0 ? "good" : "bad") + '">' + (mod > 0 ? "+" : "") + mod + "</span>" : "") + "</span></button>" + descriptionButton(name, o.skillDescriptions?.[k]) + (editable && !o.grantedSkills?.[k] ? '<button type="button" class="cp-pencil" data-od-action="edit-skill" data-skill="' + esc(k) + '" aria-label="Edit ' + esc(name) + '">\u270E</button>' : "") + "</div>" + (perks.length ? '<div class="cp-perks cp-perk-descriptions">' + perks.map((p) => '<span class="cp-pill">' + esc(p) + descriptionButton(p, o.skillPerkDescriptions?.[k]?.[p]) + "</span>").join("") + "</div>" : "") + "</div>";
+  };
+  return '<div class="cp-screen"><div class="cp-row cp-roll-options"><label>Roll modifier <input type="number" value="0" data-profile-modifier="skill" aria-label="Skill roll modifier"></label><button type="button" class="secondary" data-action="profile-random-skill">d100 vs d100</button>' + (editable ? '<button type="button" class="secondary" data-od-action="add-skill">+ Skill</button>' : "") + "</div>" + groups.filter(([, entries]) => entries.length).map(([label, entries]) => '<div class="cp-section-title">' + esc(label) + '</div><div class="cp-list">' + entries.map(skillRow).join("") + "</div>").join("") + (passives.length ? '<div class="cp-passives cp-row"><span class="cp-muted">Armor training</span>' + passives.map(([k, label]) => '<span class="cp-pill">' + esc(label) + " " + o.skills[k] + "</span>").join("") + (editable ? '<button type="button" class="cp-pencil" data-od-action="edit-training" aria-label="Edit armor training">\u270E</button>' : "") + "</div>" : "") + "</div>";
 }
 function effectChips(o, gm) {
   const rows2 = o.effectRows || [];
@@ -1187,14 +1240,14 @@ function inventoryView(tracker, gm) {
         controls = '<label>Slot <select data-equip-part="' + esc(i.id) + '">' + options.map(([key, p]) => '<option value="' + esc(key) + '">' + esc(p.label || key) + "</option>").join("") + '</select></label><button type="button" data-od-action="equip" data-id="' + esc(i.id) + '" ' + (!i.quantity || !options.length ? "disabled" : "") + ">Equip</button>";
       }
     } else if (usable) controls = '<button type="button" data-od-action="use-item" data-id="' + esc(i.id) + '" ' + (!i.quantity || subtype === "grenade" ? "disabled" : "") + ">" + (subtype === "grenade" ? "Grenade \xB7 placeholder" : "Use\u2026") + "</button>";
-    return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + edit("item", i.id) + "</div>" + (i.description ? '<p class="cp-muted cp-description">' + esc(i.description) + "</p>" : "") + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
+    return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + descriptionButton(i.name, i.description) + edit("item", i.id) + "</div>" + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
   };
   const equippedItems = inv.items.filter((i) => i.equippedPart).map(renderItem).join("");
   const items = inv.items.filter((i) => !i.equippedPart).map(renderItem).join("");
-  const ammo = o.ammunition.map((a) => `<article class="cp-card cp-row"><b>${esc(a.name)}</b><span class="cp-pill">Ammo \xD7${a.quantity}</span><span class="cp-muted">DMG ${a.damage} \xB7 AP ${a.penetration}</span>${edit("ammo", a.id)}</article>`).join("");
+  const ammo = o.ammunition.map((a) => `<article class="cp-card cp-row"><b>${esc(a.name)}</b><span class="cp-pill">Ammo \xD7${a.quantity}</span><span class="cp-muted">DMG ${a.damage} \xB7 AP ${a.penetration}</span>${descriptionButton(a.name, a.description)}${edit("ammo", a.id)}</article>`).join("");
   const mags = inv.magazines.map((m) => {
     const w = o.weapons.ranged.find((w2) => w2.magazineId === m.id), a = o.ammunition.find((a2) => a2.id === m.loadedAmmoId);
-    return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">Magazine ${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name || "Empty")}${w ? " \xB7 " + esc(w.name) : ""}</span>${gm ? `<button type="button" class="secondary" data-od-action="set-mag-rounds" data-id="${esc(m.id)}">GM \xB7 Set rounds\u2026</button>` : ""}${edit("magazine", m.id)}</div>${gm && !w ? `<div class="cp-row"><select aria-label="Magazine ammunition" data-mag-ammo="${esc(m.id)}">${o.ammunition.map((a2) => `<option value="${esc(a2.id)}">${esc(a2.name)} (${a2.quantity})</option>`).join("")}</select><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button></div>` : ""}</article>`;
+    return `<article class="cp-card"><div class="cp-row"><b>${esc(m.name)}</b><span class="cp-pill">Magazine ${m.loaded}/${m.capacity}</span><span class="cp-muted">${esc(a?.name || "Empty")}${w ? " \xB7 " + esc(w.name) : ""}</span>${gm ? `<button type="button" class="secondary" data-od-action="set-mag-rounds" data-id="${esc(m.id)}">GM \xB7 Set rounds\u2026</button>` : ""}${descriptionButton(m.name, m.description)}${edit("magazine", m.id)}</div>${gm && !w ? `<div class="cp-row"><select aria-label="Magazine ammunition" data-mag-ammo="${esc(m.id)}">${o.ammunition.map((a2) => `<option value="${esc(a2.id)}">${esc(a2.name)} (${a2.quantity})</option>`).join("")}</select><button type="button" data-od-action="fill-mag" data-id="${esc(m.id)}">Fill</button><button type="button" data-od-action="empty-mag" data-id="${esc(m.id)}">Empty to reserve</button></div>` : ""}</article>`;
   }).join("");
   const weapons = ["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((w, index) => {
     let controls = "";
@@ -1204,7 +1257,7 @@ function inventoryView(tracker, gm) {
         controls = '<div class="cp-row"><label>Magazine<select data-weapon-mag="' + index + '"><option value="">Detached</option>' + compatible.map((m) => '<option value="' + esc(m.id) + '" ' + (m.id === w.magazineId ? "selected" : "") + ">" + esc(m.name) + " \xB7 " + m.loaded + "/" + m.capacity + "</option>").join("") + '</select></label><button type="button" data-od-action="mount-mag" data-index="' + index + '">Apply magazine</button></div>';
       } else controls = '<div class="cp-row"><label>Ammo<select data-reload-kind="' + index + '">' + o.ammunition.filter((a) => w.ammoIds.includes(a.id)).map((a) => '<option value="' + esc(a.id) + '" ' + (a.id === w.loadedAmmoId ? "selected" : "") + ">" + esc(a.name) + " (" + a.quantity + ")</option>").join("") + '</select></label><button type="button" data-od-action="reload-weapon" data-index="' + index + '">Reload built-in magazine</button></div>';
     }
-    return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + esc(kind === "ranged" ? weaponCategoryLabel(w.weaponCategory) : kind) + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + (Object.keys(w.rangeReduction || {}).length ? '<span class="cp-muted">' + esc(bonusText({ rangeReduction: w.rangeReduction })) + "</span>" : "") + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
+    return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + esc(kind === "ranged" ? weaponCategoryLabel(w.weaponCategory) : kind) + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + (Object.keys(w.rangeReduction || {}).length ? '<span class="cp-muted">' + esc(bonusText({ rangeReduction: w.rangeReduction })) + "</span>" : "") + descriptionButton(w.name, w.description) + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
   }));
   const group = (label, html) => html ? `<div class="cp-section-title">${label}</div><div class="cp-list">${html}</div>` : "";
   return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button><button type="button" data-od-action="open-item-pool">Campaign item pool</button></div>' : ""}${group("Equipped", equippedItems)}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!equippedItems && !items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
@@ -1217,6 +1270,21 @@ function templatesView(library, gm) {
 // ui/compactHud.js
 function compactHud({ token, tracker, floating, target, targetData, skills, weapons, draft: draft2, parts, ammunition }) {
   return `<section class="od-hud cp-screen"><div class="cp-row"><div><span class="cp-section-title">Character</span><h3>${esc(token.name || "Character")}</h3></div><span class="cp-pill">${Object.entries(tracker.body).filter(([k]) => !["Shield", "Special"].includes(k)).reduce((n2, [, p]) => n2 + p.current, 0)} HP</span><button type="button" data-action="${floating ? "close-character-hud" : "open-character-hud"}" class="secondary">${floating ? "Close HUD" : "Floating HUD"}</button></div><div class="od-hud-grid"><div class="cp-card"><div class="cp-section-title">Weapon & skill</div><label>Weapon<select data-hud-attack-field="weaponName">${weapons}</select></label><label>Skill<select data-hud-attack-field="skill">${skills}</select></label>${ammunition.replaceAll("data-attack-field=", "data-hud-attack-field=")}</div><div class="cp-card"><div class="cp-section-title">Target</div><div class="cp-row"><b>${esc(target?.name || "No target selected")}</b><span data-target-distance class="od-target-distance"></span><span data-range-modifier="attack" class="od-range-readout cp-muted"></span><button type="button" data-action="pick-attack-target">Pick on map</button></div><label>Body zone<select data-hud-attack-field="targetPart">${parts.map(([key, label]) => `<option value="${esc(key)}" ${key === draft2.targetPart ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><p class="cp-muted">${targetData ? "Target selected \xB7 V1 armor, Parry and damage rules" : "Select a visible target to attack."}</p></div><div class="cp-card"><div class="cp-section-title">Action</div><label>Attack bonus<input type="number" value="${Number(draft2.attackBonuses) || 0}" data-hud-attack-field="attackBonuses"></label><label>Attack penalty<input type="number" value="${Number(draft2.attackPenalties) || 0}" data-hud-attack-field="attackPenalties"></label><button type="button" data-action="perform-attack" ${!target ? "disabled" : ""}>Attack</button></div></div><p class="cp-muted" role="status">${esc(tracker.lastRoll?.summary || "No rolls yet.")}</p></section>`;
+}
+
+// poolMetadata.js
+function createPoolMetadata({ getMetadata, onMetadataChange, onChange }) {
+  let revision = 0, request = 0;
+  onMetadataChange((metadata) => {
+    revision++;
+    onChange(metadata || {});
+  });
+  return async () => {
+    const current2 = ++request, before = revision;
+    const metadata = await getMetadata();
+    if (current2 === request && before === revision) onChange(metadata || {});
+    return metadata;
+  };
 }
 
 // itemPool.js
@@ -1276,6 +1344,7 @@ function captureBlueprint(tracker, type, id) {
     }
     if (values.abilities) values.abilities = values.abilities.map((ability, index) => ({ ...ability, id: "ability-" + index }));
   }
+  if (entry.description) values.description = String(entry.description).slice(0, 2e3);
   return { format: "odyssey-item-blueprint", version: 1, type, values, dependencies };
 }
 function validateBlueprint(raw) {
@@ -1430,7 +1499,7 @@ function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImp
     for (const details2 of list.querySelectorAll("details[data-pool-category]")) expanded.set(details2.dataset.poolCategory, details2.open);
     const row = (e) => {
       const b = e.blueprint, v = b.values;
-      return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : ""].filter(Boolean).join(" \xB7 ")) + '</span><button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
+      return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : ""].filter(Boolean).join(" \xB7 ")) + "</span>" + descriptionButton(v.name, v.description) + '<button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
     };
     if (search) {
       const words = search.split(/\s+/);
@@ -1516,8 +1585,8 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   dialog.innerHTML = `<form><h2>${existing.id ? "Edit item" : "New item"}</h2>${select("kind", "Type", ITEM_TYPES, type)}${field("name", "Name", existing.name || "")}${field("quantity", "Quantity / ammo reserve", existing.quantity ?? 1, "number", 999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description || "")}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
   const form = dialog.querySelector("form"), host = dialog.querySelector("[data-type-fields]");
   const rangeEditor = (prefix, value = {}) => `<fieldset class="od-range-reduction"><legend>Range penalty reduction \xB7 per band</legend>${RANGE_BANDS.map(([key, label]) => field(prefix + key, label, value[key] || 0, "number")).join("")}</fieldset>`;
-  function bonusEditor(bonuses = {}, allowSkills = true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${rangeEditor("bonusRange:", bonuses.rangeReduction)}${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
+  function bonusEditor(bonuses = {}, allowSkills = true, allowRange = true) {
+    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${allowRange ? rangeEditor("bonusRange:", bonuses.rangeReduction) : ""}${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
   }
   function abilityRow(a = {}) {
     return `<div class="od-ability-row">${field("abilityName", "Ability", a.name || "")}${field("abilityLevel", "Level", a.level || 0, "number", 10)}${field("abilityDescription", "Description", a.description || "")}<button type="button" data-remove-ability aria-label="Remove ability">\xD7</button></div>`;
@@ -1553,7 +1622,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
       if (values.subtype === "stim") html += bonusEditor(values.bonuses, false);
       if (!values.subtype || values.subtype === "grenade") html += '<p class="cp-muted">Grenades have no action yet.</p>';
     }
-    if (kind === "resource") html += bonusEditor(values.bonuses);
+    if (kind === "resource") html += bonusEditor(values.bonuses, true, false);
     if (kind === "ammo") html += field("damage", "Damage / round", values.damage ?? 0, "number") + field("penetration", "Armor penetration", values.penetration ?? 0, "number");
     if (kind === "magazine") html += field("capacity", "Capacity", values.capacity ?? 6, "number") + field("loaded", "Rounds \xB7 GM correction", values.loaded ?? 0, "number") + select("loadedAmmoId", "Ammunition", [["", "Empty"], ...ammunition.map((a) => [a.id, a.name])], values.loadedAmmoId || "");
     if (kind === "weapon") {
@@ -1568,7 +1637,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     if (["armor", "shield", "implant"].includes(kind)) {
       html += field("armor", "Armor", values.armor ?? 0, "number") + field("criticalMax", kind === "implant" ? "Body part HP bonus" : "Critical durability", values.criticalMax ?? 1, "number") + (kind === "implant" ? "" : field("criticalDamage", "Critical damage taken", values.criticalDamage ?? 0, "number")) + '<fieldset data-equipment-slots class="od-equipment-slots"><legend>Equipment slots \xB7 choose allowed parts</legend>' + [["any", "Any part"], ...parts, ...values.slots.filter((key) => key !== "any" && !parts.some(([k]) => k === key)).map((key) => [key, key])].map(([key, label]) => checkbox("equipmentSlot", label, values.slots.includes(key)).replace('name="equipmentSlot"', 'name="equipmentSlot" value="' + esc(key) + '"')).join("") + "</fieldset>";
       if (kind === "implant") html += '<p class="cp-muted">Adds maximum body-part HP. Equipping does not heal wounds.</p>';
-      if (kind === "implant") html += checkbox("playerRemovable", "Player may equip / remove this implant", values.playerRemovable) + bonusEditor(values.bonuses) + `<fieldset><legend>Granted abilities \xB7 available only while equipped</legend><div data-abilities>${(values.abilities || []).map(abilityRow).join("")}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
+      if (kind === "implant") html += checkbox("playerRemovable", "Player may equip / remove this implant", values.playerRemovable) + bonusEditor(values.bonuses, true, false) + `<fieldset><legend>Granted abilities \xB7 available only while equipped</legend><div data-abilities>${(values.abilities || []).map(abilityRow).join("")}</div><button type="button" data-add-ability>+ Ability</button></fieldset>`;
     }
     host.innerHTML = html;
     if (form.elements.weaponCategory && !existing.id) form.elements.weaponCategory.required = true;
@@ -1640,9 +1709,9 @@ function skillEditor(o, key) {
   const existing = key && Object.hasOwn(o.skills, key), core = ["Melee", "Parry"].includes(key);
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog";
-  dialog.innerHTML = `<form><h2>${existing ? "Edit skill" : "New skill"}</h2><label>Name<input name="name" required maxlength="40" value="${esc(existing ? o.skillLabels[key] || key : "")}"></label><label>Base level<input name="level" type="number" min="0" max="10" value="${existing ? o.skills[key] : 0}"></label><label>Category<select name="category">${["combat", "abilities", "applied"].map((c) => `<option ${o.skillCategories[key] === c ? "selected" : ""}>${c}</option>`).join("")}</select></label><label class="od-check"><input name="strength" type="checkbox" ${o.skillStrengthBonuses[key] ? "checked" : ""}>Strength bonus for attack damage</label><fieldset><legend>Perks</legend><p class="cp-muted">Combined perk relief for attacks using this skill. Enter each distance band separately.</p>${RANGE_BANDS.map(([band, label]) => `<label>${esc(label)} \xB7 penalty reduction<input name="perkRange:${band}" type="number" min="0" max="999" value="${o.skillRangeReduction?.[key]?.[band] || 0}"></label>`).join("")}<div data-perks></div><button type="button" data-add-perk>+ Perk</button></fieldset><div class="cp-row"><button type="button" data-cancel>Cancel</button>${existing && !core ? '<button type="button" class="danger" data-delete>Delete skill</button>' : ""}<button type="submit">Save</button></div></form>`;
+  dialog.innerHTML = `<form><h2>${existing ? "Edit skill" : "New skill"}</h2><label>Name<input name="name" required maxlength="40" value="${esc(existing ? o.skillLabels[key] || key : "")}"></label><label>Description<textarea name="description" maxlength="2000">${esc(o.skillDescriptions?.[key] || "")}</textarea></label><label>Base level<input name="level" type="number" min="0" max="10" value="${existing ? o.skills[key] : 0}"></label><label>Category<select name="category">${["combat", "abilities", "applied"].map((c) => `<option ${o.skillCategories[key] === c ? "selected" : ""}>${c}</option>`).join("")}</select></label><label class="od-check"><input name="strength" type="checkbox" ${o.skillStrengthBonuses[key] ? "checked" : ""}>Strength bonus for attack damage</label><fieldset><legend>Perks</legend><p class="cp-muted">Combined perk relief for attacks using this skill. Enter each distance band separately.</p>${RANGE_BANDS.map(([band, label]) => `<label>${esc(label)} \xB7 penalty reduction<input name="perkRange:${band}" type="number" min="0" max="999" value="${o.skillRangeReduction?.[key]?.[band] || 0}"></label>`).join("")}<div data-perks></div><button type="button" data-add-perk>+ Perk</button></fieldset><div class="cp-row"><button type="button" data-cancel>Cancel</button>${existing && !core ? '<button type="button" class="danger" data-delete>Delete skill</button>' : ""}<button type="submit">Save</button></div></form>`;
   const list = dialog.querySelector("[data-perks]");
-  const add = (value) => list.insertAdjacentHTML("beforeend", `<div class="cp-row"><input name="perk" maxlength="40" value="${esc(value)}" aria-label="Perk"><button type="button" data-remove-perk aria-label="Remove perk">\xD7</button></div>`);
+  const add = (value) => list.insertAdjacentHTML("beforeend", `<div class="cp-row"><input name="perk" maxlength="40" value="${esc(value)}" aria-label="Perk"><textarea name="perkDescription" maxlength="2000" aria-label="Perk description" placeholder="Perk description">${esc(o.skillPerkDescriptions?.[key]?.[value] || "")}</textarea><button type="button" data-remove-perk aria-label="Remove perk">\xD7</button></div>`);
   for (const p of o.skillPerks[key] || []) add(p);
   document.body.append(dialog);
   return new Promise((resolve) => {
@@ -1664,7 +1733,7 @@ function skillEditor(o, key) {
     dialog.querySelector("form").onsubmit = (e) => {
       e.preventDefault();
       const f = e.target;
-      finish({ name: f.elements.name.value.trim(), level: Number(f.elements.level.value), category: f.elements.category.value, strength: f.elements.strength.checked, rangeReduction: normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([band]) => [band, f.elements["perkRange:" + band].value]))), perks: [...list.querySelectorAll("input")].map((e2) => e2.value.trim()).filter(Boolean) });
+      finish({ name: f.elements.name.value.trim(), level: Number(f.elements.level.value), category: f.elements.category.value, description: f.elements.description.value.trim(), perkDescriptions: Object.fromEntries([...list.children].map((row) => [row.querySelector('[name="perk"]').value.trim(), row.querySelector('[name="perkDescription"]').value.trim()]).filter(([name]) => name)), strength: f.elements.strength.checked, rangeReduction: normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([band]) => [band, f.elements["perkRange:" + band].value]))), perks: [...list.querySelectorAll("input")].map((e2) => e2.value.trim()).filter(Boolean) });
     };
     dialog.showModal();
   });
@@ -1682,6 +1751,7 @@ function sanitizeAmmunition(raw) {
   }).map((item) => ({
     id: item.id,
     name: String(item.name || "Ammo").trim() || "Ammo",
+    description: String(item.description || "").trim().slice(0, 2e3),
     damage: integer(item.damage, 999),
     penetration: modifier(item.penetration),
     quantity: integer(item.quantity)
@@ -5397,7 +5467,7 @@ var LIBRARY_FORMAT = "odyssey-template-library";
 var TEMPLATE_FORMAT = "odyssey-character-template";
 var LIBRARY_ITEM_KEY = "com.codex.body-hp/template-library";
 var LIBRARY_STORAGE_KEY = "odyssey.templates.v1";
-var profileFields = ["skills", "skillCategories", "skillStrengthBonuses", "skillLabels", "skillPerks", "skillRangeReduction", "attributes", "weapons", "ammunition", "inventory"];
+var profileFields = ["skills", "skillCategories", "skillStrengthBonuses", "skillLabels", "skillPerks", "skillDescriptions", "skillPerkDescriptions", "skillRangeReduction", "attributes", "weapons", "ammunition", "inventory"];
 function profileData(tracker) {
   return {
     enabled: true,
@@ -5516,6 +5586,7 @@ function formDialog(title, fields, { danger = false, message = "", onChange } = 
   });
 }
 function installCharacterTools(host) {
+  installDescriptions();
   const { OBR: OBR2, sanitize, getToken, getRole, canControl, update, refreshOverlay, render: render2, status, download } = host;
   let library, storageError = "";
   try {
@@ -5524,7 +5595,7 @@ function installCharacterTools(host) {
     library = emptyLibrary();
     storageError = e.message;
   }
-  let poolMetadata = {}, catalog = { entries: [], errors: 0 }, poolDialog = null, scanTimer = null, scanRunning = false, scanAgain = false, scanFingerprint = "";
+  let poolMetadata = {}, catalog = { entries: [], errors: 0 }, poolDialog = null, scanTimer = null, scanPromise = null, scanFingerprint = "";
   const knownBlueprintIds = /* @__PURE__ */ new Map();
   const refreshPool = (metadata) => {
     poolMetadata = metadata || {};
@@ -5532,6 +5603,7 @@ function installCharacterTools(host) {
     poolDialog?.refresh();
     render2();
   };
+  const readPool = createPoolMetadata({ getMetadata: () => OBR2.room.getMetadata(), onMetadataChange: (fn) => OBR2.room.onMetadataChange(fn), onChange: refreshPool });
   const requirePoolGM = async () => {
     if (getRole() !== "GM" || await OBR2.player.getRole() !== "GM") throw new Error("Only the GM can edit the campaign item pool.");
   };
@@ -5555,39 +5627,34 @@ function installCharacterTools(host) {
     }
     await requirePoolGM();
     if (Object.keys(patch).length) await OBR2.room.setMetadata(patch);
-    refreshPool({ ...metadata, ...patch });
+    await readPool();
   };
-  const scanPool = async () => {
-    if (getRole() !== "GM") return;
-    if (scanRunning) {
-      scanAgain = true;
-      return;
-    }
-    scanRunning = true;
-    try {
-      const candidates = /* @__PURE__ */ new Map();
-      for (const token of host.getTokens()) {
-        const t = host.tracker(token), o = t.odyssey;
-        const entries = [...o.inventory.items.map((i) => ["item", i.id]), ...o.inventory.magazines.map((i) => ["magazine", i.id]), ...o.ammunition.map((i) => ["ammo", i.id]), ...["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((i) => ["weapon-" + kind, i.id]))];
-        for (const [type, id] of entries) {
-          const blueprint = captureBlueprint(t, type, id);
-          candidates.set(blueprintText(blueprint), blueprint);
+  const scanPool = () => {
+    if (getRole() !== "GM") return Promise.resolve();
+    if (scanPromise) return scanPromise;
+    scanPromise = (async () => {
+      try {
+        const candidates = /* @__PURE__ */ new Map();
+        for (const token of host.getTokens()) {
+          const t = host.tracker(token), o = t.odyssey;
+          const entries = [...o.inventory.items.map((i) => ["item", i.id]), ...o.inventory.magazines.map((i) => ["magazine", i.id]), ...o.ammunition.map((i) => ["ammo", i.id]), ...["melee", "ranged"].flatMap((kind) => o.weapons[kind].map((i) => ["weapon-" + kind, i.id]))];
+          for (const [type, id] of entries) {
+            const blueprint = captureBlueprint(t, type, id);
+            candidates.set(blueprintText(blueprint), blueprint);
+          }
         }
+        const fingerprint = [...candidates.keys()].sort().join("\n");
+        if (fingerprint === scanFingerprint) return;
+        await putBlueprints([...candidates.values()], true);
+        scanFingerprint = fingerprint;
+      } catch (e) {
+        scanFingerprint = "";
+        status("Item pool: " + e.message, "error");
       }
-      const fingerprint = [...candidates.keys()].sort().join("\n");
-      if (fingerprint === scanFingerprint) return;
-      scanFingerprint = fingerprint;
-      await putBlueprints([...candidates.values()], true);
-    } catch (e) {
-      scanFingerprint = "";
-      status("Item pool: " + e.message, "error");
-    } finally {
-      scanRunning = false;
-      if (scanAgain) {
-        scanAgain = false;
-        schedulePoolScan();
-      }
-    }
+    })().finally(() => {
+      scanPromise = null;
+    });
+    return scanPromise;
   };
   const schedulePoolScan = () => {
     if (getRole() !== "GM" || scanTimer) return;
@@ -5596,8 +5663,7 @@ function installCharacterTools(host) {
       void scanPool();
     }, 400);
   };
-  void OBR2.room.getMetadata().then(refreshPool).catch((e) => status("Item pool: " + e.message, "error"));
-  OBR2.room.onMetadataChange(refreshPool);
+  void readPool().catch((e) => status("Item pool: " + e.message, "error"));
   let busy = false;
   const saveLibrary = (next) => {
     if (getRole() !== "GM") throw new Error("Only the GM can edit templates.");
@@ -5650,8 +5716,9 @@ function installCharacterTools(host) {
       }
     } else if (action === "open-item-pool") {
       await requirePoolGM();
-      refreshPool(await OBR2.room.getMetadata());
+      await readPool();
       await scanPool();
+      await readPool();
       poolDialog = showItemPool({
         getCatalog: () => catalog,
         character: token.name || "Character",
@@ -5668,7 +5735,7 @@ function installCharacterTools(host) {
           if (!await formDialog("Remove from campaign pool?", [], { danger: true, message: "Existing items on characters are kept." })) return false;
           await requirePoolGM();
           await OBR2.room.setMetadata({ [ITEM_POOL_PREFIX + entryId]: { deleted: true } });
-          refreshPool(await OBR2.room.getMetadata());
+          await readPool();
           return true;
         },
         onExport: async () => {
@@ -5720,7 +5787,7 @@ function installCharacterTools(host) {
         if (key && !Object.hasOwn(d.skills, key)) throw new Error("Skill no longer exists.");
         if (value.delete) {
           if (["Melee", "Parry"].includes(key)) throw new Error("Core combat skill cannot be removed.");
-          for (const field of ["skills", "skillLabels", "skillCategories", "skillStrengthBonuses", "skillPerks", "skillRangeReduction"]) delete d[field][key];
+          for (const field of ["skills", "skillLabels", "skillCategories", "skillStrengthBonuses", "skillPerks", "skillDescriptions", "skillPerkDescriptions", "skillRangeReduction"]) delete d[field][key];
           return;
         }
         d.skills[skillKey] = value.level;
@@ -5728,6 +5795,8 @@ function installCharacterTools(host) {
         d.skillCategories[skillKey] = value.category;
         d.skillStrengthBonuses[skillKey] = value.strength;
         d.skillPerks[skillKey] = value.perks;
+        d.skillDescriptions[skillKey] = value.description;
+        d.skillPerkDescriptions[skillKey] = value.perkDescriptions;
         d.skillRangeReduction ?? (d.skillRangeReduction = {});
         d.skillRangeReduction[skillKey] = value.rangeReduction;
       }, true);
@@ -5749,9 +5818,17 @@ function installCharacterTools(host) {
       const targets = host.getTokens().filter((t) => getRole() === "GM" || t.visible !== false);
       const partsFor = (target2) => Object.entries(host.tracker(target2).body).filter(([, p]) => getRole() === "GM" || !p.hidden).map(([k, p]) => [k, p.label || k]);
       const fields = [{ name: "target", label: "Target", value: "", options: [["", "Self"], ...targets.filter((t) => t.id !== tokenId).map((t) => [t.id, t.name || t.id])] }];
-      if (item.subtype !== "stim") fields.push({ name: "part", label: "Body part", options: partsFor(token) });
+      const repairOptions = (target2) => host.tracker(target2).odyssey.inventory.items.filter((i) => ["armor", "shield"].includes(i.kind) && i.quantity > 0 && i.criticalDamage > 0 && (getRole() === "GM" || !i.equippedPart || !host.tracker(target2).body[i.equippedPart]?.hidden)).map((i) => [i.id, i.name + " \xB7 durability " + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + (i.equippedPart ? " \xB7 equipped" : " \xB7 inventory")]);
+      if (item.subtype === "repairkit") fields.push({ name: "gear", label: "Armor in inventory", options: [["", "Choose damaged armor"], ...repairOptions(token)] });
+      else if (item.subtype !== "stim") fields.push({ name: "part", label: "Body part", options: partsFor(token) });
       const value = await formDialog("Use " + item.name, fields, { onChange: (form, event) => {
-        if (event.target.name !== "target" || !form.elements.part) return;
+        if (event.target.name !== "target") return;
+        if (form.elements.gear) {
+          const target3 = host.getToken(form.elements.target.value || tokenId);
+          form.elements.gear.innerHTML = '<option value="">Choose damaged armor</option>' + (target3 ? repairOptions(target3).map(([key, label]) => '<option value="' + esc(key) + '">' + esc(label) + "</option>").join("") : "");
+          return;
+        }
+        if (!form.elements.part) return;
         const target2 = host.getToken(form.elements.target.value || tokenId);
         form.elements.part.innerHTML = target2 ? partsFor(target2).map(([key, label]) => '<option value="' + esc(key) + '">' + esc(label) + "</option>").join("") : "";
       } });
@@ -5759,7 +5836,7 @@ function installCharacterTools(host) {
       check(tokenId);
       const target = host.getToken(value.target || tokenId);
       if (!target) throw new Error("Target no longer exists.");
-      await host.useItem(tokenId, id, target.id, value.part || "");
+      await host.useItem(tokenId, id, target.id, item.subtype === "repairkit" ? value.gear || "" : value.part || "");
     } else if (action === "reload-weapon") {
       const index = Number(node.dataset.index), ammoId = readSelect(panel, "data-reload-kind", index);
       await mutate(tokenId, (t) => reloadMagazine(t.odyssey, index, ammoId), true);
@@ -6020,6 +6097,8 @@ var DEFAULT_TRACKER_DATA = {
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     skillLabels: {},
     skillPerks: {},
+    skillDescriptions: {},
+    skillPerkDescriptions: {},
     skillRangeReduction: {},
     attributes: {
       Strength: 0,
@@ -6219,11 +6298,17 @@ function sanitizeOdysseyData(raw) {
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
   next.skillRangeReduction = {};
+  next.skillDescriptions = {};
+  next.skillPerkDescriptions = {};
   for (const skillName of Object.keys(next.skills)) {
     const reduction = sanitizeMagazine({ rangeReduction: raw.skillRangeReduction?.[skillName] }).rangeReduction;
     if (Object.keys(reduction).length) next.skillRangeReduction[skillName] = reduction;
+    const description = String(raw.skillDescriptions?.[skillName] || "").trim().slice(0, 2e3);
+    if (description) next.skillDescriptions[skillName] = description;
     next.skillLabels[skillName] = String(rawSkillLabels[skillName] ?? skillName).trim().slice(0, 40) || skillName;
     next.skillPerks[skillName] = Array.isArray(rawSkillPerks[skillName]) ? rawSkillPerks[skillName].map((perk) => String(perk ?? "").trim().slice(0, 40)).filter(Boolean).slice(0, 12) : [];
+    const perkDescriptions = Object.fromEntries(next.skillPerks[skillName].map((name) => [name, String(raw.skillPerkDescriptions?.[skillName]?.[name] || "").trim().slice(0, 2e3)]).filter(([, text2]) => text2));
+    if (Object.keys(perkDescriptions).length) next.skillPerkDescriptions[skillName] = perkDescriptions;
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
@@ -6245,6 +6330,7 @@ function sanitizeWeapons(raw, ranged = false) {
   return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
     id: String(item.id || `legacy-${ranged ? "ranged" : "melee"}-${index}`),
     name: String(item.name ?? "").trim() || "Weapon",
+    description: String(item.description || "").trim().slice(0, 2e3),
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
     ...ranged ? { ...Object.hasOwn(item, "magazineId") ? { magazineId: String(item.magazineId || "") } : {}, ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}
@@ -9007,6 +9093,7 @@ function renderSelectedToken() {
   if (characterTools?.isBusy()) ui.selectedTokenPanel.querySelectorAll("[data-od-action]").forEach((e) => {
     if (e instanceof HTMLButtonElement) e.disabled = true;
   });
+  characterTools?.syncPool();
   arrangeCombatPanels(ui.selectedTokenPanel);
   paintRangeAdjustments();
   refreshTargetDistance();
@@ -10031,6 +10118,10 @@ async function useCharacterItem(sourceId, itemId, targetId, partName) {
     const sourceData = getTrackerData(source), targetData = source === target ? sourceData : getTrackerData(target);
     const item = sourceData.odyssey.inventory.items.find((i) => i.id === itemId);
     if (!item || !["consumable", "medical"].includes(item.kind) || item.quantity < 1) throw new Error("No usable item available.");
+    if (playerRole !== "GM" && item.subtype === "repairkit") {
+      const gear = targetData.odyssey.inventory.items.find((i) => i.id === partName);
+      if (gear?.equippedPart && targetData.body[gear.equippedPart]?.hidden) throw new Error("Target is unavailable.");
+    }
     useItemOnTracker(targetData, item, partName, effectId);
     item.quantity -= 1;
     source.metadata[META_KEY] = sanitizeTrackerData(sourceData);

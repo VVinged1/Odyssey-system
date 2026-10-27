@@ -37,6 +37,7 @@ export function captureBlueprint(tracker,type,id) {
     }
     if(values.abilities)values.abilities=values.abilities.map((ability,index)=>({...ability,id:'ability-'+index}));
   }
+  if(entry.description)values.description=String(entry.description).slice(0,2000);
   return {format:'odyssey-item-blueprint',version:1,type,values,dependencies};
 }
 export function validateBlueprint(raw) {

@@ -521,7 +521,7 @@ function normalizeInventory(raw, weapons = []) {
     criticalMax: int(r.criticalMax, 999),
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
     playerRemovable: r.playerRemovable === true,
-    bonuses: normalizeBonuses(r.bonuses),
+    bonuses: normalizeBonuses(["resource", "implant"].includes(r.kind) ? { ...r.bonuses, rangeReduction: {} } : r.bonuses),
     abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
     legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
@@ -536,6 +536,7 @@ function normalizeInventory(raw, weapons = []) {
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`),
     name: text(r.name) || "Magazine",
+    description: text(r.description, 2e3),
     capacity: int(r.capacity, 999),
     loadedAmmoId: text(r.loadedAmmoId),
     loaded: int(r.loaded, int(r.capacity, 999))
@@ -557,7 +558,7 @@ function normalizeInventory(raw, weapons = []) {
     if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
     let mag = magazines.find((m) => m.id === id);
     if (!mag) {
-      mag = { id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
+      mag = { id, name: `${weapon.name} magazine`, description: "", capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId };
       magazines.push(mag);
     }
     weapon.magazineId = id;
@@ -3882,6 +3883,7 @@ function sanitizeAmmunition(raw) {
   }).map((item) => ({
     id: item.id,
     name: String(item.name || "Ammo").trim() || "Ammo",
+    description: String(item.description || "").trim().slice(0, 2e3),
     damage: integer(item.damage, 999),
     penetration: modifier(item.penetration),
     quantity: integer(item.quantity)
@@ -3996,6 +3998,8 @@ var DEFAULT_TRACKER_DATA = {
     skillStrengthBonuses: structuredClone(DEFAULT_ODYSSEY_SKILL_STRENGTH_BONUSES),
     skillLabels: {},
     skillPerks: {},
+    skillDescriptions: {},
+    skillPerkDescriptions: {},
     skillRangeReduction: {},
     attributes: {
       Strength: 0,
@@ -4140,11 +4144,17 @@ function sanitizeOdysseyData(raw) {
     next.attributes[key] = clamp(Number(fallbackValue) || 0, 0, 20);
   }
   next.skillRangeReduction = {};
+  next.skillDescriptions = {};
+  next.skillPerkDescriptions = {};
   for (const skillName of Object.keys(next.skills)) {
     const reduction = sanitizeMagazine({ rangeReduction: raw.skillRangeReduction?.[skillName] }).rangeReduction;
     if (Object.keys(reduction).length) next.skillRangeReduction[skillName] = reduction;
+    const description = String(raw.skillDescriptions?.[skillName] || "").trim().slice(0, 2e3);
+    if (description) next.skillDescriptions[skillName] = description;
     next.skillLabels[skillName] = String(rawSkillLabels[skillName] ?? skillName).trim().slice(0, 40) || skillName;
     next.skillPerks[skillName] = Array.isArray(rawSkillPerks[skillName]) ? rawSkillPerks[skillName].map((perk) => String(perk ?? "").trim().slice(0, 40)).filter(Boolean).slice(0, 12) : [];
+    const perkDescriptions = Object.fromEntries(next.skillPerks[skillName].map((name) => [name, String(raw.skillPerkDescriptions?.[skillName]?.[name] || "").trim().slice(0, 2e3)]).filter(([, text2]) => text2));
+    if (Object.keys(perkDescriptions).length) next.skillPerkDescriptions[skillName] = perkDescriptions;
   }
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
@@ -4166,6 +4176,7 @@ function sanitizeWeapons(raw, ranged = false) {
   return raw.filter((item) => item && typeof item === "object").map((item, index) => ({
     id: String(item.id || `legacy-${ranged ? "ranged" : "melee"}-${index}`),
     name: String(item.name ?? "").trim() || "Weapon",
+    description: String(item.description || "").trim().slice(0, 2e3),
     damage: clamp(Number(item.damage ?? 0) || 0, -999, 999),
     accuracy: clamp(Number(item.accuracy ?? 0) || 0, -999, 999),
     ...ranged ? { ...Object.hasOwn(item, "magazineId") ? { magazineId: String(item.magazineId || "") } : {}, ...sanitizeMagazine(item), id: String(item.id || `legacy-ranged-${index}`) } : {}

@@ -20,7 +20,7 @@ export function normalizeInventory(raw, weapons = []) {
     subtype: ['grenade','medkit','repairkit','stim'].includes(r.subtype)?r.subtype:r.kind==='medical'?'medkit':'grenade',
     healCritical: int(r.healCritical ?? 1,999), slots:[...new Set((Array.isArray(r.slots)?r.slots:[r.slot||'any']).map(s=>text(s,40)).filter(Boolean))].slice(0,100), slot: text(r.slot||'any',40),
     criticalMax:int(r.criticalMax,999), criticalDamage:int(r.criticalDamage,int(r.criticalMax,999)),
-    playerRemovable:r.playerRemovable===true, bonuses:normalizeBonuses(r.bonuses),
+    playerRemovable:r.playerRemovable===true, bonuses:normalizeBonuses(['resource','implant'].includes(r.kind)?{...r.bonuses,rangeReduction:{}}:r.bonuses),
     abilities:(Array.isArray(r.abilities)?r.abilities:[]).slice(0,20).map((a,j)=>({id:text(a.id||'ability-'+j),name:text(a.name)||'Ability',level:int(a.level,10),description:text(a.description,2000)})),
     legacyEquipment: r.legacyEquipment ?? (raw?.version<3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40), previousArmor: int(r.previousArmor, 999),
@@ -32,7 +32,7 @@ export function normalizeInventory(raw, weapons = []) {
   }
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`), name: text(r.name) || 'Magazine',
-    capacity: int(r.capacity, 999), loadedAmmoId: text(r.loadedAmmoId),
+    description:text(r.description,2000), capacity: int(r.capacity, 999), loadedAmmoId: text(r.loadedAmmoId),
     loaded: int(r.loaded, int(r.capacity, 999)),
   }));
   const assigned = new Set();
@@ -44,7 +44,7 @@ export function normalizeInventory(raw, weapons = []) {
     if (!id) { weapon.magazineId = ''; weapon.loaded = 0; weapon.loadedAmmoId = ''; continue; }
     if (assigned.has(id)) id = `recovered-mag-${weapon.id || i}-${i}`;
     let mag = magazines.find(m => m.id === id);
-    if (!mag) { mag = {id, name: `${weapon.name} magazine`, capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId}; magazines.push(mag); }
+    if (!mag) { mag = {id, name: `${weapon.name} magazine`, description:'', capacity: weapon.capacity, loaded: weapon.loaded, loadedAmmoId: weapon.loadedAmmoId}; magazines.push(mag); }
     weapon.magazineId = id;
     assigned.add(id);
     // V1 remains authoritative while mounted. Normalization persists this mirror
@@ -188,22 +188,22 @@ export function saveInventoryEntry(tracker,origin,values,id) {
   if(origin&&origin.type!==dest)deleteInventoryEntry(tracker,origin.type,origin.id);
   const same=origin?.type===dest?existing:null;
   if(kind==='ammo') {
-    const row={id,name:values.name,damage:Number(values.damage)||0,penetration:Number(values.penetration)||0,quantity:Number(values.quantity)||0};
+    const row={id,name:values.name,description:text(values.description,2000),damage:Number(values.damage)||0,penetration:Number(values.penetration)||0,quantity:Number(values.quantity)||0};
     if(same)Object.assign(same,row);else {if(o.ammunition.length>=200)throw new Error('Too many ammo types.');o.ammunition.push(row);}return;
   }
   if(kind==='magazine') {
     const capacity=Number(values.capacity),loaded=Number(values.loaded);
     if(!Number.isInteger(capacity)||capacity<1||capacity>999||!Number.isInteger(loaded)||loaded<0||loaded>capacity)throw new Error('Invalid magazine capacity or rounds.');
     const mounted=same&&magazineWeapon(o,same.id);if(mounted&&capacity!==mounted.capacity)throw new Error('Detach the magazine before changing its capacity.');
-    if(same){same.capacity=capacity;same.name=values.name;setMagazineRounds(o,same.id,loaded,values.loadedAmmoId);}
+    if(same){same.capacity=capacity;same.name=values.name;same.description=text(values.description,2000);setMagazineRounds(o,same.id,loaded,values.loadedAmmoId);}
     else {
       const quantity=Number(values.quantity??1);if(!Number.isInteger(quantity)||quantity<1||quantity>1000||o.inventory.magazines.length+quantity>1000)throw new Error('Invalid magazine quantity or inventory is full.');
-      for(let i=0;i<quantity;i++){const magazineId=i?id+'-copy-'+i:id;o.inventory.magazines.push({id:magazineId,name:values.name,capacity,loaded:0,loadedAmmoId:''});setMagazineRounds(o,magazineId,loaded,values.loadedAmmoId);}
+      for(let i=0;i<quantity;i++){const magazineId=i?id+'-copy-'+i:id;o.inventory.magazines.push({id:magazineId,name:values.name,description:text(values.description,2000),capacity,loaded:0,loadedAmmoId:''});setMagazineRounds(o,magazineId,loaded,values.loadedAmmoId);}
     }return;
   }
   if(kind==='weapon') {
     if([...o.weapons.melee,...o.weapons.ranged].some(w=>w!==same&&w.name===values.name))throw new Error('A weapon with this name already exists.');
-    const row={id,name:values.name,accuracy:Number(values.accuracy)||0,damage:Number(values.damage)||0};
+    const row={id,name:values.name,description:text(values.description,2000),accuracy:Number(values.accuracy)||0,damage:Number(values.damage)||0};
     if(weaponKind==='ranged') {
       row.weaponCategory=normalizeWeaponCategory(values.weaponCategory);row.rangeReduction=normalizeRangeReduction(values.rangeReduction);
       const acceptsMagazines=values.acceptsMagazines!==false;

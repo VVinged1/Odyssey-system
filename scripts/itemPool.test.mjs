@@ -1,3 +1,4 @@
+import {createPoolMetadata} from '../poolMetadata.js';
 import {armorPoolTier,poolCategoryPaths,groupPoolEntries} from '../poolCategories.js';
 import {distanceLabel,createTargetDistance} from '../targetDistance.js';
 import assert from 'node:assert/strict';
@@ -57,5 +58,15 @@ await test('Cancelling an in-flight ruler calculation cannot leave a local artif
  const items=[];let release;const delayed=new Promise(resolve=>release=resolve);
  const OBR={scene:{items:{getItemBounds:async()=>({center:{x:0,y:0}})},grid:{getScale:async()=>({parsed:{multiplier:1,unit:'m'}}),getDistance:async()=>delayed},local:{getItems:async()=>[],addItems:async rows=>items.push(...rows),deleteItems:async()=>{items.length=0;}}}};
  const ruler=createTargetDistance({OBR,buildRuler:()=>{throw new Error('Cancelled ruler must not be built.');},onRead:()=>{}});ruler.preview({id:'source'},{x:100,y:100});await new Promise(resolve=>setTimeout(resolve,90));await ruler.clear();release(1);await new Promise(resolve=>setTimeout(resolve,0));assert.equal(items.length,0);
+});
+await test('Late room reads never erase metadata received after token switches',async()=>{
+ const pending=[],changes=[];let notify;const read=createPoolMetadata({getMetadata:()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),onMetadataChange:fn=>notify=fn,onChange:data=>changes.push(data)});
+ const initial=read();notify({catalog:'new item'});pending[0].resolve({});await initial;assert.deepEqual(changes,[{catalog:'new item'}]);
+ const a=read(),b=read();pending[2].resolve({catalog:'second token'});await b;pending[1].resolve({});await a;assert.equal(changes.at(-1).catalog,'second token');
+ const failed=read();pending[3].reject(new Error('offline'));await assert.rejects(failed);assert.equal(changes.at(-1).catalog,'second token');
+});
+await test('All inventory type descriptions remain portable through pool JSON',()=>{
+ const source=character();saveInventoryEntry(source,null,{kind:'weapon',weaponKind:'melee',name:'Blade',damage:2,description:'Blade details'},'blade');saveInventoryEntry(source,null,{kind:'magazine',name:'Mag',capacity:6,loaded:0,description:'Mag details'},'mag');source.odyssey.ammunition[0].description='Ball details';
+ for(const [type,id,text]of [['weapon-melee','blade','Blade details'],['magazine','mag','Mag details'],['ammo','ball','Ball details']]){const b=captureBlueprint(source,type,id),target=character();target.odyssey.ammunition=[];const [portable]=parsePoolJSON(JSON.parse(JSON.stringify({format:'odyssey-item-pool',version:1,entries:[b]})));copyBlueprint(target,portable,1,'copy');const actual=type==='ammo'?target.odyssey.ammunition[0]:type==='magazine'?target.odyssey.inventory.magazines[0]:target.odyssey.weapons.melee[0];assert.equal(actual.description,text);}
 });
 console.log(count+' item pool, category, instance and distance checks passed.');

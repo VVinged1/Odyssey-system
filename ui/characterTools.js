@@ -1,3 +1,5 @@
+import {installDescriptions} from './descriptions.js';
+import {createPoolMetadata} from '../poolMetadata.js';
 import {captureBlueprint,blueprintText,blueprintId,validateBlueprint,poolEntries,parsePoolJSON,exportPool,copyBlueprint,ITEM_POOL_PREFIX} from '../itemPool.js';
 import {showItemPool} from './itemPoolView.js';
 import {itemEditor,skillEditor} from './itemEditor.js';
@@ -24,12 +26,14 @@ export function formDialog(title, fields, {danger = false, message = '', onChang
   });
 }
 export function installCharacterTools(host) {
+  installDescriptions();
   const { OBR, sanitize, getToken, getRole, canControl, update, refreshOverlay, render, status, download } = host;
   let library, storageError='';
   try { library=readLibrary(window.localStorage,sanitize); } catch(e) { library=emptyLibrary();storageError=e.message; }
-  let poolMetadata={},catalog={entries:[],errors:0},poolDialog=null,scanTimer=null,scanRunning=false,scanAgain=false,scanFingerprint='';
+  let poolMetadata={},catalog={entries:[],errors:0},poolDialog=null,scanTimer=null,scanPromise=null,scanFingerprint='';
   const knownBlueprintIds=new Map();
   const refreshPool=metadata=>{poolMetadata=metadata||{};catalog=poolEntries(poolMetadata);poolDialog?.refresh();render();};
+  const readPool=createPoolMetadata({getMetadata:()=>OBR.room.getMetadata(),onMetadataChange:fn=>OBR.room.onMetadataChange(fn),onChange:refreshPool});
   const requirePoolGM=async()=>{if(getRole()!=='GM'||await OBR.player.getRole()!=='GM')throw new Error('Only the GM can edit the campaign item pool.');};
   const putBlueprints=async(blueprints,automatic=false)=>{
     await requirePoolGM();const metadata=await OBR.room.getMetadata(),patch={};let count=Object.entries(metadata).filter(([key,value])=>key.startsWith(ITEM_POOL_PREFIX)&&value&&!value.deleted).length;
@@ -38,23 +42,24 @@ export function installCharacterTools(host) {
       const key=ITEM_POOL_PREFIX+id;if(metadata[key]&&(automatic||!metadata[key].deleted))continue;if(Object.hasOwn(patch,key))continue;
       if((!metadata[key]||metadata[key].deleted)&&++count>2000)throw new Error('Campaign item pool is full. Export a backup and remove unused definitions.');patch[key]={blueprint};
     }
-    await requirePoolGM();if(Object.keys(patch).length)await OBR.room.setMetadata(patch);refreshPool({...metadata,...patch});
+    await requirePoolGM();if(Object.keys(patch).length)await OBR.room.setMetadata(patch);await readPool();
   };
-  const scanPool=async()=>{
-    if(getRole()!=='GM')return;if(scanRunning){scanAgain=true;return;}scanRunning=true;
+  const scanPool=()=>{
+    if(getRole()!=='GM')return Promise.resolve();if(scanPromise)return scanPromise;
+    scanPromise=(async()=>{
     try {
       const candidates=new Map();for(const token of host.getTokens()) {
         const t=host.tracker(token),o=t.odyssey;
         const entries=[...o.inventory.items.map(i=>['item',i.id]),...o.inventory.magazines.map(i=>['magazine',i.id]),...o.ammunition.map(i=>['ammo',i.id]),...['melee','ranged'].flatMap(kind=>o.weapons[kind].map(i=>['weapon-'+kind,i.id]))];
         for(const [type,id]of entries){const blueprint=captureBlueprint(t,type,id);candidates.set(blueprintText(blueprint),blueprint);}
       }
-      const fingerprint=[...candidates.keys()].sort().join('\n');if(fingerprint===scanFingerprint)return;scanFingerprint=fingerprint;
-      await putBlueprints([...candidates.values()],true);
-    } catch(e){scanFingerprint='';status('Item pool: '+e.message,'error');}finally{scanRunning=false;if(scanAgain){scanAgain=false;schedulePoolScan();}}
+      const fingerprint=[...candidates.keys()].sort().join('\n');if(fingerprint===scanFingerprint)return;
+      await putBlueprints([...candidates.values()],true);scanFingerprint=fingerprint;
+    } catch(e){scanFingerprint='';status('Item pool: '+e.message,'error');}
+    })().finally(()=>{scanPromise=null;});return scanPromise;
   };
   const schedulePoolScan=()=>{if(getRole()!=='GM'||scanTimer)return;scanTimer=setTimeout(()=>{scanTimer=null;void scanPool();},400);};
-  void OBR.room.getMetadata().then(refreshPool).catch(e=>status('Item pool: '+e.message,'error'));
-  OBR.room.onMetadataChange(refreshPool);
+  void readPool().catch(e=>status('Item pool: '+e.message,'error'));
   let busy=false;
   const saveLibrary=next=>{if(getRole()!=='GM')throw new Error('Only the GM can edit templates.');writeLibrary(window.localStorage,next);library=next;storageError='';render();};
   const check=(id,gm=false)=>{
@@ -83,14 +88,14 @@ export function installCharacterTools(host) {
       await mutate(tokenId,t=>{saveInventoryEntry(t,existing?{type,id}:null,values,entryId);blueprint=captureBlueprint(sanitize(t),entryType,entryId);},true);
       try{await putBlueprints([blueprint]);}catch(e){throw new Error('Item saved on character; campaign pool was not updated: '+e.message);}
     } else if(action==='open-item-pool') {
-      await requirePoolGM();refreshPool(await OBR.room.getMetadata());await scanPool();
+      await requirePoolGM();await readPool();await scanPool();await readPool();
       poolDialog=showItemPool({getCatalog:()=>catalog,character:token.name||'Character',
         onGive:async entryId=>{
           const entry=catalog.entries.find(e=>e.id===entryId);if(!entry)throw new Error('Item definition no longer exists.');
           const value=await formDialog('Give '+entry.blueprint.values.name,[{name:'quantity',label:'Quantity',type:'number',min:1,max:entry.blueprint.type==='ammo'?999999:entry.blueprint.type.startsWith('weapon-')?20:1000,value:1}]);if(!value)return false;
           const copyId=newId();await mutate(tokenId,t=>copyBlueprint(t,entry.blueprint,Number(value.quantity),copyId),true);return true;
         },
-        onDelete:async entryId=>{if(!await formDialog('Remove from campaign pool?',[],{danger:true,message:'Existing items on characters are kept.'}))return false;await requirePoolGM();await OBR.room.setMetadata({[ITEM_POOL_PREFIX+entryId]:{deleted:true}});refreshPool(await OBR.room.getMetadata());return true;},
+        onDelete:async entryId=>{if(!await formDialog('Remove from campaign pool?',[],{danger:true,message:'Existing items on characters are kept.'}))return false;await requirePoolGM();await OBR.room.setMetadata({[ITEM_POOL_PREFIX+entryId]:{deleted:true}});await readPool();return true;},
         onExport:async()=>{await requirePoolGM();download('odyssey-item-pool.json',JSON.stringify(exportPool(catalog.entries),null,2));},
         onImport:()=>new Promise((resolve,reject)=>{
           const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.addEventListener('cancel',()=>resolve(false));
@@ -105,8 +110,8 @@ export function installCharacterTools(host) {
       const value=await skillEditor(o,key);if(!value)return;
       const skillKey=key||newId();await mutate(tokenId,t=>{
         const d=t.odyssey;if(key&&!Object.hasOwn(d.skills,key))throw new Error('Skill no longer exists.');
-        if(value.delete){if(['Melee','Parry'].includes(key))throw new Error('Core combat skill cannot be removed.');for(const field of ['skills','skillLabels','skillCategories','skillStrengthBonuses','skillPerks','skillRangeReduction'])delete d[field][key];return;}
-        d.skills[skillKey]=value.level;d.skillLabels[skillKey]=value.name;d.skillCategories[skillKey]=value.category;d.skillStrengthBonuses[skillKey]=value.strength;d.skillPerks[skillKey]=value.perks;d.skillRangeReduction??={};d.skillRangeReduction[skillKey]=value.rangeReduction;
+        if(value.delete){if(['Melee','Parry'].includes(key))throw new Error('Core combat skill cannot be removed.');for(const field of ['skills','skillLabels','skillCategories','skillStrengthBonuses','skillPerks','skillDescriptions','skillPerkDescriptions','skillRangeReduction'])delete d[field][key];return;}
+        d.skills[skillKey]=value.level;d.skillLabels[skillKey]=value.name;d.skillCategories[skillKey]=value.category;d.skillStrengthBonuses[skillKey]=value.strength;d.skillPerks[skillKey]=value.perks;d.skillDescriptions[skillKey]=value.description;d.skillPerkDescriptions[skillKey]=value.perkDescriptions;d.skillRangeReduction??={};d.skillRangeReduction[skillKey]=value.rangeReduction;
       },true);
     } else if(action==='edit-training') {
       check(tokenId,true);const o=host.tracker(token).odyssey;
@@ -119,13 +124,17 @@ export function installCharacterTools(host) {
       const targets=host.getTokens().filter(t=>getRole()==='GM'||t.visible!==false);
       const partsFor=target=>Object.entries(host.tracker(target).body).filter(([,p])=>getRole()==='GM'||!p.hidden).map(([k,p])=>[k,p.label||k]);
       const fields=[{name:'target',label:'Target',value:'',options:[['','Self'],...targets.filter(t=>t.id!==tokenId).map(t=>[t.id,t.name||t.id])]}];
-      if(item.subtype!=='stim')fields.push({name:'part',label:'Body part',options:partsFor(token)});
+      const repairOptions=target=>host.tracker(target).odyssey.inventory.items.filter(i=>['armor','shield'].includes(i.kind)&&i.quantity>0&&i.criticalDamage>0&&(getRole()==='GM'||!i.equippedPart||!host.tracker(target).body[i.equippedPart]?.hidden)).map(i=>[i.id,i.name+' · durability '+(i.criticalMax-i.criticalDamage)+'/'+i.criticalMax+(i.equippedPart?' · equipped':' · inventory')]);
+      if(item.subtype==='repairkit')fields.push({name:'gear',label:'Armor in inventory',options:[['','Choose damaged armor'],...repairOptions(token)]});
+      else if(item.subtype!=='stim')fields.push({name:'part',label:'Body part',options:partsFor(token)});
       const value=await formDialog('Use '+item.name,fields,{onChange:(form,event)=>{
-        if(event.target.name!=='target'||!form.elements.part)return;
+        if(event.target.name!=='target')return;
+        if(form.elements.gear){const target=host.getToken(form.elements.target.value||tokenId);form.elements.gear.innerHTML='<option value="">Choose damaged armor</option>'+(target?repairOptions(target).map(([key,label])=>'<option value="'+esc(key)+'">'+esc(label)+'</option>').join(''):'');return;}
+        if(!form.elements.part)return;
         const target=host.getToken(form.elements.target.value||tokenId);form.elements.part.innerHTML=target?partsFor(target).map(([key,label])=>'<option value="'+esc(key)+'">'+esc(label)+'</option>').join(''):'';
       }});if(!value)return;
       check(tokenId);const target=host.getToken(value.target||tokenId);if(!target)throw new Error('Target no longer exists.');
-      await host.useItem(tokenId,id,target.id,value.part||'');
+      await host.useItem(tokenId,id,target.id,item.subtype==='repairkit'?value.gear||'':value.part||'');
     } else if(action==='reload-weapon') {
       const index=Number(node.dataset.index),ammoId=readSelect(panel,'data-reload-kind',index);await mutate(tokenId,t=>reloadMagazine(t.odyssey,index,ammoId),true);
     } else if(action==='delete-item') {

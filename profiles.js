@@ -4,7 +4,7 @@ export const LIBRARY_FORMAT = 'odyssey-template-library';
 export const TEMPLATE_FORMAT = 'odyssey-character-template';
 export const LIBRARY_ITEM_KEY = 'com.codex.body-hp/template-library';
 export const LIBRARY_STORAGE_KEY = 'odyssey.templates.v1';
-const profileFields = ['skills','skillCategories','skillStrengthBonuses','skillLabels','skillPerks','skillRangeReduction','attributes','weapons','ammunition','inventory'];
+const profileFields = ['skills','skillCategories','skillStrengthBonuses','skillLabels','skillPerks','skillDescriptions','skillPerkDescriptions','skillRangeReduction','attributes','weapons','ammunition','inventory'];
 export function profileData(tracker) {
   return {enabled:true, minor:tracker.minor || 0, serious:tracker.serious || 0,
     body:structuredClone(tracker.body), odyssey:Object.fromEntries(profileFields.map(k => [k, structuredClone(tracker.odyssey[k])]))};

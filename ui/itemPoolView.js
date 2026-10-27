@@ -1,3 +1,4 @@
+import {descriptionButton} from './descriptions.js';
 import {groupPoolEntries,poolCategoryPaths} from '../poolCategories.js';
 import {esc} from './characterView.js';
 export function showItemPool({getCatalog,character,onGive,onDelete,onExport,onImport}) {
@@ -9,7 +10,7 @@ export function showItemPool({getCatalog,character,onGive,onDelete,onExport,onIm
     const catalog=getCatalog(),search=dialog.querySelector('[data-pool-search]').value.trim().toLowerCase();
     const list=dialog.querySelector('[data-pool-list]');
     for(const details of list.querySelectorAll('details[data-pool-category]'))expanded.set(details.dataset.poolCategory,details.open);
-    const row=e=>{const b=e.blueprint,v=b.values;return '<article class="cp-card cp-row"><b>'+esc(v.name)+'</b><span class="cp-pill">'+esc(v.kind)+'</span><span class="cp-muted">'+esc([v.armor?'Armor '+v.armor:'',v.criticalMax?'HP '+v.criticalMax:'',v.capacity?'Capacity '+v.capacity:'',v.damage?'DMG '+v.damage:''].filter(Boolean).join(' · '))+'</span><button type="button" data-pool-give="'+esc(e.id)+'" '+(busy?'disabled':'')+'>Give item</button><button type="button" data-pool-delete="'+esc(e.id)+'" class="danger" aria-label="Remove definition from pool" '+(busy?'disabled':'')+'>×</button></article>';};
+    const row=e=>{const b=e.blueprint,v=b.values;return '<article class="cp-card cp-row"><b>'+esc(v.name)+'</b><span class="cp-pill">'+esc(v.kind)+'</span><span class="cp-muted">'+esc([v.armor?'Armor '+v.armor:'',v.criticalMax?'HP '+v.criticalMax:'',v.capacity?'Capacity '+v.capacity:'',v.damage?'DMG '+v.damage:''].filter(Boolean).join(' · '))+'</span>'+descriptionButton(v.name,v.description)+'<button type="button" data-pool-give="'+esc(e.id)+'" '+(busy?'disabled':'')+'>Give item</button><button type="button" data-pool-delete="'+esc(e.id)+'" class="danger" aria-label="Remove definition from pool" '+(busy?'disabled':'')+'>×</button></article>';};
     if(search) {
       const words=search.split(/\s+/);const matches=catalog.entries.filter(e=>{const text=[e.blueprint.values.name,e.blueprint.values.kind,e.blueprint.values.description||'',...poolCategoryPaths(e.blueprint).flat()].join(' ').toLowerCase();return words.every(word=>text.includes(word));});
       list.innerHTML=matches.map(row).join('')||'<p class="cp-muted">No matching items.</p>';

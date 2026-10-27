@@ -3445,6 +3445,7 @@ function renderSelectedToken() {
     </div>`;
 
   if(characterTools?.isBusy())ui.selectedTokenPanel.querySelectorAll('[data-od-action]').forEach(e=>{if(e instanceof HTMLButtonElement)e.disabled=true;});
+  characterTools?.syncPool();
   arrangeCombatPanels(ui.selectedTokenPanel);
   paintRangeAdjustments();
   refreshTargetDistance();
@@ -4696,6 +4697,7 @@ async function useCharacterItem(sourceId,itemId,targetId,partName) {
     const sourceData=getTrackerData(source),targetData=source===target?sourceData:getTrackerData(target);
     const item=sourceData.odyssey.inventory.items.find(i=>i.id===itemId);
     if(!item||!['consumable','medical'].includes(item.kind)||item.quantity<1)throw new Error('No usable item available.');
+    if(playerRole!=='GM'&&item.subtype==='repairkit'){const gear=targetData.odyssey.inventory.items.find(i=>i.id===partName);if(gear?.equippedPart&&targetData.body[gear.equippedPart]?.hidden)throw new Error('Target is unavailable.');}
     useItemOnTracker(targetData,item,partName,effectId);item.quantity-=1;
     source.metadata[META_KEY]=sanitizeTrackerData(sourceData);target.metadata[META_KEY]=sanitizeTrackerData(targetData);
   });

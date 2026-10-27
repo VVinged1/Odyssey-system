@@ -1,5 +1,6 @@
 // Shared compact action buttons. Character/stat cards retain their full content.
 const paths={
+ info:'M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
  plus:'M12 5v14M5 12h14',close:'m6 6 12 12M18 6 6 18',edit:'m4 16-1 5 5-1L20 8l-4-4Z M14 6l4 4',
  save:'M5 3h13l3 3v15H3V3Z M7 3v6h10V3 M7 21v-8h10v8',
  refresh:'M20 7v5h-5M4 17v-5h5 M5 8a8 8 0 0 1 13-3l2 3 M19 16a8 8 0 0 1-13 3l-2-3',
@@ -15,6 +16,7 @@ const paths={
  window:'M3 3h18v18H3Z M3 8h18 M8 8v13',copy:'M8 8h13v13H8Z M16 8V3H3v13h5'
 };
 function iconFor(text) {
+ if(/description/i.test(text))return 'info';
  if(/cancel|clear|remove|delete|unequip|detach|close/i.test(text))return 'close';
  if(/edit|rename|set rounds|set magazine/i.test(text))return 'edit';
  if(/duplicate/i.test(text))return 'copy';

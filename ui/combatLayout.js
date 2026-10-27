@@ -16,7 +16,12 @@ export function arrangeCombatPanels(root=document) {
       cards[isWeapon?0:isTarget?1:2].append(field);
     }
     for(const hidden of [...panel.querySelectorAll('input[type="hidden"]')])cards[1].append(hidden);
-    for(const note of [...panel.querySelectorAll('.combat-notes,:scope > .muted')])cards[2].append(note);
+    for(const note of [...panel.querySelectorAll('.combat-notes')])cards[2].append(note);
+    const notes=[...panel.querySelectorAll(':scope > .muted')];
+    if(notes.length) {
+      const details=document.createElement('details');details.className='combat-notes';
+      const summary=document.createElement('summary');summary.textContent='Attack rules';details.append(summary,...notes);cards[2].append(details);
+    }
     for(const action of [...panel.querySelectorAll('.combat-action,:scope > .row')])cards[2].append(action);
     for(const obsolete of [...panel.querySelectorAll(':scope > .combat-form-grid,:scope > .combat-modifiers')])obsolete.remove();
     panel.append(grid);panel.classList.add('od-combat-panel');

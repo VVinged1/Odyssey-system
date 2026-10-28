@@ -937,7 +937,10 @@ function installTooltips() {
     active = node;
     tip.textContent = text2;
     node.setAttribute("aria-describedby", tip.id);
-    if (!tip.matches(":popover-open")) tip.showPopover();
+    const host = node.closest("dialog[open]") || document.body;
+    if (tip.matches(":popover-open")) tip.hidePopover();
+    if (tip.parentElement !== host) host.append(tip);
+    tip.showPopover();
     const r = node.getBoundingClientRect();
     tip.style.left = Math.max(8, Math.min(r.left, innerWidth - 328)) + "px";
     tip.style.top = Math.max(8, Math.min(r.bottom + 7, innerHeight - tip.offsetHeight - 8)) + "px";

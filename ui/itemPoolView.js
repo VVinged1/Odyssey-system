@@ -1,3 +1,4 @@
+import {groupNamedItems} from '../itemGroups.js';
 import {descriptionButton} from './descriptions.js';
 import {groupPoolEntries,poolCategoryPaths} from '../poolCategories.js';
 import {esc} from './characterView.js';
@@ -12,11 +13,12 @@ export function showItemPool({getCatalog,character,onGive,onDelete,onExport,onIm
     const list=dialog.querySelector('[data-pool-list]');
     for(const details of list.querySelectorAll('details[data-pool-category]'))expanded.set(details.dataset.poolCategory,details.open);
     const row=e=>{const b=e.blueprint,v=b.values;return '<article class="cp-card cp-row"><b>'+esc(v.name)+'</b><span class="cp-pill">'+esc(v.kind)+'</span><span class="cp-muted">'+esc([v.armor?'Armor '+v.armor:'',v.criticalMax?'HP '+v.criticalMax:'',v.capacity?'Capacity '+v.capacity:'',v.damage?'DMG '+v.damage:'',v.useSkill?'Use: '+v.useSkill:''].filter(Boolean).join(' · '))+'</span>'+descriptionButton(v.name,v.description)+'<button type="button" data-pool-give="'+esc(e.id)+'" '+(busy?'disabled':'')+'>Give item</button><button type="button" data-pool-delete="'+esc(e.id)+'" class="danger" aria-label="Remove definition from pool" '+(busy?'disabled':'')+'>×</button></article>';};
+    const rows=entries=>groupNamedItems(entries,e=>({...e.blueprint.values,kind:e.blueprint.type==='item'?e.blueprint.values.kind:e.id})).map(group=>group.length===1?row(group[0]):'<details class="cp-card od-named-group"><summary>'+esc(group[0].blueprint.values.name)+' · '+group.length+' variants</summary>'+group.map(row).join('')+'</details>').join('');
     if(search) {
       const words=search.split(/\s+/);const matches=catalog.entries.filter(e=>{const text=[e.blueprint.values.name,e.blueprint.values.kind,e.blueprint.values.description||'',...poolCategoryPaths(e.blueprint).flat()].join(' ').toLowerCase();return words.every(word=>text.includes(word));});
-      list.innerHTML=matches.map(row).join('')||'<p class="cp-muted">No matching items.</p>';
+      list.innerHTML=rows(matches)||'<p class="cp-muted">No matching items.</p>';
     } else {
-      const group=(node,path=[],level=0)=>{const key=JSON.stringify([...path,node.label]),open=expanded.get(key)??level===0;return '<details class="od-pool-category" data-pool-category="'+esc(key)+'" '+(open?'open':'')+'><summary>'+esc(node.label)+' <span class="cp-pill">'+node.count+'</span></summary><div class="od-pool-category-body">'+node.entries.map(row).join('')+node.children.map(child=>group(child,[...path,node.label],level+1)).join('')+'</div></details>';};
+      const group=(node,path=[],level=0)=>{const key=JSON.stringify([...path,node.label]),open=expanded.get(key)??level===0;return '<details class="od-pool-category" data-pool-category="'+esc(key)+'" '+(open?'open':'')+'><summary>'+esc(node.label)+' <span class="cp-pill">'+node.count+'</span></summary><div class="od-pool-category-body">'+rows(node.entries)+node.children.map(child=>group(child,[...path,node.label],level+1)).join('')+'</div></details>';};
       list.innerHTML=groupPoolEntries(catalog.entries).map(node=>group(node)).join('')||'<p class="cp-muted">The campaign item pool is empty.</p>';
     }
     if(catalog.errors)message.textContent='Some catalog entries could not be read. Export a backup before importing changes.';

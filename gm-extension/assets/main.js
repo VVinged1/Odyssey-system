@@ -453,6 +453,57 @@ function arrangeCombatPanels(root = document) {
   }
 }
 
+// ui/tooltips.js
+function installTooltips() {
+  const tip = document.createElement("div");
+  tip.className = "od-tooltip";
+  tip.id = "od-hover-tooltip";
+  tip.setAttribute("role", "tooltip");
+  tip.setAttribute("popover", "manual");
+  document.body.append(tip);
+  let active = null;
+  const hide = () => {
+    tip.classList.remove("visible");
+    active?.removeAttribute("aria-describedby");
+    active = null;
+  };
+  const show = (node) => {
+    hide();
+    const text2 = node.dataset.descriptionText || node.dataset.tooltip || node.getAttribute("title") || node.getAttribute("aria-label");
+    if (!text2) return;
+    active = node;
+    tip.textContent = text2;
+    node.setAttribute("aria-describedby", tip.id);
+    if (!tip.matches(":popover-open")) tip.showPopover();
+    const r = node.getBoundingClientRect();
+    tip.style.left = Math.max(8, Math.min(r.left, innerWidth - 328)) + "px";
+    tip.style.top = Math.max(8, Math.min(r.bottom + 7, innerHeight - tip.offsetHeight - 8)) + "px";
+    requestAnimationFrame(() => {
+      if (active === node) tip.classList.add("visible");
+    });
+  };
+  document.addEventListener("pointerover", (e) => {
+    const node = e.target.closest?.("button,[data-tooltip]");
+    if (node && node !== active && !node.contains(e.relatedTarget)) show(node);
+  });
+  document.addEventListener("pointerout", (e) => {
+    if (active && !active.contains(e.relatedTarget)) hide();
+  });
+  document.addEventListener("focusin", (e) => {
+    const node = e.target.closest?.("button,[data-tooltip]");
+    if (node) show(node);
+  });
+  document.addEventListener("focusout", hide);
+  document.addEventListener("pointerdown", hide);
+  document.addEventListener("scroll", hide, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hide();
+  });
+  new MutationObserver(() => {
+    if (active && !active.isConnected) hide();
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 // ui/compactButtons.js
 var paths = {
   info: "M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
@@ -497,6 +548,7 @@ function iconFor(text2) {
   return "box";
 }
 function installCompactButtons() {
+  installTooltips();
   const enhance = () => {
     for (const button of document.querySelectorAll("button")) {
       if (button.matches(".cp-attr,.cp-skill-card,.list-item,.od-wide-action") || button.querySelector("[data-compact-icon]")) continue;
@@ -535,11 +587,12 @@ var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
 function normalizeBonuses(raw) {
   const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
   const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
-  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
+  const skillCategories = Object.fromEntries(Object.keys(clean(raw?.skills)).filter((k) => ["combat", "applied"].includes(raw?.skillCategories?.[k])).map((k) => [k, raw.skillCategories[k]]));
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(skillCategories).length ? { skillCategories } : {}, ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
 }
 function normalizeEffects(raw) {
   const seen = /* @__PURE__ */ new Set();
-  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
+  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses), ...e.sourceItemId ? { sourceItemId: String(e.sourceItemId).slice(0, 120) } : {} }));
 }
 function itemActive(item) {
   return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
@@ -550,46 +603,71 @@ function armorSummary(o) {
   return { total, key, name: key ? ARMOR_TRAINING[key] : "No armor" };
 }
 function effectiveOdyssey(base) {
-  const o = structuredClone(base), rows2 = [];
+  var _a, _b, _c, _d;
+  const o = structuredClone(base), rows2 = [], canonical = /* @__PURE__ */ new Map(), available = /* @__PURE__ */ new Set(), direct = /* @__PURE__ */ new Set();
   o.baseAttributes = structuredClone(base.attributes);
-  o.baseSkills = structuredClone(base.skills);
+  o.baseSkills = {};
   o.grantedSkills = {};
-  for (const i of o.inventory?.items || []) {
-    if (!itemActive(i)) continue;
-    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true });
-    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
-      const key = `implant:${i.id}:${a.id}`;
-      o.skills[key] = a.level;
-      o.skillCategories[key] = "abilities";
-      o.skillLabels[key] = a.name;
-      o.skillDescriptions ?? (o.skillDescriptions = {});
-      o.skillDescriptions[key] = a.description || "";
-      o.skillPerks[key] = a.description ? [a.description] : [];
-      o.grantedSkills[key] = i.name;
+  o.skillAliases = {};
+  const nameKey = (value) => String(value || "").trim().toLocaleLowerCase();
+  const register = (key, label, level, category, source = "", isAvailable = false) => {
+    const name = nameKey(label), existing = canonical.get(name);
+    if (existing) {
+      o.skillAliases[key] = existing;
+      return existing;
+    }
+    canonical.set(name, key);
+    o.skills[key] = level;
+    o.baseSkills[key] = level;
+    o.skillLabels[key] = label;
+    o.skillCategories[key] = category;
+    if (source) o.grantedSkills[key] = source;
+    if (isAvailable) available.add(key);
+    return key;
+  };
+  o.skills = {};
+  for (const [key, value] of Object.entries(base.skills || {})) {
+    const k = register(key, base.skillLabels[key] || key, value, base.skillCategories[key]);
+    if (k === key) {
+      available.add(k);
+      direct.add(k);
     }
   }
-  rows2.push(...base.effects || []);
-  const eligibleSkills = new Set(Object.keys(o.skills));
+  for (const i of o.inventory?.items || []) {
+    if (!itemActive(i)) continue;
+    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true, implant: i.kind === "implant" });
+    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
+      if (a.kind && a.kind !== "skill") continue;
+      const key = register("implant:" + i.id + ":" + a.id, a.name, a.level, "abilities", i.name, true);
+      if (!direct.has(key)) {
+        o.skillDescriptions ?? (o.skillDescriptions = {});
+        (_a = o.skillDescriptions)[key] ?? (_a[key] = a.description || "");
+        (_b = o.skillPerks)[key] ?? (_b[key] = []);
+      }
+    }
+  }
+  rows2.push(...(base.effects || []).filter((e) => !e.sourceItemId || (o.inventory?.items || []).some((i) => i.id === e.sourceItemId && i.equippedPart && itemActive(i))).map((e) => ({ ...e, implant: !!e.sourceItemId })));
+  for (const row of [...rows2].sort((a, b) => Number(b.implant) - Number(a.implant))) for (const [key] of Object.entries(row.bonuses?.skills || {})) {
+    const label = base.skillLabels[key] || key, k = canonical.get(nameKey(label)) || register(key, label, 0, row.bonuses?.skillCategories?.[key] || "applied", row.name);
+    o.skillAliases[key] = k;
+    if (row.implant) available.add(k);
+    if (!direct.has(k)) {
+      (_c = o.skillStrengthBonuses)[k] ?? (_c[k] = false);
+      (_d = o.skillPerks)[k] ?? (_d[k] = []);
+    }
+  }
+  const skillMods = {};
   for (const row of rows2) {
     const skills = {};
     for (const [key, value] of Object.entries(row.bonuses?.skills || {})) {
-      const resolved = eligibleSkills.has(key) ? key : [...eligibleSkills].find((k) => (o.skillLabels[k] || k).toLowerCase() === key.toLowerCase()) || key;
-      skills[resolved] = (skills[resolved] || 0) + value;
+      const k = o.skillAliases[key] || canonical.get(nameKey(base.skillLabels[key] || key)) || key;
+      skills[k] = (skills[k] || 0) + value;
+      if (available.has(k)) skillMods[k] = (skillMods[k] || 0) + value;
     }
     row.bonuses = { ...row.bonuses, skills };
   }
-  for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
-    o.skills[key] = 0;
-    o.baseSkills[key] = 0;
-    o.skillLabels[key] = key;
-    o.skillCategories[key] = "applied";
-    o.skillStrengthBonuses[key] = false;
-    o.skillPerks[key] = [];
-    o.grantedSkills[key] = row.name;
-  }
-  const skillMods = {};
-  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) if (eligibleSkills.has(k)) skillMods[k] = (skillMods[k] || 0) + v;
-  for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
+  o.availableSkills = [...available];
+  for (const [k, v] of Object.entries(skillMods)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
   const armor = armorSummary(o), trained = !armor.key || (o.skills[armor.key] || 0) >= 1;
   if (!trained) {
     const penalties = armor.key === "light_armor" ? { Agility: -1, Endurance: -1 } : armor.key === "medium_armor" ? { Agility: -2, Endurance: -2, Strength: -2 } : { Agility: -4, Endurance: -5, Strength: -4 };
@@ -674,6 +752,44 @@ function setCombinedPartHp(tracker, partName, value) {
   part.current = goal;
 }
 
+// itemGroups.js
+var stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value;
+var itemNameKey = (item) => String(item.name || "").trim().toLocaleLowerCase();
+function mergeInventoryStacks(items, preferredId = "", skillLabels = {}) {
+  const result = [], known = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    if (item.equippedPart) {
+      result.push(item);
+      continue;
+    }
+    const { id, quantity, equippedPart, previousArmor, legacyEquipment, ...definition } = item;
+    if (!["consumable", "medical"].includes(item.kind)) for (const k of ["subtype", "healCritical", "useSkill"]) delete definition[k];
+    if (!["armor", "shield", "implant"].includes(item.kind)) for (const k of ["armor", "criticalMax", "criticalDamage", "slots", "slot", "playerRemovable"]) delete definition[k];
+    if (item.kind !== "implant") delete definition.abilities;
+    else definition.abilities = (definition.abilities || []).map(({ id: id2, ...ability }) => ability);
+    if (definition.bonuses) {
+      definition.bonuses = structuredClone(definition.bonuses);
+      for (const field of ["skills", "skillCategories"]) if (definition.bonuses[field]) definition.bonuses[field] = Object.entries(definition.bonuses[field]).reduce((result2, [key2, value]) => {
+        const label = String(skillLabels[key2] || key2).trim().toLocaleLowerCase();
+        result2[label] = field === "skills" ? (result2[label] || 0) + value : value;
+        return result2;
+      }, {});
+    }
+    const key = JSON.stringify(stable({ ...definition, name: itemNameKey(item) })), previous = known.get(key);
+    if (previous && previous.quantity + quantity <= 999999) {
+      if (id === preferredId) {
+        item.quantity += previous.quantity;
+        result[result.indexOf(previous)] = item;
+        known.set(key, item);
+      } else previous.quantity += quantity;
+    } else {
+      result.push(item);
+      known.set(key, item);
+    }
+  }
+  return result;
+}
+
 // inventory.js
 var LIMIT = 2e3;
 var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
@@ -683,7 +799,7 @@ function rows(raw, map) {
   const seen = /* @__PURE__ */ new Set();
   return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
 }
-function normalizeInventory(raw, weapons = []) {
+function normalizeInventory(raw, weapons = [], preferredId = "", skillLabels = {}) {
   const items = rows(raw?.items, (r, i) => ({
     id: text(r.id || `legacy-item-${i}`),
     name: text(r.name) || "Item",
@@ -700,7 +816,7 @@ function normalizeInventory(raw, weapons = []) {
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
     playerRemovable: r.playerRemovable === true,
     bonuses: normalizeBonuses(["resource", "implant"].includes(r.kind) ? { ...r.bonuses, rangeReduction: {} } : r.bonuses),
-    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
+    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3), ...a.kind && a.kind !== "skill" ? { kind: ["bonus", "attack"].includes(a.kind) ? a.kind : "skill", bonuses: normalizeBonuses(a.bonuses), damage: int(a.damage, 999), accuracy: Math.max(-999, Math.min(999, Number(a.accuracy) || 0)), skill: text(a.skill, 80) } : {} })),
     legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
     previousArmor: int(r.previousArmor, 999)
@@ -711,6 +827,7 @@ function normalizeInventory(raw, weapons = []) {
     items.push({ ...structuredClone(item), id, quantity: item.quantity - 1, equippedPart: "", previousArmor: 0, legacyEquipment: false });
     item.quantity = 1;
   }
+  items.splice(0, items.length, ...mergeInventoryStacks(items, preferredId, skillLabels));
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`),
     name: text(r.name) || "Magazine",
@@ -4395,8 +4512,9 @@ function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
-  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged, "", next.skillLabels);
   next.effects = normalizeEffects(raw.effects);
+  if (raw.vehicle?.enabled) next.vehicle = { enabled: true, pilotTokenId: String(raw.vehicle.pilotTokenId || "").trim().slice(0, 120) };
   next.preferences = { parryMode: ["off", "1", "2", "3", "4", "5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off" };
   for (const [key, label] of Object.entries(ARMOR_TRAINING)) {
     next.skills[key] = clamp(Number(raw.skills?.[key]) || 0, 0, 1);
@@ -4462,8 +4580,16 @@ function sortCharacters(items) {
     (left, right) => getCharacterName(left).localeCompare(getCharacterName(right))
   );
 }
-function getOdysseyData(item) {
-  return effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey));
+function getOdysseyData(item, tokens = []) {
+  const own = effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey)), id = own.vehicle?.pilotTokenId;
+  if (!id) return own;
+  const pilot = tokens.find((t) => t.id === id && t.id !== item.id && isCharacterToken(t));
+  if (!pilot || getTrackerData(pilot).odyssey.vehicle?.enabled) return { ...own, pilotMissing: true };
+  const driver = effectiveOdyssey(getTrackerData(pilot).odyssey), fields = ["attributes", "baseAttributes", "skills", "baseSkills", "skillLabels", "skillCategories", "skillPerks", "skillDescriptions", "skillPerkDescriptions", "skillStrengthBonuses", "skillRangeReduction", "grantedSkills", "skillAliases", "availableSkills", "modifiers", "rangeReduction"];
+  const result = { ...own, pilot: { id: pilot.id, name: getCharacterName(pilot) } };
+  for (const key of fields) result[key] = driver[key];
+  result.effectRows = [...driver.effectRows || [], ...own.effectRows || []];
+  return result;
 }
 function getBodyPartNames(dataOrBody) {
   const body = dataOrBody?.body ?? dataOrBody ?? {};
@@ -5581,7 +5707,7 @@ async function performEnvironmentAttack() {
     return;
   }
   const targetData = getTrackerData(target);
-  const targetOdyssey = getOdysseyData(target);
+  const targetOdyssey = getOdysseyData(target, getCharacters());
   const sourceName = ui.attackSourceName.value.trim() || "Environment";
   const attackSkill = clamp(Number(ui.attackSkill.value) || 0, 0, 10);
   const weaponDamage = Number(ui.weaponDamage.value) || 0;

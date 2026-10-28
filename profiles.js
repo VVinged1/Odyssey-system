@@ -7,7 +7,7 @@ export const LIBRARY_STORAGE_KEY = 'odyssey.templates.v1';
 const profileFields = ['skills','skillCategories','skillStrengthBonuses','skillLabels','skillPerks','skillDescriptions','skillPerkDescriptions','skillRangeReduction','attributes','weapons','ammunition','inventory'];
 export function profileData(tracker) {
   return {enabled:true, minor:tracker.minor || 0, serious:tracker.serious || 0,
-    body:structuredClone(tracker.body), odyssey:Object.fromEntries(profileFields.map(k => [k, structuredClone(tracker.odyssey[k])]))};
+    body:structuredClone(tracker.body), odyssey:{...Object.fromEntries(profileFields.map(k => [k, structuredClone(tracker.odyssey[k])])),...(tracker.odyssey.vehicle?.enabled?{vehicle:{enabled:true,pilotTokenId:''}}:{})}};
 }
 export function makeTemplate(name, tracker) {
   const data = profileData(tracker);
@@ -15,6 +15,7 @@ export function makeTemplate(name, tracker) {
   for(const item of data.odyssey.inventory.items)item.criticalDamage=0;
   reconcileEquipment(data);
   for (const part of Object.values(data.body)) { part.current = part.max; part.minor = 0; part.serious = 0; }
+  if(tracker.odyssey.vehicle?.enabled)data.odyssey.vehicle={enabled:true,pilotTokenId:''};
   return {format:TEMPLATE_FORMAT, version:1, id:newId(), name:String(name || 'Character').trim().slice(0,120), updatedAt:new Date().toISOString(), data};
 }
 export function normalizeLibrary(raw, sanitize) {

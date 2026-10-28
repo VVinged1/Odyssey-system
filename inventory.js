@@ -1,3 +1,4 @@
+import {mergeInventoryStacks} from './itemGroups.js';
 import {normalizeWeaponCategory,normalizeRangeReduction} from './rangeRules.js';
 import { normalizeBonuses, reconcileEquipment, equipmentFits } from "./characterRules.js";
 // Token-owned inventory. Equipped magazines mirror the V1 weapon fields so
@@ -12,7 +13,7 @@ function rows(raw, map) {
   return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter(r => r && typeof r === 'object').map(map)
     .filter(r => r.id && !seen.has(r.id) && seen.add(r.id));
 }
-export function normalizeInventory(raw, weapons = []) {
+export function normalizeInventory(raw, weapons = [], preferredId='',skillLabels={}) {
   const items = rows(raw?.items, (r, i) => ({
     id: text(r.id || `legacy-item-${i}`), name: text(r.name) || 'Item',
     kind: kinds.has(r.kind) ? r.kind : 'item', quantity: int(r.quantity ?? 1),
@@ -21,7 +22,7 @@ export function normalizeInventory(raw, weapons = []) {
     healCritical: int(r.healCritical ?? 1,999), useSkill:text(r.useSkill,80), slots:[...new Set((Array.isArray(r.slots)?r.slots:[r.slot||'any']).map(s=>text(s,40)).filter(Boolean))].slice(0,100), slot: text(r.slot||'any',40),
     criticalMax:int(r.criticalMax,999), criticalDamage:int(r.criticalDamage,int(r.criticalMax,999)),
     playerRemovable:r.playerRemovable===true, bonuses:normalizeBonuses(['resource','implant'].includes(r.kind)?{...r.bonuses,rangeReduction:{}}:r.bonuses),
-    abilities:(Array.isArray(r.abilities)?r.abilities:[]).slice(0,20).map((a,j)=>({id:text(a.id||'ability-'+j),name:text(a.name)||'Ability',level:int(a.level,10),description:text(a.description,2000)})),
+    abilities:(Array.isArray(r.abilities)?r.abilities:[]).slice(0,20).map((a,j)=>({id:text(a.id||'ability-'+j),name:text(a.name)||'Ability',level:int(a.level,10),description:text(a.description,2000),...(a.kind&&a.kind!=='skill'?{kind:['bonus','attack'].includes(a.kind)?a.kind:'skill',bonuses:normalizeBonuses(a.bonuses),damage:int(a.damage,999),accuracy:Math.max(-999,Math.min(999,Number(a.accuracy)||0)),skill:text(a.skill,80)}:{})})),
     legacyEquipment: r.legacyEquipment ?? (raw?.version<3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40), previousArmor: int(r.previousArmor, 999),
   }));
@@ -30,6 +31,7 @@ export function normalizeInventory(raw, weapons = []) {
     let id=(item.id.slice(0,90)+'-reserve'),suffix=1;while(items.some(i=>i.id===id))id=item.id.slice(0,90)+'-reserve-'+suffix++;
     items.push({...structuredClone(item),id,quantity:item.quantity-1,equippedPart:'',previousArmor:0,legacyEquipment:false});item.quantity=1;
   }
+  items.splice(0,items.length,...mergeInventoryStacks(items,preferredId,skillLabels));
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`), name: text(r.name) || 'Magazine',
     description:text(r.description,2000), capacity: int(r.capacity, 999), loadedAmmoId: text(r.loadedAmmoId),
@@ -146,7 +148,7 @@ export function unequipItem(tracker,id,gm=true) {
     const expected=inv.baseArmor[item.equippedPart]+inv.items.filter(i=>i.equippedPart===item.equippedPart&&['armor','shield','implant'].includes(i.kind)&&i.quantity>0&&(i.kind==='implant'||!i.criticalMax||i.criticalDamage<i.criticalMax)).reduce((sum,i)=>sum+i.armor,0);
     if(part.armor!==expected)inv.baseArmor[item.equippedPart]=part.armor;
   }
-  item.equippedPart='';reconcileEquipment(tracker);
+  item.equippedPart='';tracker.odyssey.effects=(tracker.odyssey.effects||[]).filter(e=>e.sourceItemId!==id);reconcileEquipment(tracker);
 }
 export function consumeItem(tracker, id) {
   const item = tracker.odyssey.inventory.items.find(i => i.id === id);
@@ -229,5 +231,5 @@ export function saveInventoryEntry(tracker,origin,values,id) {
   if(row.equippedPart&&row.quantity>1&&o.inventory.items.length>=1000)throw new Error('Inventory is full; cannot separate equipped and spare items.');
   if(row.criticalDamage>row.criticalMax)throw new Error('Critical damage cannot exceed durability.');
   if(same?.equippedPart&&!equipmentFits(row,same.equippedPart,tracker.body[same.equippedPart]))throw new Error('Unequip before changing the equipment slot.');
-  if(same)Object.assign(same,row);else{if(o.inventory.items.length>=1000)throw new Error('Inventory limit is 1000 items.');o.inventory.items.push(row);}reconcileEquipment(tracker);
+  if(same)Object.assign(same,row);else{if(o.inventory.items.length>=1000)throw new Error('Inventory limit is 1000 items.');o.inventory.items.push(row);}o.inventory=normalizeInventory(o.inventory,o.weapons.ranged,id,o.skillLabels);reconcileEquipment(tracker);
 }

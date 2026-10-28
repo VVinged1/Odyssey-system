@@ -408,11 +408,12 @@ var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
 function normalizeBonuses(raw) {
   const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
   const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
-  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
+  const skillCategories = Object.fromEntries(Object.keys(clean(raw?.skills)).filter((k) => ["combat", "applied"].includes(raw?.skillCategories?.[k])).map((k) => [k, raw.skillCategories[k]]));
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(skillCategories).length ? { skillCategories } : {}, ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
 }
 function normalizeEffects(raw) {
   const seen = /* @__PURE__ */ new Set();
-  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
+  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses), ...e.sourceItemId ? { sourceItemId: String(e.sourceItemId).slice(0, 120) } : {} }));
 }
 function itemActive(item) {
   return item.quantity > 0 && (item.kind === "implant" || !item.criticalMax || item.criticalDamage < item.criticalMax);
@@ -497,6 +498,44 @@ function setCombinedPartHp(tracker, partName, value) {
   part.current = goal;
 }
 
+// itemGroups.js
+var stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value;
+var itemNameKey = (item) => String(item.name || "").trim().toLocaleLowerCase();
+function mergeInventoryStacks(items, preferredId = "", skillLabels = {}) {
+  const result = [], known = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    if (item.equippedPart) {
+      result.push(item);
+      continue;
+    }
+    const { id, quantity, equippedPart, previousArmor, legacyEquipment, ...definition } = item;
+    if (!["consumable", "medical"].includes(item.kind)) for (const k of ["subtype", "healCritical", "useSkill"]) delete definition[k];
+    if (!["armor", "shield", "implant"].includes(item.kind)) for (const k of ["armor", "criticalMax", "criticalDamage", "slots", "slot", "playerRemovable"]) delete definition[k];
+    if (item.kind !== "implant") delete definition.abilities;
+    else definition.abilities = (definition.abilities || []).map(({ id: id2, ...ability }) => ability);
+    if (definition.bonuses) {
+      definition.bonuses = structuredClone(definition.bonuses);
+      for (const field of ["skills", "skillCategories"]) if (definition.bonuses[field]) definition.bonuses[field] = Object.entries(definition.bonuses[field]).reduce((result2, [key2, value]) => {
+        const label = String(skillLabels[key2] || key2).trim().toLocaleLowerCase();
+        result2[label] = field === "skills" ? (result2[label] || 0) + value : value;
+        return result2;
+      }, {});
+    }
+    const key = JSON.stringify(stable({ ...definition, name: itemNameKey(item) })), previous = known.get(key);
+    if (previous && previous.quantity + quantity <= 999999) {
+      if (id === preferredId) {
+        item.quantity += previous.quantity;
+        result[result.indexOf(previous)] = item;
+        known.set(key, item);
+      } else previous.quantity += quantity;
+    } else {
+      result.push(item);
+      known.set(key, item);
+    }
+  }
+  return result;
+}
+
 // inventory.js
 var LIMIT = 2e3;
 var int = (v, max = 999999) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
@@ -506,7 +545,7 @@ function rows(raw, map) {
   const seen = /* @__PURE__ */ new Set();
   return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
 }
-function normalizeInventory(raw, weapons = []) {
+function normalizeInventory(raw, weapons = [], preferredId = "", skillLabels = {}) {
   const items = rows(raw?.items, (r, i) => ({
     id: text(r.id || `legacy-item-${i}`),
     name: text(r.name) || "Item",
@@ -523,7 +562,7 @@ function normalizeInventory(raw, weapons = []) {
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
     playerRemovable: r.playerRemovable === true,
     bonuses: normalizeBonuses(["resource", "implant"].includes(r.kind) ? { ...r.bonuses, rangeReduction: {} } : r.bonuses),
-    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
+    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3), ...a.kind && a.kind !== "skill" ? { kind: ["bonus", "attack"].includes(a.kind) ? a.kind : "skill", bonuses: normalizeBonuses(a.bonuses), damage: int(a.damage, 999), accuracy: Math.max(-999, Math.min(999, Number(a.accuracy) || 0)), skill: text(a.skill, 80) } : {} })),
     legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
     previousArmor: int(r.previousArmor, 999)
@@ -534,6 +573,7 @@ function normalizeInventory(raw, weapons = []) {
     items.push({ ...structuredClone(item), id, quantity: item.quantity - 1, equippedPart: "", previousArmor: 0, legacyEquipment: false });
     item.quantity = 1;
   }
+  items.splice(0, items.length, ...mergeInventoryStacks(items, preferredId, skillLabels));
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`),
     name: text(r.name) || "Magazine",
@@ -4160,8 +4200,9 @@ function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
-  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged, "", next.skillLabels);
   next.effects = normalizeEffects(raw.effects);
+  if (raw.vehicle?.enabled) next.vehicle = { enabled: true, pilotTokenId: String(raw.vehicle.pilotTokenId || "").trim().slice(0, 120) };
   next.preferences = { parryMode: ["off", "1", "2", "3", "4", "5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off" };
   for (const [key, label] of Object.entries(ARMOR_TRAINING)) {
     next.skills[key] = clamp(Number(raw.skills?.[key]) || 0, 0, 1);

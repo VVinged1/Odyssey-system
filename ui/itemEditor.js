@@ -4,7 +4,7 @@ import { ATTRIBUTES } from '../characterRules.js';
 export const ITEM_TYPES=[['consumable','Usable'],['resource','Resource'],['ammo','Ammunition'],['magazine','Magazine'],['weapon','Weapon'],['armor','Armor'],['shield','Shield'],['implant','Implant']];
 export function itemEditor({existing={},type='resource',skills=[],parts=[],ammunition=[],magazines=[]}) {
   const dialog=document.createElement('dialog');dialog.className='od-dialog od-item-editor';
-  const field=(name,label,value='',inputType='text',max=999)=>`<label>${esc(label)}<input name="${name}" type="${inputType}" value="${esc(value)}" ${inputType==='number'?`min="${['damage','accuracy','penetration'].includes(name)?-999:0}" max="${max}" step="1"`:'maxlength="120"'}></label>`;
+  const field=(name,label,value='',inputType='text',max=999)=>`<label>${esc(label)}<input name="${name}" type="${inputType}" value="${esc(value)}" ${inputType==='number'?`min="${['damage','accuracy','penetration','abilityAccuracy'].includes(name)||name.startsWith('abilityAttr:')||name==='abilityBonusValue'?-999:0}" max="${max}" step="1"`:'maxlength="120"'}></label>`;
   const select=(name,label,options,value)=>`<label>${esc(label)}<select name="${name}">${options.map(([k,l])=>`<option value="${esc(k)}" ${k===value?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
   const checkbox=(name,label,checked)=>`<label class="od-check"><input name="${name}" type="checkbox" ${checked?'checked':''}>${esc(label)}</label>`;
   const values={...existing,kind:type,acceptsMagazines:existing.acceptsMagazines!==false};
@@ -17,9 +17,10 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
   const form=dialog.querySelector('form'),host=dialog.querySelector('[data-type-fields]');
   const rangeEditor=(prefix,value={})=>`<fieldset class="od-range-reduction"><legend>Range penalty reduction · per band</legend>${RANGE_BANDS.map(([key,label])=>field(prefix+key,label,value[key]||0,'number')).join('')}</fieldset>`;
   function bonusEditor(bonuses={},allowSkills=true,allowRange=true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${allowRange?rangeEditor('bonusRange:',bonuses.rangeReduction):''}${ATTRIBUTES.map(k=>field('attr:'+k,k,bonuses.attributes?.[k]||0,'number')).join('')}${allowSkills?skillChoices.map(([k,label])=>field('skill:'+k,`${label} · skill level`,bonuses.skills?.[k]||0,'number')).join('')+`<div class="od-new-bonus-skill">${field('newBonusSkillName','New skill name')}${field('newBonusSkillValue','Level bonus',1,'number',10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>`:''}</fieldset>`;
+    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${allowRange?rangeEditor('bonusRange:',bonuses.rangeReduction):''}${ATTRIBUTES.map(k=>field('attr:'+k,k,bonuses.attributes?.[k]||0,'number')).join('')}${allowSkills?skillChoices.map(([k,label])=>'<div class="cp-row">'+field('skill:'+k,`${label} · skill level`,bonuses.skills?.[k]||0,'number')+select('skillCategory:'+k,'Category',[['combat','Combat'],['applied','Applied']],bonuses.skillCategories?.[k]||skills.find(([key])=>key===k)?.[2]||'applied')+'</div>').join('')+`<div class="od-new-bonus-skill">${field('newBonusSkillName','New skill name')}${field('newBonusSkillValue','Level bonus',1,'number',10)}${select('newBonusSkillCategory','Category',[['combat','Combat'],['applied','Applied']],'applied')}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>`:''}</fieldset>`;
   }
-  function abilityRow(a={}) {return `<div class="od-ability-row">${field('abilityName','Ability',a.name||'')}${field('abilityLevel','Level',a.level||0,'number',10)}${field('abilityDescription','Description',a.description||'')}<button type="button" data-remove-ability aria-label="Remove ability">×</button></div>`;}
+  function abilityBonusSkill(key='',value=0){return '<div class="cp-row od-ability-bonus-skill">'+field('abilityBonusSkill','Skill name',key)+field('abilityBonusValue','Level bonus',value,'number',10)+'<button type="button" data-remove-ability-bonus aria-label="Remove skill bonus">×</button></div>';}
+  function abilityRow(a={}) {const kind=a.kind||'skill';return '<fieldset class="od-ability-row" data-ability-id="'+esc(a.id||crypto.randomUUID())+'">'+field('abilityName','Ability',a.name||'')+select('abilityKind','Ability type',[['skill','Granted skill'],['bonus','Activate bonuses'],['attack','Attack']],kind)+(kind==='skill'?field('abilityLevel','Level',a.level||0,'number',10):kind==='attack'?field('abilityDamage','Damage',a.damage||0,'number')+field('abilityAccuracy','Accuracy',a.accuracy||0,'number')+field('abilitySkill','Attack skill',a.skill||''):ATTRIBUTES.map(k=>field('abilityAttr:'+k,k,a.bonuses?.attributes?.[k]||0,'number')).join('')+'<div data-ability-bonus-skills>'+Object.entries(a.bonuses?.skills||{}).map(([k,v])=>abilityBonusSkill(k,v)).join('')+'</div><button type="button" data-add-ability-bonus>Add skill bonus</button>')+field('abilityDescription','Description',a.description||'')+'<button type="button" data-remove-ability aria-label="Remove ability">×</button></fieldset>';}
   function collect() {
     const data=Object.fromEntries(new FormData(form));Object.assign(values,data);
     if(form.elements.useSkill){const input=String(values.useSkill||'').trim();const match=skillChoices.find(([key,label])=>key.toLowerCase()===input.toLowerCase()||label.toLowerCase()===input.toLowerCase());values.useSkill=match?match[1]:input;}
@@ -27,13 +28,19 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     if(form.querySelector('[name="magazineCompatible"]'))values.acceptedMagazineIds=[...form.querySelectorAll('[name="magazineCompatible"]:checked')].map(e=>e.value);
     if(form.querySelector('[data-equipment-slots]'))values.slots=[...form.querySelectorAll('[name="equipmentSlot"]:checked')].map(e=>e.value);
     values.playerRemovable=!!form.elements.playerRemovable?.checked;
-    const bonuses={attributes:{},skills:{}};
+    const bonuses={attributes:{},skills:{},skillCategories:{}};
     for(const input of form.querySelectorAll('[name^="attr:"],[name^="skill:"]')) {
       const [kind,...key]=input.name.split(':');const value=Number(input.value)||0;if(value)bonuses[kind==='attr'?'attributes':'skills'][key.join(':')]=value;
     }
+    for(const input of form.querySelectorAll('[name^="skillCategory:"]'))bonuses.skillCategories[input.name.slice(14)]=input.value;
     if(form.querySelector('.od-bonuses')){bonuses.rangeReduction=normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key])=>[key,data['bonusRange:'+key]])));values.bonuses=bonuses;}
     if(form.elements['weaponRange:clinch'])values.rangeReduction=normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key])=>[key,data['weaponRange:'+key]])));
-    if(form.querySelector('[data-abilities]'))values.abilities=[...form.querySelectorAll('.od-ability-row')].map((row,index)=>({id:existing.abilities?.[index]?.id||crypto.randomUUID(),name:row.querySelector('[name="abilityName"]').value,level:Number(row.querySelector('[name="abilityLevel"]').value)||0,description:row.querySelector('[name="abilityDescription"]').value})).filter(a=>a.name.trim());
+    if(form.querySelector('[data-abilities]'))values.abilities=[...form.querySelectorAll('.od-ability-row')].map(row=>{
+      const get=name=>row.querySelector('[name="'+name+'"]')?.value||'',bonuses={attributes:{},skills:{}};
+      for(const input of row.querySelectorAll('[name^="abilityAttr:"]'))if(Number(input.value))bonuses.attributes[input.name.slice(12)]=Number(input.value);
+      for(const r of row.querySelectorAll('.od-ability-bonus-skill')){const name=r.querySelector('[name="abilityBonusSkill"]').value.trim(),v=Number(r.querySelector('[name="abilityBonusValue"]').value)||0;if(name&&v)bonuses.skills[name]=(bonuses.skills[name]||0)+v;}
+      return {id:row.dataset.abilityId,name:get('abilityName'),kind:get('abilityKind'),level:Number(get('abilityLevel'))||0,description:get('abilityDescription'),damage:Number(get('abilityDamage'))||0,accuracy:Number(get('abilityAccuracy'))||0,skill:get('abilitySkill'),bonuses};
+    }).filter(a=>a.name.trim());
     values.ammoIds=[...form.querySelectorAll('[name="ammoCompatible"]:checked')].map(e=>e.value);
   }
   function render() {
@@ -70,13 +77,13 @@ export function itemEditor({existing={},type='resource',skills=[],parts=[],ammun
     for(const input of host.querySelectorAll('[name^="attr:"],[name^="skill:"]'))input.min='-999';
     form.elements.quantity.closest('label').hidden=kind==='weapon'||(kind==='magazine'&&!!existing.id);
   }
-  form.addEventListener('change',e=>{if(['kind','subtype','weaponKind','acceptsMagazines'].includes(e.target.name)){collect();render();}});
+  form.addEventListener('change',e=>{if(['kind','subtype','weaponKind','acceptsMagazines','abilityKind'].includes(e.target.name)){collect();render();}});
   form.addEventListener('click',e=>{if(e.target.closest('[data-add-bonus-skill]')) {
     const input=form.elements.newBonusSkillName,name=input.value.trim(),bonus=Number(form.elements.newBonusSkillValue.value)||0;
     if(!name||name.length>40||['__proto__','constructor','prototype'].includes(name)){input.setCustomValidity('Enter a skill name (1–40 characters).');input.reportValidity();input.oninput=()=>input.setCustomValidity('');return;}
     collect();let choice=skillChoices.find(([key,label])=>key.toLowerCase()===name.toLowerCase()||label.toLowerCase()===name.toLowerCase());
-    if(!choice){choice=[name,name];skillChoices.push(choice);}values.bonuses.skills[choice[0]]=bonus;render();return;
-  }if(e.target.closest('[data-add-ability]')){host.querySelector('[data-abilities]').insertAdjacentHTML('beforeend',abilityRow());}e.target.closest('[data-remove-ability]')?.closest('.od-ability-row').remove();});
+    if(!choice){choice=[name,name];skillChoices.push(choice);}values.bonuses.skills[choice[0]]=bonus;values.bonuses.skillCategories??={};values.bonuses.skillCategories[choice[0]]=values.newBonusSkillCategory;render();return;
+  }if(e.target.closest('[data-add-ability-bonus]')){e.target.closest('.od-ability-row').querySelector('[data-ability-bonus-skills]').insertAdjacentHTML('beforeend',abilityBonusSkill());}e.target.closest('[data-remove-ability-bonus]')?.closest('.od-ability-bonus-skill').remove();if(e.target.closest('[data-add-ability]')){host.querySelector('[data-abilities]').insertAdjacentHTML('beforeend',abilityRow());}e.target.closest('[data-remove-ability]')?.closest('.od-ability-row').remove();});
   document.body.append(dialog);render();
   return new Promise(resolve=>{
     const finish=v=>{dialog.close();dialog.remove();resolve(v);};

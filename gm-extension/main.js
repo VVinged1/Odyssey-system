@@ -622,7 +622,7 @@ async function performEnvironmentAttack() {
   }
 
   const targetData = getTrackerData(target);
-  const targetOdyssey = getOdysseyData(target);
+  const targetOdyssey = getOdysseyData(target,getCharacters());
   const sourceName = ui.attackSourceName.value.trim() || "Environment";
   const attackSkill = clamp(Number(ui.attackSkill.value) || 0, 0, 10);
   const weaponDamage = Number(ui.weaponDamage.value) || 0;

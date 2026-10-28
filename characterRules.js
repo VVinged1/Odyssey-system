@@ -6,10 +6,11 @@ const n = v => Math.max(-999,Math.min(999,Math.trunc(Number(v)||0)));
 export function normalizeBonuses(raw) {
   const clean=(rows,attributes=false)=>Object.fromEntries(Object.entries(rows||{}).filter(([k,v])=>k.length<=80&&!['__proto__','constructor','prototype'].includes(k)&&(!attributes||ATTRIBUTES.includes(k))&&n(v)).slice(0,80).map(([k,v])=>[k,n(v)]));
   const rangeReduction=normalizeRangeReduction(raw?.rangeReduction);
-  return {attributes:clean(raw?.attributes,true),skills:clean(raw?.skills),...(Object.keys(rangeReduction).length?{rangeReduction}:{})};
+  const skillCategories=Object.fromEntries(Object.keys(clean(raw?.skills)).filter(k=>['combat','applied'].includes(raw?.skillCategories?.[k])).map(k=>[k,raw.skillCategories[k]]));
+  return {attributes:clean(raw?.attributes,true),skills:clean(raw?.skills),...(Object.keys(skillCategories).length?{skillCategories}:{}),...(Object.keys(rangeReduction).length?{rangeReduction}:{})};
 }
 export function normalizeEffects(raw) {
-  const seen=new Set();return (Array.isArray(raw)?raw:[]).slice(0,100).filter(e=>e&&typeof e.id==='string'&&!seen.has(e.id)&&seen.add(e.id)).map(e=>({id:e.id.slice(0,120),name:String(e.name||'Effect').slice(0,120),bonuses:normalizeBonuses(e.bonuses)}));
+  const seen=new Set();return (Array.isArray(raw)?raw:[]).slice(0,100).filter(e=>e&&typeof e.id==='string'&&!seen.has(e.id)&&seen.add(e.id)).map(e=>({id:e.id.slice(0,120),name:String(e.name||'Effect').slice(0,120),bonuses:normalizeBonuses(e.bonuses),...(e.sourceItemId?{sourceItemId:String(e.sourceItemId).slice(0,120)}:{})}));
 }
 export function equipmentFits(item,partName,part) {
   const slots=Array.isArray(item.slots)?item.slots:[item.slot||'any'];
@@ -23,23 +24,40 @@ export function armorSummary(o) {
   return {total,key,name:key?ARMOR_TRAINING[key]:'No armor'};
 }
 export function effectiveOdyssey(base) {
-  const o=structuredClone(base),rows=[];o.baseAttributes=structuredClone(base.attributes);o.baseSkills=structuredClone(base.skills);o.grantedSkills={};
+  const o=structuredClone(base),rows=[],canonical=new Map(),available=new Set(),direct=new Set();
+  o.baseAttributes=structuredClone(base.attributes);o.baseSkills={};o.grantedSkills={};o.skillAliases={};
+  const nameKey=value=>String(value||'').trim().toLocaleLowerCase();
+  const register=(key,label,level,category,source='',isAvailable=false)=>{
+    const name=nameKey(label),existing=canonical.get(name);if(existing){o.skillAliases[key]=existing;return existing;}
+    canonical.set(name,key);o.skills[key]=level;o.baseSkills[key]=level;o.skillLabels[key]=label;o.skillCategories[key]=category;
+    if(source)o.grantedSkills[key]=source;if(isAvailable)available.add(key);return key;
+  };
+  o.skills={};
+  // Directly learned skills own the name, category, level and description.
+  for(const [key,value]of Object.entries(base.skills||{})){const k=register(key,base.skillLabels[key]||key,value,base.skillCategories[key]);if(k===key){available.add(k);direct.add(k);}}
   for(const i of o.inventory?.items||[]) {
     if(!itemActive(i))continue;
-    if(i.kind==='resource'||(['armor','shield','implant'].includes(i.kind)&&i.equippedPart)) rows.push({id:i.id,name:i.name,bonuses:['resource','implant'].includes(i.kind)?{...i.bonuses,rangeReduction:{}}:i.bonuses,passive:true});
+    if(i.kind==='resource'||(['armor','shield','implant'].includes(i.kind)&&i.equippedPart))rows.push({id:i.id,name:i.name,bonuses:['resource','implant'].includes(i.kind)?{...i.bonuses,rangeReduction:{}}:i.bonuses,passive:true,implant:i.kind==='implant'});
     if(i.kind==='implant'&&i.equippedPart)for(const a of i.abilities||[]) {
-      const key=`implant:${i.id}:${a.id}`;o.skills[key]=a.level;o.skillCategories[key]='abilities';o.skillLabels[key]=a.name;o.skillDescriptions??={};o.skillDescriptions[key]=a.description||'';o.skillPerks[key]=a.description?[a.description]:[];o.grantedSkills[key]=i.name;
+      if(a.kind&&a.kind!=='skill')continue;
+      const key=register('implant:'+i.id+':'+a.id,a.name,a.level,'abilities',i.name,true);
+      if(!direct.has(key)){o.skillDescriptions??={};o.skillDescriptions[key]??=a.description||'';o.skillPerks[key]??=[];}
     }
   }
-  rows.push(...(base.effects||[]));
-  const eligibleSkills=new Set(Object.keys(o.skills));
-  for(const row of rows){const skills={};for(const [key,value]of Object.entries(row.bonuses?.skills||{})){const resolved=eligibleSkills.has(key)?key:[...eligibleSkills].find(k=>(o.skillLabels[k]||k).toLowerCase()===key.toLowerCase())||key;skills[resolved]=(skills[resolved]||0)+value;}row.bonuses={...row.bonuses,skills};}
-  // Items may grant skills absent from the character; these disappear with the item.
-  for(const row of rows)for(const key of Object.keys(row.bonuses?.skills||{}))if(!Object.hasOwn(o.skills,key)) {
-    o.skills[key]=0;o.baseSkills[key]=0;o.skillLabels[key]=key;o.skillCategories[key]='applied';o.skillStrengthBonuses[key]=false;o.skillPerks[key]=[];o.grantedSkills[key]=row.name;
+  rows.push(...(base.effects||[]).filter(e=>!e.sourceItemId||(o.inventory?.items||[]).some(i=>i.id===e.sourceItemId&&i.equippedPart&&itemActive(i))).map(e=>({...e,implant:!!e.sourceItemId})));
+  // Register implant skills before resources, independent of inventory order.
+  for(const row of [...rows].sort((a,b)=>Number(b.implant)-Number(a.implant)))for(const [key]of Object.entries(row.bonuses?.skills||{})){
+    const label=base.skillLabels[key]||key,k=canonical.get(nameKey(label))||register(key,label,0,row.bonuses?.skillCategories?.[key]||'applied',row.name);
+    o.skillAliases[key]=k;if(row.implant)available.add(k);
+    if(!direct.has(k)){o.skillStrengthBonuses[k]??=false;o.skillPerks[k]??=[];}
   }
-  const skillMods={};for(const row of rows)for(const [k,v] of Object.entries(row.bonuses?.skills||{}))if(eligibleSkills.has(k))skillMods[k]=(skillMods[k]||0)+v;
-  for(const [k,v] of Object.entries(skillMods))if(Object.hasOwn(o.skills,k))o.skills[k]=Math.max(0,Math.min(Object.hasOwn(ARMOR_TRAINING,k)?1:10,o.skills[k]+v));
+  const skillMods={};
+  for(const row of rows){const skills={};for(const [key,value]of Object.entries(row.bonuses?.skills||{})){
+    const k=o.skillAliases[key]||canonical.get(nameKey(base.skillLabels[key]||key))||key;
+    skills[k]=(skills[k]||0)+value;if(available.has(k))skillMods[k]=(skillMods[k]||0)+value;
+  }row.bonuses={...row.bonuses,skills};}
+  o.availableSkills=[...available];
+  for(const [k,v]of Object.entries(skillMods))o.skills[k]=Math.max(0,Math.min(Object.hasOwn(ARMOR_TRAINING,k)?1:10,o.skills[k]+v));
   const armor=armorSummary(o),trained=!armor.key||(o.skills[armor.key]||0)>=1;
   if(!trained) {
     const penalties=armor.key==='light_armor'?{Agility:-1,Endurance:-1}:armor.key==='medium_armor'?{Agility:-2,Endurance:-2,Strength:-2}:{Agility:-4,Endurance:-5,Strength:-4};

@@ -1,3 +1,4 @@
+import {installTooltips} from './tooltips.js';
 // Shared compact action buttons. Character/stat cards retain their full content.
 const paths={
  info:'M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
@@ -37,6 +38,7 @@ function iconFor(text) {
  return 'box';
 }
 export function installCompactButtons() {
+ installTooltips();
  const enhance=()=>{
   for(const button of document.querySelectorAll('button')) {
    if(button.matches('.cp-attr,.cp-skill-card,.list-item,.od-wide-action')||button.querySelector('[data-compact-icon]'))continue;

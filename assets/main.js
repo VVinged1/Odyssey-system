@@ -433,11 +433,12 @@ var n = (v) => Math.max(-999, Math.min(999, Math.trunc(Number(v) || 0)));
 function normalizeBonuses(raw) {
   const clean = (rows2, attributes = false) => Object.fromEntries(Object.entries(rows2 || {}).filter(([k, v]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k) && (!attributes || ATTRIBUTES.includes(k)) && n(v)).slice(0, 80).map(([k, v]) => [k, n(v)]));
   const rangeReduction = normalizeRangeReduction(raw?.rangeReduction);
-  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
+  const skillCategories = Object.fromEntries(Object.keys(clean(raw?.skills)).filter((k) => ["combat", "applied"].includes(raw?.skillCategories?.[k])).map((k) => [k, raw.skillCategories[k]]));
+  return { attributes: clean(raw?.attributes, true), skills: clean(raw?.skills), ...Object.keys(skillCategories).length ? { skillCategories } : {}, ...Object.keys(rangeReduction).length ? { rangeReduction } : {} };
 }
 function normalizeEffects(raw) {
   const seen = /* @__PURE__ */ new Set();
-  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses) }));
+  return (Array.isArray(raw) ? raw : []).slice(0, 100).filter((e) => e && typeof e.id === "string" && !seen.has(e.id) && seen.add(e.id)).map((e) => ({ id: e.id.slice(0, 120), name: String(e.name || "Effect").slice(0, 120), bonuses: normalizeBonuses(e.bonuses), ...e.sourceItemId ? { sourceItemId: String(e.sourceItemId).slice(0, 120) } : {} }));
 }
 function equipmentFits(item, partName, part) {
   const slots = Array.isArray(item.slots) ? item.slots : [item.slot || "any"];
@@ -452,46 +453,71 @@ function armorSummary(o) {
   return { total, key, name: key ? ARMOR_TRAINING[key] : "No armor" };
 }
 function effectiveOdyssey(base) {
-  const o = structuredClone(base), rows2 = [];
+  var _a, _b, _c, _d;
+  const o = structuredClone(base), rows2 = [], canonical = /* @__PURE__ */ new Map(), available = /* @__PURE__ */ new Set(), direct = /* @__PURE__ */ new Set();
   o.baseAttributes = structuredClone(base.attributes);
-  o.baseSkills = structuredClone(base.skills);
+  o.baseSkills = {};
   o.grantedSkills = {};
-  for (const i of o.inventory?.items || []) {
-    if (!itemActive(i)) continue;
-    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true });
-    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
-      const key = `implant:${i.id}:${a.id}`;
-      o.skills[key] = a.level;
-      o.skillCategories[key] = "abilities";
-      o.skillLabels[key] = a.name;
-      o.skillDescriptions ?? (o.skillDescriptions = {});
-      o.skillDescriptions[key] = a.description || "";
-      o.skillPerks[key] = a.description ? [a.description] : [];
-      o.grantedSkills[key] = i.name;
+  o.skillAliases = {};
+  const nameKey = (value) => String(value || "").trim().toLocaleLowerCase();
+  const register = (key, label, level, category, source = "", isAvailable = false) => {
+    const name = nameKey(label), existing = canonical.get(name);
+    if (existing) {
+      o.skillAliases[key] = existing;
+      return existing;
+    }
+    canonical.set(name, key);
+    o.skills[key] = level;
+    o.baseSkills[key] = level;
+    o.skillLabels[key] = label;
+    o.skillCategories[key] = category;
+    if (source) o.grantedSkills[key] = source;
+    if (isAvailable) available.add(key);
+    return key;
+  };
+  o.skills = {};
+  for (const [key, value] of Object.entries(base.skills || {})) {
+    const k = register(key, base.skillLabels[key] || key, value, base.skillCategories[key]);
+    if (k === key) {
+      available.add(k);
+      direct.add(k);
     }
   }
-  rows2.push(...base.effects || []);
-  const eligibleSkills = new Set(Object.keys(o.skills));
+  for (const i of o.inventory?.items || []) {
+    if (!itemActive(i)) continue;
+    if (i.kind === "resource" || ["armor", "shield", "implant"].includes(i.kind) && i.equippedPart) rows2.push({ id: i.id, name: i.name, bonuses: ["resource", "implant"].includes(i.kind) ? { ...i.bonuses, rangeReduction: {} } : i.bonuses, passive: true, implant: i.kind === "implant" });
+    if (i.kind === "implant" && i.equippedPart) for (const a of i.abilities || []) {
+      if (a.kind && a.kind !== "skill") continue;
+      const key = register("implant:" + i.id + ":" + a.id, a.name, a.level, "abilities", i.name, true);
+      if (!direct.has(key)) {
+        o.skillDescriptions ?? (o.skillDescriptions = {});
+        (_a = o.skillDescriptions)[key] ?? (_a[key] = a.description || "");
+        (_b = o.skillPerks)[key] ?? (_b[key] = []);
+      }
+    }
+  }
+  rows2.push(...(base.effects || []).filter((e) => !e.sourceItemId || (o.inventory?.items || []).some((i) => i.id === e.sourceItemId && i.equippedPart && itemActive(i))).map((e) => ({ ...e, implant: !!e.sourceItemId })));
+  for (const row of [...rows2].sort((a, b) => Number(b.implant) - Number(a.implant))) for (const [key] of Object.entries(row.bonuses?.skills || {})) {
+    const label = base.skillLabels[key] || key, k = canonical.get(nameKey(label)) || register(key, label, 0, row.bonuses?.skillCategories?.[key] || "applied", row.name);
+    o.skillAliases[key] = k;
+    if (row.implant) available.add(k);
+    if (!direct.has(k)) {
+      (_c = o.skillStrengthBonuses)[k] ?? (_c[k] = false);
+      (_d = o.skillPerks)[k] ?? (_d[k] = []);
+    }
+  }
+  const skillMods = {};
   for (const row of rows2) {
     const skills = {};
     for (const [key, value] of Object.entries(row.bonuses?.skills || {})) {
-      const resolved = eligibleSkills.has(key) ? key : [...eligibleSkills].find((k) => (o.skillLabels[k] || k).toLowerCase() === key.toLowerCase()) || key;
-      skills[resolved] = (skills[resolved] || 0) + value;
+      const k = o.skillAliases[key] || canonical.get(nameKey(base.skillLabels[key] || key)) || key;
+      skills[k] = (skills[k] || 0) + value;
+      if (available.has(k)) skillMods[k] = (skillMods[k] || 0) + value;
     }
     row.bonuses = { ...row.bonuses, skills };
   }
-  for (const row of rows2) for (const key of Object.keys(row.bonuses?.skills || {})) if (!Object.hasOwn(o.skills, key)) {
-    o.skills[key] = 0;
-    o.baseSkills[key] = 0;
-    o.skillLabels[key] = key;
-    o.skillCategories[key] = "applied";
-    o.skillStrengthBonuses[key] = false;
-    o.skillPerks[key] = [];
-    o.grantedSkills[key] = row.name;
-  }
-  const skillMods = {};
-  for (const row of rows2) for (const [k, v] of Object.entries(row.bonuses?.skills || {})) if (eligibleSkills.has(k)) skillMods[k] = (skillMods[k] || 0) + v;
-  for (const [k, v] of Object.entries(skillMods)) if (Object.hasOwn(o.skills, k)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
+  o.availableSkills = [...available];
+  for (const [k, v] of Object.entries(skillMods)) o.skills[k] = Math.max(0, Math.min(Object.hasOwn(ARMOR_TRAINING, k) ? 1 : 10, o.skills[k] + v));
   const armor = armorSummary(o), trained = !armor.key || (o.skills[armor.key] || 0) >= 1;
   if (!trained) {
     const penalties = armor.key === "light_armor" ? { Agility: -1, Endurance: -1 } : armor.key === "medium_armor" ? { Agility: -2, Endurance: -2, Strength: -2 } : { Agility: -4, Endurance: -5, Strength: -4 };
@@ -620,12 +646,34 @@ function useItemOnTracker(target, item, partName, effectId) {
   throw new Error("This item cannot be used.");
 }
 
+// implantAbilities.js
+function activeImplantAbilities(o) {
+  return (o.inventory?.items || []).filter((i) => i.kind === "implant" && i.equippedPart && i.quantity > 0).flatMap((item) => (item.abilities || []).filter((a) => ["attack", "bonus"].includes(a.kind)).map((ability) => ({ item, ability, key: "implant:" + item.id + ":" + ability.id })));
+}
+function implantAttacks(o) {
+  return activeImplantAbilities(o).filter(({ ability }) => ability.kind === "attack").map(({ item, ability, key }) => ({ id: key, selectionKey: key, name: item.name + " \xB7 " + ability.name, damage: ability.damage, accuracy: ability.accuracy || 0, boundSkill: ability.skill, implantId: item.id, abilityId: ability.id }));
+}
+function resolveAbilitySkill(o, label) {
+  return Object.keys(o.skills).find((k) => k.toLocaleLowerCase() === String(label).trim().toLocaleLowerCase() || String(o.skillLabels[k] || k).toLocaleLowerCase() === String(label).trim().toLocaleLowerCase()) || "";
+}
+function activateImplantAbility(tracker, itemId, abilityId) {
+  var _a;
+  const row = activeImplantAbilities(tracker.odyssey).find((r) => r.item.id === itemId && r.ability.id === abilityId && r.ability.kind === "bonus");
+  if (!row) throw Error("Equipped implant ability is unavailable.");
+  const effect = { id: "implant-effect:" + itemId + ":" + abilityId, name: row.item.name + " \xB7 " + row.ability.name, sourceItemId: itemId, bonuses: normalizeBonuses(row.ability.bonuses) };
+  (_a = tracker.odyssey).effects ?? (_a.effects = []);
+  if (tracker.odyssey.effects.some((e) => e.id === effect.id)) throw Error("Ability is already active.");
+  if (tracker.odyssey.effects.length >= 100) throw Error("Too many active effects.");
+  tracker.odyssey.effects.push(effect);
+  return effect;
+}
+
 // itemUse.js
 function itemUseRequirement(odyssey, item) {
   const skill = String(item.useSkill || "").trim();
   if (!skill) return { mode: "none", skill: "" };
   const match = Object.keys(odyssey.skills || {}).find((key) => key.toLowerCase() === skill.toLowerCase() || String(odyssey.skillLabels?.[key] || key).toLowerCase() === skill.toLowerCase());
-  const learned = match && (!Object.hasOwn(odyssey.grantedSkills || {}, match) || match.startsWith("implant:"));
+  const learned = match && (odyssey.availableSkills ? odyssey.availableSkills.includes(match) : !Object.hasOwn(odyssey.grantedSkills || {}, match) || match.startsWith("implant:"));
   return learned ? { mode: "skill", skill: odyssey.skillLabels?.[match] || skill, key: match, level: odyssey.skills[match] } : { mode: "attribute", skill };
 }
 var passed = (result) => ["success", "critical-success"].includes(result.outcome);
@@ -642,12 +690,12 @@ function resolveItemUseCheck({ odyssey, item, attribute, rollCharacter, rollSkil
   stages.push({ kind: requirement.mode === "skill" ? "skill" : "random", name: requirement.mode === "skill" ? requirement.skill : "d100 vs d100", result });
   return { ...requirement, stages, success: passed(result) };
 }
-function applyCheckedItemUse({ source, target, itemId, selection, attribute, effectId, rollCharacter, rollSkill }) {
+function applyCheckedItemUse({ source, target, itemId, selection, attribute, effectId, rollCharacter, rollSkill, actorOdyssey }) {
   const item = source.odyssey.inventory.items.find((row) => row.id === itemId);
   if (!item || !["consumable", "medical"].includes(item.kind) || item.quantity < 1) throw Error("No usable item available.");
   const projected = structuredClone(target);
   useItemOnTracker(projected, item, selection, effectId);
-  const check = resolveItemUseCheck({ odyssey: effectiveOdyssey(source.odyssey), item, attribute, rollCharacter, rollSkill });
+  const check = resolveItemUseCheck({ odyssey: actorOdyssey || effectiveOdyssey(source.odyssey), item, attribute, rollCharacter, rollSkill });
   const same = source === target, nextSource = same && check.success ? projected : structuredClone(source);
   nextSource.odyssey.inventory.items.find((row) => row.id === itemId).quantity--;
   return { ...check, itemName: item.name, source: nextSource, target: same ? nextSource : check.success ? projected : target };
@@ -868,6 +916,57 @@ function arrangeCombatPanels(root = document) {
   }
 }
 
+// ui/tooltips.js
+function installTooltips() {
+  const tip = document.createElement("div");
+  tip.className = "od-tooltip";
+  tip.id = "od-hover-tooltip";
+  tip.setAttribute("role", "tooltip");
+  tip.setAttribute("popover", "manual");
+  document.body.append(tip);
+  let active = null;
+  const hide = () => {
+    tip.classList.remove("visible");
+    active?.removeAttribute("aria-describedby");
+    active = null;
+  };
+  const show = (node) => {
+    hide();
+    const text2 = node.dataset.descriptionText || node.dataset.tooltip || node.getAttribute("title") || node.getAttribute("aria-label");
+    if (!text2) return;
+    active = node;
+    tip.textContent = text2;
+    node.setAttribute("aria-describedby", tip.id);
+    if (!tip.matches(":popover-open")) tip.showPopover();
+    const r = node.getBoundingClientRect();
+    tip.style.left = Math.max(8, Math.min(r.left, innerWidth - 328)) + "px";
+    tip.style.top = Math.max(8, Math.min(r.bottom + 7, innerHeight - tip.offsetHeight - 8)) + "px";
+    requestAnimationFrame(() => {
+      if (active === node) tip.classList.add("visible");
+    });
+  };
+  document.addEventListener("pointerover", (e) => {
+    const node = e.target.closest?.("button,[data-tooltip]");
+    if (node && node !== active && !node.contains(e.relatedTarget)) show(node);
+  });
+  document.addEventListener("pointerout", (e) => {
+    if (active && !active.contains(e.relatedTarget)) hide();
+  });
+  document.addEventListener("focusin", (e) => {
+    const node = e.target.closest?.("button,[data-tooltip]");
+    if (node) show(node);
+  });
+  document.addEventListener("focusout", hide);
+  document.addEventListener("pointerdown", hide);
+  document.addEventListener("scroll", hide, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hide();
+  });
+  new MutationObserver(() => {
+    if (active && !active.isConnected) hide();
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 // ui/compactButtons.js
 var paths = {
   info: "M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
@@ -912,6 +1011,7 @@ function iconFor(text2) {
   return "box";
 }
 function installCompactButtons() {
+  installTooltips();
   const enhance = () => {
     for (const button of document.querySelectorAll("button")) {
       if (button.matches(".cp-attr,.cp-skill-card,.list-item,.od-wide-action") || button.querySelector("[data-compact-icon]")) continue;
@@ -933,6 +1033,53 @@ function installCompactButtons() {
     });
   }).observe(document.body, { childList: true, subtree: true, characterData: true });
   enhance();
+}
+
+// itemGroups.js
+var stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value;
+var itemNameKey = (item) => String(item.name || "").trim().toLocaleLowerCase();
+function groupNamedItems(rows2, getValue = (row) => row) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const row of rows2) {
+    const v = getValue(row), key = (v.kind || "") + ":" + itemNameKey(v);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return [...groups.values()];
+}
+function mergeInventoryStacks(items, preferredId = "", skillLabels = {}) {
+  const result = [], known = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    if (item.equippedPart) {
+      result.push(item);
+      continue;
+    }
+    const { id, quantity, equippedPart, previousArmor, legacyEquipment, ...definition } = item;
+    if (!["consumable", "medical"].includes(item.kind)) for (const k of ["subtype", "healCritical", "useSkill"]) delete definition[k];
+    if (!["armor", "shield", "implant"].includes(item.kind)) for (const k of ["armor", "criticalMax", "criticalDamage", "slots", "slot", "playerRemovable"]) delete definition[k];
+    if (item.kind !== "implant") delete definition.abilities;
+    else definition.abilities = (definition.abilities || []).map(({ id: id2, ...ability }) => ability);
+    if (definition.bonuses) {
+      definition.bonuses = structuredClone(definition.bonuses);
+      for (const field of ["skills", "skillCategories"]) if (definition.bonuses[field]) definition.bonuses[field] = Object.entries(definition.bonuses[field]).reduce((result2, [key2, value]) => {
+        const label = String(skillLabels[key2] || key2).trim().toLocaleLowerCase();
+        result2[label] = field === "skills" ? (result2[label] || 0) + value : value;
+        return result2;
+      }, {});
+    }
+    const key = JSON.stringify(stable({ ...definition, name: itemNameKey(item) })), previous = known.get(key);
+    if (previous && previous.quantity + quantity <= 999999) {
+      if (id === preferredId) {
+        item.quantity += previous.quantity;
+        result[result.indexOf(previous)] = item;
+        known.set(key, item);
+      } else previous.quantity += quantity;
+    } else {
+      result.push(item);
+      known.set(key, item);
+    }
+  }
+  return result;
 }
 
 // ui/descriptions.js
@@ -980,7 +1127,7 @@ function rows(raw, map) {
   const seen = /* @__PURE__ */ new Set();
   return (Array.isArray(raw) ? raw : []).slice(0, LIMIT).filter((r) => r && typeof r === "object").map(map).filter((r) => r.id && !seen.has(r.id) && seen.add(r.id));
 }
-function normalizeInventory(raw, weapons = []) {
+function normalizeInventory(raw, weapons = [], preferredId = "", skillLabels = {}) {
   const items = rows(raw?.items, (r, i) => ({
     id: text(r.id || `legacy-item-${i}`),
     name: text(r.name) || "Item",
@@ -997,7 +1144,7 @@ function normalizeInventory(raw, weapons = []) {
     criticalDamage: int(r.criticalDamage, int(r.criticalMax, 999)),
     playerRemovable: r.playerRemovable === true,
     bonuses: normalizeBonuses(["resource", "implant"].includes(r.kind) ? { ...r.bonuses, rangeReduction: {} } : r.bonuses),
-    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3) })),
+    abilities: (Array.isArray(r.abilities) ? r.abilities : []).slice(0, 20).map((a, j) => ({ id: text(a.id || "ability-" + j), name: text(a.name) || "Ability", level: int(a.level, 10), description: text(a.description, 2e3), ...a.kind && a.kind !== "skill" ? { kind: ["bonus", "attack"].includes(a.kind) ? a.kind : "skill", bonuses: normalizeBonuses(a.bonuses), damage: int(a.damage, 999), accuracy: Math.max(-999, Math.min(999, Number(a.accuracy) || 0)), skill: text(a.skill, 80) } : {} })),
     legacyEquipment: r.legacyEquipment ?? (raw?.version < 3 || !raw?.version),
     equippedPart: text(r.equippedPart, 40),
     previousArmor: int(r.previousArmor, 999)
@@ -1008,6 +1155,7 @@ function normalizeInventory(raw, weapons = []) {
     items.push({ ...structuredClone(item), id, quantity: item.quantity - 1, equippedPart: "", previousArmor: 0, legacyEquipment: false });
     item.quantity = 1;
   }
+  items.splice(0, items.length, ...mergeInventoryStacks(items, preferredId, skillLabels));
   const magazines = rows(raw?.magazines, (r, i) => ({
     id: text(r.id || `legacy-magazine-${i}`),
     name: text(r.name) || "Magazine",
@@ -1146,6 +1294,7 @@ function unequipItem(tracker, id, gm = true) {
     if (part.armor !== expected) inv.baseArmor[item.equippedPart] = part.armor;
   }
   item.equippedPart = "";
+  tracker.odyssey.effects = (tracker.odyssey.effects || []).filter((e) => e.sourceItemId !== id);
   reconcileEquipment(tracker);
 }
 function consumeItem(tracker, id) {
@@ -1276,6 +1425,7 @@ function saveInventoryEntry(tracker, origin, values, id) {
     if (o.inventory.items.length >= 1e3) throw new Error("Inventory limit is 1000 items.");
     o.inventory.items.push(row);
   }
+  o.inventory = normalizeInventory(o.inventory, o.weapons.ranged, id, o.skillLabels);
   reconcileEquipment(tracker);
 }
 
@@ -1319,8 +1469,9 @@ function inventoryView(tracker, gm) {
     } else if (usable) controls = '<button type="button" data-od-action="use-item" data-id="' + esc(i.id) + '" ' + (!i.quantity || subtype === "grenade" ? "disabled" : "") + ">" + (subtype === "grenade" ? "Grenade \xB7 placeholder" : "Use\u2026") + "</button>";
     return '<article class="cp-card"><div class="cp-row"><b>' + esc(i.name) + '</b><span class="cp-pill">' + esc(usable ? subtype : i.kind) + '</span><span class="cp-pill">\xD7' + i.quantity + "</span>" + (i.armor ? '<span class="cp-pill">Armor ' + i.armor + "</span>" : "") + (i.kind === "implant" && i.criticalMax ? '<span class="cp-pill">Body HP +' + i.criticalMax + "</span>" : i.criticalMax ? '<span class="cp-pill ' + (broken ? "bad" : "") + '">Durability ' + (i.criticalMax - i.criticalDamage) + "/" + i.criticalMax + "</span>" : "") + (usable && i.useSkill ? '<span class="cp-pill">Use: ' + esc(i.useSkill) + "</span>" : "") + descriptionButton(i.name, i.description) + edit("item", i.id) + "</div>" + (bonusText(i.bonuses) ? '<p class="cp-muted">' + esc(bonusText(i.bonuses)) + "</p>" : "") + '<div class="cp-row">' + controls + "</div></article>";
   };
+  const abilities = activeImplantAbilities(o).map(({ item, ability, key }) => '<article class="cp-card cp-row"><b>' + esc(ability.name) + '</b><span class="cp-muted">' + esc(item.name) + "</span>" + descriptionButton(ability.name, ability.description) + (ability.kind === "attack" ? '<span class="cp-pill">DMG ' + ability.damage + " \xB7 " + esc(ability.skill) + '</span><button type="button" data-od-action="implant-attack" data-key="' + esc(key) + '">Prepare attack</button>' : '<button type="button" data-od-action="activate-implant" data-id="' + esc(item.id) + '" data-ability-id="' + esc(ability.id) + '" ' + ((o.effects || []).some((e) => e.id === "implant-effect:" + item.id + ":" + ability.id) ? "disabled" : "") + ">Activate bonuses</button>") + "</article>").join("");
   const equippedItems = inv.items.filter((i) => i.equippedPart).map(renderItem).join("");
-  const items = inv.items.filter((i) => !i.equippedPart).map(renderItem).join("");
+  const items = groupNamedItems(inv.items.filter((i) => !i.equippedPart)).map((rows2) => rows2.length === 1 ? renderItem(rows2[0]) : '<details class="cp-card od-named-group"><summary>' + esc(rows2[0].name) + " \xB7 \xD7" + rows2.reduce((sum, i) => sum + i.quantity, 0) + " \xB7 " + rows2.length + " variants</summary>" + rows2.map(renderItem).join("") + "</details>").join("");
   const ammo = o.ammunition.map((a) => `<article class="cp-card cp-row"><b>${esc(a.name)}</b><span class="cp-pill">Ammo \xD7${a.quantity}</span><span class="cp-muted">DMG ${a.damage} \xB7 AP ${a.penetration}</span>${descriptionButton(a.name, a.description)}${edit("ammo", a.id)}</article>`).join("");
   const mags = inv.magazines.map((m) => {
     const w = o.weapons.ranged.find((w2) => w2.magazineId === m.id), a = o.ammunition.find((a2) => a2.id === m.loadedAmmoId);
@@ -1337,7 +1488,7 @@ function inventoryView(tracker, gm) {
     return '<article class="cp-card"><div class="cp-row"><b>' + esc(w.name) + '</b><span class="cp-pill">' + esc(kind === "ranged" ? weaponCategoryLabel(w.weaponCategory) : kind) + '</span><span class="cp-muted">ACC ' + w.accuracy + (kind === "melee" ? " \xB7 DMG " + w.damage : " \xB7 " + (w.acceptsMagazines === false ? "Built-in " : "Magazine ") + w.loaded + "/" + w.capacity) + "</span>" + (Object.keys(w.rangeReduction || {}).length ? '<span class="cp-muted">' + esc(bonusText({ rangeReduction: w.rangeReduction })) + "</span>" : "") + descriptionButton(w.name, w.description) + edit("weapon-" + kind, w.id || String(index)) + "</div>" + controls + "</article>";
   }));
   const group = (label, html) => html ? `<div class="cp-section-title">${label}</div><div class="cp-list">${html}</div>` : "";
-  return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button><button type="button" data-od-action="open-item-pool">Campaign item pool</button></div>' : ""}${group("Equipped", equippedItems)}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!equippedItems && !items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
+  return `<div class="cp-screen">${gm ? '<div class="cp-row"><button type="button" data-od-action="add-item">+ Item</button><button type="button" data-od-action="open-item-pool">Campaign item pool</button></div>' : ""}${group("Implant abilities", abilities)}${group("Equipped", equippedItems)}${group("Items", items)}${group("Weapons", weapons.join(""))}${group("Ammunition", ammo)}${group("Magazines", mags)}${!equippedItems && !items && !ammo && !mags && !weapons.length ? '<p class="cp-muted">Inventory is empty.</p>' : ""}</div>`;
 }
 function templatesView(library, gm) {
   if (!gm) return "";
@@ -1353,8 +1504,8 @@ function compactHud({ token, tracker, floating, target, targetData, skills, weap
 var ITEM_POOL_PREFIX = "com.codex.body-hp/item-pool/";
 var ITEM_POOL_FORMAT = "odyssey-item-pool";
 var TYPES = /* @__PURE__ */ new Set(["item", "ammo", "magazine", "weapon-melee", "weapon-ranged"]);
-var stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
-var blueprintText = (blueprint) => JSON.stringify(stable(blueprint));
+var stable2 = (value) => Array.isArray(value) ? value.map(stable2) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable2(value[key])])) : value;
+var blueprintText = (blueprint) => JSON.stringify(stable2(blueprint));
 var ammoDefinition = (a) => ({ name: a.name, damage: a.damage, penetration: a.penetration });
 var sameAmmo = (a, b) => a.name === b.name && a.damage === b.damage && a.penetration === b.penetration;
 var sameMagazine = (a, b) => a.name === b.name && a.capacity === b.capacity;
@@ -1403,8 +1554,11 @@ function captureBlueprint(tracker, type, id) {
         skills[label] = (skills[label] || 0) + value;
       }
       values.bonuses.skills = skills;
+      if (values.bonuses.skillCategories) {
+        values.bonuses.skillCategories = Object.fromEntries(Object.entries(values.bonuses.skillCategories).map(([key, value]) => [o.skillLabels[key] || key, value]));
+      }
     }
-    if (values.abilities) values.abilities = values.abilities.map((ability, index) => ({ ...ability, id: "ability-" + index }));
+    if (values.abilities) values.abilities = values.abilities.map((ability, index) => ({ ...ability, id: "ability-" + index, ...ability.skill ? { skill: o.skillLabels[ability.skill] || ability.skill } : {}, ...ability.bonuses ? { bonuses: { ...ability.bonuses, skills: Object.fromEntries(Object.entries(ability.bonuses.skills || {}).map(([key, value]) => [o.skillLabels[key] || key, value])) } } : {} }));
   }
   if (entry.useSkill) values.useSkill = String(o.skillLabels[entry.useSkill] || entry.useSkill).trim().slice(0, 80);
   if (entry.description) values.description = String(entry.description).slice(0, 2e3);
@@ -1483,6 +1637,12 @@ function copyBlueprint(tracker, raw, quantity = 1, id = newId()) {
       const key = Object.keys(o.skills).find((key2) => key2.toLowerCase() === label.toLowerCase() || (o.skillLabels[key2] || key2).toLowerCase() === label.toLowerCase()) || label;
       skills[key] = (skills[key] || 0) + value;
     }
+    const categories = {};
+    for (const [label, value] of Object.entries(values.bonuses.skillCategories || {})) {
+      const key = Object.keys(o.skills).find((key2) => key2.toLowerCase() === label.toLowerCase() || (o.skillLabels[key2] || key2).toLowerCase() === label.toLowerCase()) || label;
+      categories[key] = value;
+    }
+    if (Object.keys(categories).length) values.bonuses.skillCategories = categories;
     values.bonuses.skills = skills;
   }
   if (blueprint.type === "ammo") {
@@ -1720,17 +1880,18 @@ function showItemPool({ getCatalog, character, onGive, onDelete, onExport, onImp
       const b = e.blueprint, v = b.values;
       return '<article class="cp-card cp-row"><b>' + esc(v.name) + '</b><span class="cp-pill">' + esc(v.kind) + '</span><span class="cp-muted">' + esc([v.armor ? "Armor " + v.armor : "", v.criticalMax ? "HP " + v.criticalMax : "", v.capacity ? "Capacity " + v.capacity : "", v.damage ? "DMG " + v.damage : "", v.useSkill ? "Use: " + v.useSkill : ""].filter(Boolean).join(" \xB7 ")) + "</span>" + descriptionButton(v.name, v.description) + '<button type="button" data-pool-give="' + esc(e.id) + '" ' + (busy ? "disabled" : "") + '>Give item</button><button type="button" data-pool-delete="' + esc(e.id) + '" class="danger" aria-label="Remove definition from pool" ' + (busy ? "disabled" : "") + ">\xD7</button></article>";
     };
+    const rows2 = (entries) => groupNamedItems(entries, (e) => ({ ...e.blueprint.values, kind: e.blueprint.type === "item" ? e.blueprint.values.kind : e.id })).map((group) => group.length === 1 ? row(group[0]) : '<details class="cp-card od-named-group"><summary>' + esc(group[0].blueprint.values.name) + " \xB7 " + group.length + " variants</summary>" + group.map(row).join("") + "</details>").join("");
     if (search) {
       const words = search.split(/\s+/);
       const matches = catalog.entries.filter((e) => {
         const text2 = [e.blueprint.values.name, e.blueprint.values.kind, e.blueprint.values.description || "", ...poolCategoryPaths(e.blueprint).flat()].join(" ").toLowerCase();
         return words.every((word) => text2.includes(word));
       });
-      list.innerHTML = matches.map(row).join("") || '<p class="cp-muted">No matching items.</p>';
+      list.innerHTML = rows2(matches) || '<p class="cp-muted">No matching items.</p>';
     } else {
       const group = (node, path = [], level = 0) => {
         const key = JSON.stringify([...path, node.label]), open = expanded.get(key) ?? level === 0;
-        return '<details class="od-pool-category" data-pool-category="' + esc(key) + '" ' + (open ? "open" : "") + "><summary>" + esc(node.label) + ' <span class="cp-pill">' + node.count + '</span></summary><div class="od-pool-category-body">' + node.entries.map(row).join("") + node.children.map((child) => group(child, [...path, node.label], level + 1)).join("") + "</div></details>";
+        return '<details class="od-pool-category" data-pool-category="' + esc(key) + '" ' + (open ? "open" : "") + "><summary>" + esc(node.label) + ' <span class="cp-pill">' + node.count + '</span></summary><div class="od-pool-category-body">' + rows2(node.entries) + node.children.map((child) => group(child, [...path, node.label], level + 1)).join("") + "</div></details>";
       };
       list.innerHTML = groupPoolEntries(catalog.entries).map((node) => group(node)).join("") || '<p class="cp-muted">The campaign item pool is empty.</p>';
     }
@@ -1795,7 +1956,7 @@ var ITEM_TYPES = [["consumable", "Usable"], ["resource", "Resource"], ["ammo", "
 function itemEditor({ existing = {}, type = "resource", skills = [], parts = [], ammunition = [], magazines = [] }) {
   const dialog = document.createElement("dialog");
   dialog.className = "od-dialog od-item-editor";
-  const field = (name, label, value = "", inputType = "text", max = 999) => `<label>${esc(label)}<input name="${name}" type="${inputType}" value="${esc(value)}" ${inputType === "number" ? `min="${["damage", "accuracy", "penetration"].includes(name) ? -999 : 0}" max="${max}" step="1"` : 'maxlength="120"'}></label>`;
+  const field = (name, label, value = "", inputType = "text", max = 999) => `<label>${esc(label)}<input name="${name}" type="${inputType}" value="${esc(value)}" ${inputType === "number" ? `min="${["damage", "accuracy", "penetration", "abilityAccuracy"].includes(name) || name.startsWith("abilityAttr:") || name === "abilityBonusValue" ? -999 : 0}" max="${max}" step="1"` : 'maxlength="120"'}></label>`;
   const select = (name, label, options, value) => `<label>${esc(label)}<select name="${name}">${options.map(([k, l]) => `<option value="${esc(k)}" ${k === value ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
   const checkbox = (name, label, checked) => `<label class="od-check"><input name="${name}" type="checkbox" ${checked ? "checked" : ""}>${esc(label)}</label>`;
   const values = { ...existing, kind: type, acceptsMagazines: existing.acceptsMagazines !== false };
@@ -1808,10 +1969,14 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   const form = dialog.querySelector("form"), host = dialog.querySelector("[data-type-fields]");
   const rangeEditor = (prefix, value = {}) => `<fieldset class="od-range-reduction"><legend>Range penalty reduction \xB7 per band</legend>${RANGE_BANDS.map(([key, label]) => field(prefix + key, label, value[key] || 0, "number")).join("")}</fieldset>`;
   function bonusEditor(bonuses = {}, allowSkills = true, allowRange = true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${allowRange ? rangeEditor("bonusRange:", bonuses.rangeReduction) : ""}${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number")).join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
+    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${allowRange ? rangeEditor("bonusRange:", bonuses.rangeReduction) : ""}${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => '<div class="cp-row">' + field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number") + select("skillCategory:" + k, "Category", [["combat", "Combat"], ["applied", "Applied"]], bonuses.skillCategories?.[k] || skills.find(([key]) => key === k)?.[2] || "applied") + "</div>").join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}${select("newBonusSkillCategory", "Category", [["combat", "Combat"], ["applied", "Applied"]], "applied")}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
+  }
+  function abilityBonusSkill(key = "", value = 0) {
+    return '<div class="cp-row od-ability-bonus-skill">' + field("abilityBonusSkill", "Skill name", key) + field("abilityBonusValue", "Level bonus", value, "number", 10) + '<button type="button" data-remove-ability-bonus aria-label="Remove skill bonus">\xD7</button></div>';
   }
   function abilityRow(a = {}) {
-    return `<div class="od-ability-row">${field("abilityName", "Ability", a.name || "")}${field("abilityLevel", "Level", a.level || 0, "number", 10)}${field("abilityDescription", "Description", a.description || "")}<button type="button" data-remove-ability aria-label="Remove ability">\xD7</button></div>`;
+    const kind = a.kind || "skill";
+    return '<fieldset class="od-ability-row" data-ability-id="' + esc(a.id || crypto.randomUUID()) + '">' + field("abilityName", "Ability", a.name || "") + select("abilityKind", "Ability type", [["skill", "Granted skill"], ["bonus", "Activate bonuses"], ["attack", "Attack"]], kind) + (kind === "skill" ? field("abilityLevel", "Level", a.level || 0, "number", 10) : kind === "attack" ? field("abilityDamage", "Damage", a.damage || 0, "number") + field("abilityAccuracy", "Accuracy", a.accuracy || 0, "number") + field("abilitySkill", "Attack skill", a.skill || "") : ATTRIBUTES.map((k) => field("abilityAttr:" + k, k, a.bonuses?.attributes?.[k] || 0, "number")).join("") + "<div data-ability-bonus-skills>" + Object.entries(a.bonuses?.skills || {}).map(([k, v]) => abilityBonusSkill(k, v)).join("") + '</div><button type="button" data-add-ability-bonus>Add skill bonus</button>') + field("abilityDescription", "Description", a.description || "") + '<button type="button" data-remove-ability aria-label="Remove ability">\xD7</button></fieldset>';
   }
   function collect() {
     const data = Object.fromEntries(new FormData(form));
@@ -1825,18 +1990,27 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     if (form.querySelector('[name="magazineCompatible"]')) values.acceptedMagazineIds = [...form.querySelectorAll('[name="magazineCompatible"]:checked')].map((e) => e.value);
     if (form.querySelector("[data-equipment-slots]")) values.slots = [...form.querySelectorAll('[name="equipmentSlot"]:checked')].map((e) => e.value);
     values.playerRemovable = !!form.elements.playerRemovable?.checked;
-    const bonuses = { attributes: {}, skills: {} };
+    const bonuses = { attributes: {}, skills: {}, skillCategories: {} };
     for (const input of form.querySelectorAll('[name^="attr:"],[name^="skill:"]')) {
       const [kind, ...key] = input.name.split(":");
       const value = Number(input.value) || 0;
       if (value) bonuses[kind === "attr" ? "attributes" : "skills"][key.join(":")] = value;
     }
+    for (const input of form.querySelectorAll('[name^="skillCategory:"]')) bonuses.skillCategories[input.name.slice(14)] = input.value;
     if (form.querySelector(".od-bonuses")) {
       bonuses.rangeReduction = normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key]) => [key, data["bonusRange:" + key]])));
       values.bonuses = bonuses;
     }
     if (form.elements["weaponRange:clinch"]) values.rangeReduction = normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key]) => [key, data["weaponRange:" + key]])));
-    if (form.querySelector("[data-abilities]")) values.abilities = [...form.querySelectorAll(".od-ability-row")].map((row, index) => ({ id: existing.abilities?.[index]?.id || crypto.randomUUID(), name: row.querySelector('[name="abilityName"]').value, level: Number(row.querySelector('[name="abilityLevel"]').value) || 0, description: row.querySelector('[name="abilityDescription"]').value })).filter((a) => a.name.trim());
+    if (form.querySelector("[data-abilities]")) values.abilities = [...form.querySelectorAll(".od-ability-row")].map((row) => {
+      const get2 = (name) => row.querySelector('[name="' + name + '"]')?.value || "", bonuses2 = { attributes: {}, skills: {} };
+      for (const input of row.querySelectorAll('[name^="abilityAttr:"]')) if (Number(input.value)) bonuses2.attributes[input.name.slice(12)] = Number(input.value);
+      for (const r of row.querySelectorAll(".od-ability-bonus-skill")) {
+        const name = r.querySelector('[name="abilityBonusSkill"]').value.trim(), v = Number(r.querySelector('[name="abilityBonusValue"]').value) || 0;
+        if (name && v) bonuses2.skills[name] = (bonuses2.skills[name] || 0) + v;
+      }
+      return { id: row.dataset.abilityId, name: get2("abilityName"), kind: get2("abilityKind"), level: Number(get2("abilityLevel")) || 0, description: get2("abilityDescription"), damage: Number(get2("abilityDamage")) || 0, accuracy: Number(get2("abilityAccuracy")) || 0, skill: get2("abilitySkill"), bonuses: bonuses2 };
+    }).filter((a) => a.name.trim());
     values.ammoIds = [...form.querySelectorAll('[name="ammoCompatible"]:checked')].map((e) => e.value);
   }
   function render2() {
@@ -1873,12 +2047,13 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     form.elements.quantity.closest("label").hidden = kind === "weapon" || kind === "magazine" && !!existing.id;
   }
   form.addEventListener("change", (e) => {
-    if (["kind", "subtype", "weaponKind", "acceptsMagazines"].includes(e.target.name)) {
+    if (["kind", "subtype", "weaponKind", "acceptsMagazines", "abilityKind"].includes(e.target.name)) {
       collect();
       render2();
     }
   });
   form.addEventListener("click", (e) => {
+    var _a;
     if (e.target.closest("[data-add-bonus-skill]")) {
       const input = form.elements.newBonusSkillName, name = input.value.trim(), bonus = Number(form.elements.newBonusSkillValue.value) || 0;
       if (!name || name.length > 40 || ["__proto__", "constructor", "prototype"].includes(name)) {
@@ -1894,9 +2069,15 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
         skillChoices.push(choice);
       }
       values.bonuses.skills[choice[0]] = bonus;
+      (_a = values.bonuses).skillCategories ?? (_a.skillCategories = {});
+      values.bonuses.skillCategories[choice[0]] = values.newBonusSkillCategory;
       render2();
       return;
     }
+    if (e.target.closest("[data-add-ability-bonus]")) {
+      e.target.closest(".od-ability-row").querySelector("[data-ability-bonus-skills]").insertAdjacentHTML("beforeend", abilityBonusSkill());
+    }
+    e.target.closest("[data-remove-ability-bonus]")?.closest(".od-ability-bonus-skill").remove();
     if (e.target.closest("[data-add-ability]")) {
       host.querySelector("[data-abilities]").insertAdjacentHTML("beforeend", abilityRow());
     }
@@ -5702,7 +5883,7 @@ function profileData(tracker) {
     minor: tracker.minor || 0,
     serious: tracker.serious || 0,
     body: structuredClone(tracker.body),
-    odyssey: Object.fromEntries(profileFields.map((k) => [k, structuredClone(tracker.odyssey[k])]))
+    odyssey: { ...Object.fromEntries(profileFields.map((k) => [k, structuredClone(tracker.odyssey[k])])), ...tracker.odyssey.vehicle?.enabled ? { vehicle: { enabled: true, pilotTokenId: "" } } : {} }
   };
 }
 function makeTemplate(name, tracker) {
@@ -5716,6 +5897,7 @@ function makeTemplate(name, tracker) {
     part.minor = 0;
     part.serious = 0;
   }
+  if (tracker.odyssey.vehicle?.enabled) data.odyssey.vehicle = { enabled: true, pilotTokenId: "" };
   return { format: TEMPLATE_FORMAT, version: 1, id: newId(), name: String(name || "Character").trim().slice(0, 120), updatedAt: (/* @__PURE__ */ new Date()).toISOString(), data };
 }
 function normalizeLibrary(raw, sanitize) {
@@ -5956,18 +6138,45 @@ function installCharacterTools(host) {
   };
   const readSelect = (root, attribute, value) => Array.from(root.querySelectorAll(`[${attribute}]`)).find((e) => e.getAttribute(attribute) === String(value))?.value || "";
   async function handle(action, node) {
+    if (action === "vehicle-toggle" || action === "vehicle-enter" || action === "vehicle-exit") {
+      const vehicle = getToken(), data = vehicle && host.tracker(vehicle);
+      if (!vehicle || vehicle.visible === false && getRole() !== "GM") throw Error("Vehicle is unavailable.");
+      if (action === "vehicle-toggle") {
+        if (getRole() !== "GM") throw Error("Only the GM can configure vehicles.");
+        if (data.odyssey.vehicle?.pilotTokenId) throw Error("Exit the vehicle before changing its type.");
+        await host.setVehicle(vehicle.id, !data.odyssey.vehicle?.enabled);
+      } else if (action === "vehicle-exit") await host.setVehicle(vehicle.id, true, "");
+      else {
+        const tokens = host.getTokens(), choices = tokens.filter((t) => t.id !== vehicle.id && canControl(t) && !host.tracker(t).odyssey.vehicle?.enabled && !tokens.some((v) => host.tracker(v).odyssey.vehicle?.pilotTokenId === t.id));
+        const value = await formDialog("Enter vehicle", [{ name: "pilot", label: "Driver / pilot", value: "", required: true, options: [["", "Choose character"], ...choices.map((t) => [t.id, t.name || t.id])] }], { submitLabel: "Enter", message: "Vehicle body, items and weapons stay on this token. Characteristics and skill rolls use the driver." });
+        if (!value) return;
+        await host.setVehicle(vehicle.id, true, value.pilot);
+      }
+      status("Vehicle updated.", "success");
+      return;
+    }
     const token = check();
     const tokenId = token.id, panel = node.closest("#selectedTokenPanel"), id = node.dataset.id;
     const gmActions = ["add-item", "edit-item", "delete-item", "add-mag", "fill-mag", "set-mag-rounds", "empty-mag", "delete-mag", "mount-mag", "apply-template"];
     if (action === "open-item-pool") check(tokenId, true);
     if (gmActions.includes(action) || action.includes("template") || action.includes("library") || action.startsWith("account-")) check(tokenId, true);
+    if (action === "activate-implant") {
+      await host.activateAbility(tokenId, id, node.dataset.abilityId);
+      status("Implant bonuses activated.", "success");
+      return;
+    }
+    if (action === "implant-attack") {
+      host.selectImplantAttack(tokenId, node.dataset.key);
+      status("Implant attack selected. Choose a target in Attack.", "success");
+      return;
+    }
     if (action === "add-item" || action === "edit-entry") {
       check(tokenId, true);
       const t = host.tracker(token), o = t.odyssey, type = node.dataset.entryType || "item";
       const existing = action === "edit-entry" ? findInventoryEntry(t, type, id) : null;
       if (action === "edit-entry" && !existing) throw new Error("Item no longer exists.");
       const kind = type.startsWith("weapon-") ? "weapon" : type === "item" ? ["item", "tool"].includes(existing?.kind) ? "resource" : existing?.kind === "medical" ? "consumable" : existing?.kind || "resource" : type;
-      const values = await itemEditor({ existing: { ...existing, ...type.startsWith("weapon-") ? { weaponKind: type.slice(7) } : {} }, type: kind, skills: Object.entries(o.skills).map(([k]) => [k, o.skillLabels[k] || k]), parts: Object.entries(t.body).map(([k, p]) => [k, p.label || k]), ammunition: o.ammunition, magazines: o.inventory.magazines });
+      const values = await itemEditor({ existing: { ...existing, ...type.startsWith("weapon-") ? { weaponKind: type.slice(7) } : {} }, type: kind, skills: Object.entries(o.skills).map(([k]) => [k, o.skillLabels[k] || k, o.skillCategories[k]]), parts: Object.entries(t.body).map(([k, p]) => [k, p.label || k]), ammunition: o.ammunition, magazines: o.inventory.magazines });
       if (!values) return;
       const entryId = existing?.id || newId(), entryType = values.kind === "weapon" ? "weapon-" + values.weaponKind : ["ammo", "magazine"].includes(values.kind) ? values.kind : "item";
       let blueprint;
@@ -6059,6 +6268,7 @@ function installCharacterTools(host) {
       await mutate(tokenId, (t) => deleteInventoryEntry(t, node.dataset.entryType, id), true);
     } else if (action === "add-skill" || action === "edit-skill") {
       check(tokenId, true);
+      if (host.getEffective?.(token).pilot) throw Error("Edit skills on the driver character token.");
       const key = node.dataset.skill, o = host.tracker(token).odyssey;
       const value = await skillEditor(o, key);
       if (!value) return;
@@ -6119,7 +6329,7 @@ function installCharacterTools(host) {
       if (!target) throw new Error("Target no longer exists.");
       const currentItem = host.tracker(check(tokenId)).odyssey.inventory.items.find((row) => row.id === id);
       if (!currentItem) throw Error("Item no longer exists.");
-      const useOdyssey = effectiveOdyssey(host.tracker(check(tokenId)).odyssey), requirement = itemUseRequirement(useOdyssey, currentItem);
+      const useOdyssey = host.getEffective ? host.getEffective(check(tokenId)) : effectiveOdyssey(host.tracker(check(tokenId)).odyssey), requirement = itemUseRequirement(useOdyssey, currentItem);
       let attribute = "";
       if (requirement.mode === "attribute") {
         const choice = await formDialog("Use " + currentItem.name + " \xB7 choose characteristic", [{ name: "attribute", label: "Characteristic", value: "", required: true, options: [["", "Choose a characteristic"], ...ATTRIBUTES.map((key) => [key, key + " (" + (useOdyssey.attributes[key] || 0) + ")"])] }], { submitLabel: "Roll and use", message: "Unknown skill: " + requirement.skill + ". First pass a characteristic check, then d100 vs d100. A failed check spends one item without an effect." });
@@ -6283,7 +6493,12 @@ function installCharacterTools(host) {
     if (event.key === LIBRARY_STORAGE_KEY) reload();
   });
   const disabledWhileBusy = (html) => busy ? html.replaceAll("<button ", "<button disabled ").replaceAll("<select ", "<select disabled ").replaceAll("<input ", "<input disabled ") : html;
-  return { syncPool: schedulePoolScan, isBusy: () => busy, renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => getRole() !== "GM" ? "" : disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
+  return { renderVehicle: (token) => {
+    const vehicle = host.tracker(token).odyssey.vehicle;
+    if (!vehicle?.enabled && getRole() !== "GM") return "";
+    const driver = vehicle?.pilotTokenId && getToken(vehicle.pilotTokenId), canExit = getRole() === "GM" || driver && canControl(driver);
+    return '<div class="cp-screen cp-row od-vehicle"><span class="cp-section-title">Vehicle</span>' + (vehicle?.enabled ? vehicle.pilotTokenId ? '<span class="cp-pill">Driver: ' + esc(driver?.name || "Unavailable") + "</span>" + (canExit ? '<button type="button" data-od-action="vehicle-exit" title="Exit vehicle">Exit vehicle</button>' : "") : '<span class="cp-muted">No driver</span><button type="button" data-od-action="vehicle-enter" title="Enter vehicle">Enter vehicle</button>' : "") + (getRole() === "GM" ? '<button type="button" data-od-action="vehicle-toggle" title="' + (vehicle?.enabled ? "Make ordinary character" : "Mark as vehicle") + '">' + (vehicle?.enabled ? "Make ordinary character" : "Mark as vehicle") + "</button>" : "") + "</div>";
+  }, syncPool: schedulePoolScan, isBusy: () => busy, renderInventory: (tracker) => disabledWhileBusy(inventoryView(tracker, getRole() === "GM")), renderTemplates: () => getRole() !== "GM" ? "" : disabledWhileBusy(`${storageError ? `<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>` : ""}${templatesView(library, getRole() === "GM")}`) };
 }
 
 // shared.js
@@ -6605,8 +6820,9 @@ function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
-  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged, "", next.skillLabels);
   next.effects = normalizeEffects(raw.effects);
+  if (raw.vehicle?.enabled) next.vehicle = { enabled: true, pilotTokenId: String(raw.vehicle.pilotTokenId || "").trim().slice(0, 120) };
   next.preferences = { parryMode: ["off", "1", "2", "3", "4", "5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off" };
   for (const [key, label] of Object.entries(ARMOR_TRAINING)) {
     next.skills[key] = clamp(Number(raw.skills?.[key]) || 0, 0, 1);
@@ -6697,14 +6913,23 @@ function formatOverlayText(data) {
   }
   return lines.join("\n");
 }
-function getOdysseyData(item) {
-  return effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey));
+function getOdysseyData(item, tokens = []) {
+  const own = effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey)), id = own.vehicle?.pilotTokenId;
+  if (!id) return own;
+  const pilot = tokens.find((t) => t.id === id && t.id !== item.id && isCharacterToken(t));
+  if (!pilot || getTrackerData(pilot).odyssey.vehicle?.enabled) return { ...own, pilotMissing: true };
+  const driver = effectiveOdyssey(getTrackerData(pilot).odyssey), fields = ["attributes", "baseAttributes", "skills", "baseSkills", "skillLabels", "skillCategories", "skillPerks", "skillDescriptions", "skillPerkDescriptions", "skillStrengthBonuses", "skillRangeReduction", "grantedSkills", "skillAliases", "availableSkills", "modifiers", "rangeReduction"];
+  const result = { ...own, pilot: { id: pilot.id, name: getCharacterName(pilot) } };
+  for (const key of fields) result[key] = driver[key];
+  result.effectRows = [...driver.effectRows || [], ...own.effectRows || []];
+  return result;
 }
-function canPlayerControlToken(playerRole2, playerId2, token) {
+function canPlayerControlToken(playerRole2, playerId2, token, tokens = []) {
   if (!token || !isCharacterToken(token)) return false;
   if (playerRole2 === "GM") return true;
   const odyssey = getOdysseyData(token);
-  return Boolean(playerId2) && odyssey.owner.playerId === playerId2;
+  const pilot = odyssey.vehicle?.pilotTokenId && tokens.find((t) => t.id === odyssey.vehicle.pilotTokenId && isCharacterToken(t) && !getTrackerData(t).odyssey.vehicle?.enabled);
+  return Boolean(playerId2) && (odyssey.owner.playerId === playerId2 || Boolean(pilot && getTrackerData(pilot).odyssey.owner.playerId === playerId2));
 }
 function getBodyTotals(data) {
   return getBodyPartNames(data).reduce(
@@ -7375,7 +7600,7 @@ function paintTargetDistance(reading) {
 function paintRangeAdjustments() {
   const token = getCharacterById(activeTokenId);
   if (!token) return;
-  const odyssey = getOdysseyData(token);
+  const odyssey = getOdysseyData2(token);
   for (const node of document.querySelectorAll("[data-range-modifier]")) {
     const manual = node.dataset.rangeModifier === "manual", prefix = manual ? "data-manual-attack-field" : "data-attack-field";
     const weapon = getWeaponByName(token, getActionFieldValue(`[${prefix}="weaponName"]`));
@@ -7395,7 +7620,7 @@ function refreshTargetDistance() {
     if (!source2 || !canUseToken(source2) || source2.id !== activeTokenId) void stopTargetPick();
     return;
   }
-  const source = getCharacterById(activeTokenId), targetId = source ? getOdysseyData(source).attackDraft.targetTokenId : "";
+  const source = getCharacterById(activeTokenId), targetId = source ? getOdysseyData2(source).attackDraft.targetTokenId : "";
   const target = getCharacterById(targetId);
   if (source && target && target.visible !== false && canUseToken(source)) void targetDistance.measure(source, target);
   else paintTargetDistance(null);
@@ -7584,7 +7809,8 @@ function getAbilitiesSkillEntries(odyssey) {
   );
 }
 function getAttackSkillEntries(odyssey) {
-  return [...getCombatSkillEntries(odyssey), ...getAbilitiesSkillEntries(odyssey)].filter(
+  const assigned = implantAttacks(odyssey).map((w) => resolveAbilitySkill(odyssey, w.boundSkill)).filter(Boolean);
+  return [...new Map([...getCombatSkillEntries(odyssey), ...getAbilitiesSkillEntries(odyssey), ...assigned.map((key) => [key, odyssey.skills[key]])]).entries()].filter(
     ([skillName]) => !ATTACK_ONLY_EXCLUDED_SKILLS.has(skillName)
   );
 }
@@ -7766,8 +7992,11 @@ function resolveActiveTokenId() {
 function isEditable() {
   return playerRole === "GM";
 }
+function getOdysseyData2(token) {
+  return getOdysseyData(token, characterListCache);
+}
 function canUseToken(token) {
-  return canPlayerControlToken(playerRole, playerId, token);
+  return canPlayerControlToken(playerRole, playerId, token, characterListCache);
 }
 function canEditTokenData(token) {
   return canUseToken(token);
@@ -8274,7 +8503,7 @@ function getAttackDraft(token, data, targetCharacters) {
     manualArmor: stored.manualArmor ?? "0",
     manualParry: stored.manualParry ?? "0",
     rounds: stored.rounds ?? "1",
-    parryMode: ["off", "1", "2", "3", "4", "5"].includes(String(stored.parryMode)) ? String(stored.parryMode) : getOdysseyData(token).preferences?.parryMode || "off"
+    parryMode: ["off", "1", "2", "3", "4", "5"].includes(String(stored.parryMode)) ? String(stored.parryMode) : getOdysseyData2(token).preferences?.parryMode || "off"
   };
 }
 function saveAttackDraftValue(tokenId, field, value) {
@@ -8304,16 +8533,17 @@ function buildWeaponOptions(weapons, selectedWeaponName = "") {
   ).join("");
 }
 function getAttackSelectableWeapons(token) {
-  const odyssey = getOdysseyData(token);
+  const odyssey = getOdysseyData2(token);
   const meleeWeapons = odyssey.weapons?.melee ?? [];
   return [
     { name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 },
     ...meleeWeapons,
+    ...implantAttacks(odyssey),
     ...(odyssey.weapons?.ranged ?? []).map((weapon, rangedIndex) => ({ ...weapon, damage: 0, rangedIndex, selectionKey: `ranged:${weapon.id}` }))
   ];
 }
 function getDefaultAttackWeapon(token) {
-  const odyssey = getOdysseyData(token);
+  const odyssey = getOdysseyData2(token);
   const meleeWeapons = odyssey.weapons?.melee ?? [];
   return meleeWeapons[0] ?? { name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 };
 }
@@ -8325,6 +8555,14 @@ function getWeaponByName(token, weaponName) {
 function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage, weaponAccuracy = 0) {
   scheduleRender();
   if (!tokenId) return;
+  const chosen = getWeaponByName(getCharacterById(tokenId), weaponName);
+  if (chosen.implantId) {
+    const skill = resolveAbilitySkill(getOdysseyData2(getCharacterById(tokenId)), chosen.boundSkill);
+    if (skill) {
+      saveAttackDraftValue(tokenId, "skill", skill);
+      ui.selectedTokenPanel.querySelectorAll('[data-attack-field="skill"],[data-manual-attack-field="skill"],[data-hud-attack-field="skill"]').forEach((field) => field.value = skill);
+    }
+  }
   saveAttackDraftValue(tokenId, "weaponName", weaponName);
   saveAttackDraftValue(tokenId, "weaponDamage", String(weaponDamage));
   saveAttackDraftValue(tokenId, "weaponAccuracy", String(weaponAccuracy));
@@ -8469,7 +8707,7 @@ async function persistAttackTargetToken(tokenId, targetTokenId) {
   const normalizedTargetTokenId = String(targetTokenId ?? "").trim();
   const targetToken = normalizedTargetTokenId ? getCharacterById(normalizedTargetTokenId) : null;
   const normalizedTargetTokenName = targetToken ? getCharacterName(targetToken) : "";
-  const currentAttackDraft = getOdysseyData(token).attackDraft ?? {};
+  const currentAttackDraft = getOdysseyData2(token).attackDraft ?? {};
   const currentTargetTokenId = String(currentAttackDraft.targetTokenId ?? "").trim();
   const currentTargetTokenName = String(currentAttackDraft.targetTokenName ?? "").trim();
   if (currentTargetTokenId === normalizedTargetTokenId && currentTargetTokenName === normalizedTargetTokenName) {
@@ -8924,11 +9162,11 @@ Player ID: ${escapeHtml(playerId || "Unavailable")}</pre>
   );
 }
 function renderCharacteristicsBlock(data) {
-  return renderCollapsibleSection("Characteristics", attributeCards(data.odyssey, ATTRIBUTE_UI_FIELDS, isEditable()), true);
+  return renderCollapsibleSection("Characteristics", attributeCards(data.odyssey, ATTRIBUTE_UI_FIELDS, isEditable() && !data.odyssey.pilot), true);
 }
 function renderEnglishSkillsBlock(data) {
   const groups = [["Combat", getCombatSkillEntries(data.odyssey)], ["Abilities", getAbilitiesSkillEntries(data.odyssey)], ["Applied", getAppliedSkillEntries(data.odyssey)]];
-  return renderCollapsibleSection("Skills", skillCards(data.odyssey, groups.map(([label, entries]) => [label, entries.filter(([key]) => !Object.hasOwn(ARMOR_TRAINING, key))]), isEditable()), true);
+  return renderCollapsibleSection("Skills", skillCards(data.odyssey, groups.map(([label, entries]) => [label, entries.filter(([key]) => !Object.hasOwn(ARMOR_TRAINING, key))]), isEditable() && !data.odyssey.pilot), true);
 }
 function toggleWeaponDraftFields(select) {
   const row = select.closest(".weapon-entry");
@@ -9013,7 +9251,7 @@ async function saveAmmunition(node) {
 function renderAttackAmmunition(token, draft2, manual, disabledAttr) {
   const weapon = getWeaponByName(token, draft2.weaponName);
   if (weapon.rangedIndex == null) return "";
-  const ammo = getOdysseyData(token).ammunition ?? [];
+  const ammo = getOdysseyData2(token).ammunition ?? [];
   const prefix = manual ? "data-manual-attack-field" : "data-attack-field";
   return `<label class="field-stack"><span class="field-label">Ammunition (${weapon.loaded}/${weapon.capacity})</span>
     <select ${prefix}="ammoId" ${disabledAttr}>
@@ -9298,7 +9536,7 @@ function renderSelectedToken() {
   }
   const tracked = isTrackedCharacter(token);
   const data = getTrackerData(token);
-  const odyssey = getOdysseyData(token);
+  const odyssey = getOdysseyData2(token);
   const totals = getBodyTotals(data);
   const selected = selectionIds.includes(token.id);
   const tokenLocked = !canUseToken(token);
@@ -9339,6 +9577,7 @@ function renderSelectedToken() {
       ${isEditable() ? `
             ${renderOwnerFields({ odyssey }, gmOnlyDisabled)}
           ` : ""}
+      ${characterTools ? characterTools.renderVehicle(token) : ""}
       ${canUseToken(token) ? effectChips(odyssey, isEditable()) : ""}
       ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
       ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
@@ -9804,7 +10043,7 @@ async function setWeaponDamage(index, value) {
     setStatus("Only the GM can edit weapons.", "error");
     return;
   }
-  const currentWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
+  const currentWeapon = getOdysseyData2(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
   const currentWeaponName = currentWeapon.name ?? "Default";
   const nextDamage = clamp(Number(value) || 0, -999, 999);
   await updateTrackerData2(token.id, (current2) => {
@@ -9832,7 +10071,7 @@ async function setWeaponAccuracy(index, value) {
     setStatus("Only the GM can edit weapons.", "error");
     return;
   }
-  const currentWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
+  const currentWeapon = getOdysseyData2(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
   const currentWeaponName = currentWeapon.name ?? "Default";
   const nextAccuracy = clamp(Number(value) || 0, -999, 999);
   await updateTrackerData2(token.id, (current2) => {
@@ -9860,7 +10099,7 @@ async function setWeaponName(index, value) {
     setStatus("Only the GM can edit weapons.", "error");
     return;
   }
-  const previousWeapon = getOdysseyData(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
+  const previousWeapon = getOdysseyData2(token).weapons?.melee?.[index] ?? { name: "Default", damage: 0, accuracy: 0 };
   const nextWeaponName = String(value || "").trim() || "Default";
   await updateTrackerData2(token.id, (current2) => {
     var _a;
@@ -9887,7 +10126,7 @@ async function removeWeapon(type = "melee", index) {
     setStatus("Only the GM can edit weapons.", "error");
     return;
   }
-  const currentWeapons = getOdysseyData(token).weapons?.[type] ?? [];
+  const currentWeapons = getOdysseyData2(token).weapons?.[type] ?? [];
   const removedWeapon = currentWeapons[index];
   if (!removedWeapon) {
     setStatus("Weapon not found.", "error");
@@ -10051,12 +10290,18 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     setStatus("Attacker and target must be different tokens.", "error");
     return;
   }
-  const attackerOdyssey = getOdysseyData(attacker);
+  const attackerOdyssey = getOdysseyData2(attacker);
   const targetData = target ? getTrackerData(target) : null;
-  const targetOdyssey = target ? getOdysseyData(target) : null;
-  const skillName = manualDefense ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]') : getActionFieldValue('[data-attack-field="skill"]');
+  const targetOdyssey = target ? getOdysseyData2(target) : null;
+  let skillName = manualDefense ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]') : getActionFieldValue('[data-attack-field="skill"]');
   const weaponName = manualDefense ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]') : getActionFieldValue('[data-attack-field="weaponName"]');
+  if (attackerOdyssey.pilotMissing) throw Error("Vehicle driver is unavailable. Exit the vehicle or select another driver.");
+  if (weaponName?.startsWith("implant:") && !implantAttacks(attackerOdyssey).some((w) => w.selectionKey === weaponName)) throw Error("Implant attack is no longer equipped. Select a weapon.");
   const selectedWeapon = getWeaponByName(attacker, weaponName);
+  if (selectedWeapon.implantId) {
+    skillName = resolveAbilitySkill(attackerOdyssey, selectedWeapon.boundSkill);
+    if (!skillName) throw Error("Learn or grant the implant attack skill before attacking.");
+  }
   const shotPrefix = manualDefense ? "data-manual-attack-field" : "data-attack-field";
   const shot = selectedWeapon.rangedIndex == null ? null : getAmmoShot(
     attackerOdyssey,
@@ -10145,7 +10390,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const beforeSerious = target ? targetPartState.serious ?? 0 : null;
   const specialBeforeHp = specialWasActive ? Number(specialPartState?.current) || 0 : null;
   const strengthBonus = !shot && getSkillStrengthBonusFlag(attackerOdyssey, skillName) ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0) : 0;
-  const finalWeaponDamage = shot ? shot.damage : weaponDamage + strengthBonus;
+  const finalWeaponDamage = shot ? shot.damage : (selectedWeapon.implantId ? selectedWeapon.damage : weaponDamage) + strengthBonus;
   const baseTargetParry = target ? targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0 : manualParry;
   const targetParry = parryDivisor <= 0 ? 0 : Math.max(Math.floor(baseTargetParry / parryDivisor), 0);
   const result = resolveAttack({
@@ -10190,6 +10435,11 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const resolvedAttackSummary = shot ? `${damageSummary} ${shot.name} x${shot.count}; ammo damage ${shot.damage}; armor ${baseTargetArmor} -> ${targetArmor} (AP ${shot.penetration}).` : damageSummary;
   await updateTrackerData2(attacker.id, (current2) => {
     const next = structuredClone(current2);
+    if (attackerOdyssey.pilot?.id && next.odyssey.vehicle?.pilotTokenId !== attackerOdyssey.pilot.id) throw Error("Vehicle driver changed. Retry the attack.");
+    if (selectedWeapon.implantId) {
+      const ability = implantAttacks(next.odyssey).find((w) => w.id === selectedWeapon.id);
+      if (!ability || ability.damage !== selectedWeapon.damage || ability.accuracy !== selectedWeapon.accuracy || ability.boundSkill !== selectedWeapon.boundSkill) throw Error("Implant attack changed. Retry the attack.");
+    }
     if (shot) {
       if (next.odyssey.weapons.ranged[selectedWeapon.rangedIndex]?.id !== selectedWeapon.id) throw new Error("Weapon changed. Please retry the attack.");
       consumeAmmo(next.odyssey, selectedWeapon.rangedIndex, shot);
@@ -10392,7 +10642,8 @@ async function performRollCharOnce(options = {}) {
   const attribute = options.attribute ?? (getActionFieldValue('[data-roll-char-field="attribute"]') || "Strength");
   if (!ATTRIBUTE_UI_FIELDS.some(([key]) => key === attribute)) throw new Error("Unknown characteristic.");
   const modifier2 = options.modifier ?? (Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0);
-  const odyssey = getOdysseyData(token);
+  const odyssey = getOdysseyData2(token);
+  if (odyssey.pilotMissing) throw Error("Vehicle driver is unavailable.");
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier2);
   const attributeLabel = ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
   const summary = `${getResolvedCheckResultIcon(result.result)} Characteristic ${attributeLabel}: ${result.roll} vs ${result.finalAttribute} (${result.result})`;
@@ -10422,6 +10673,31 @@ async function performRollCharOnce(options = {}) {
   );
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
+async function setVehicleState(vehicleId, enabled, pilotId = "") {
+  const fresh = (await lib_default.scene.items.getItems()).filter(isCharacterToken);
+  await queueTrackerWrite(vehicleId, () => lib_default.scene.items.updateItems([vehicleId], (changed) => {
+    const items = [...fresh.filter((t) => t.id !== vehicleId), ...changed];
+    const vehicle = changed.find((t) => t.id === vehicleId);
+    if (!vehicle) throw Error("Vehicle is unavailable.");
+    const data = getTrackerData(vehicle), current2 = data.odyssey.vehicle;
+    if (playerRole !== "GM" && (!current2?.enabled || !enabled)) throw Error("Only the GM can configure vehicles.");
+    if (current2?.pilotTokenId && pilotId && current2.pilotTokenId !== pilotId) throw Error("Vehicle already has a driver. Exit first.");
+    if (!pilotId && current2?.pilotTokenId && playerRole !== "GM") {
+      const previous = items.find((t) => t.id === current2.pilotTokenId);
+      if (!previous || !canPlayerControlToken(playerRole, playerId, previous)) throw Error("Only the driver or GM can exit this vehicle.");
+    }
+    if (pilotId) {
+      const pilot = items.find((t) => t.id === pilotId);
+      if (!pilot || pilot.id === vehicle.id || getTrackerData(pilot).odyssey.vehicle?.enabled || !canPlayerControlToken(playerRole, playerId, pilot)) throw Error("Choose a character you control as driver.");
+      if (items.some((t) => t.id !== vehicleId && getTrackerData(t).odyssey.vehicle?.pilotTokenId === pilotId)) throw Error("This character is already driving another vehicle.");
+    }
+    if (enabled) data.odyssey.vehicle = { enabled: true, pilotTokenId: pilotId };
+    else delete data.odyssey.vehicle;
+    vehicle.metadata[META_KEY] = sanitizeTrackerData(data);
+  }));
+  await syncState();
+  scheduleRender();
+}
 async function useCharacterItem(sourceId, itemId, targetId, partName, attribute = "") {
   const effectId = crypto.randomUUID();
   let result, actorName;
@@ -10429,13 +10705,14 @@ async function useCharacterItem(sourceId, itemId, targetId, partName, attribute 
     const source = items.find((t) => t.id === sourceId), target = items.find((t) => t.id === targetId);
     if (!source || !target || !canUseToken(source)) throw new Error("Character is unavailable.");
     if (playerRole !== "GM" && (target.visible === false || getTrackerData(target).body[partName]?.hidden)) throw new Error("Target is unavailable.");
+    if (getOdysseyData2(source).pilotMissing) throw Error("Vehicle driver is unavailable.");
     const sourceData = getTrackerData(source), targetData = source === target ? sourceData : getTrackerData(target);
     const item = sourceData.odyssey.inventory.items.find((i) => i.id === itemId);
     if (playerRole !== "GM" && item?.subtype === "repairkit") {
       const gear = targetData.odyssey.inventory.items.find((i) => i.id === partName);
       if (gear?.equippedPart && targetData.body[gear.equippedPart]?.hidden) throw new Error("Target is unavailable.");
     }
-    result = applyCheckedItemUse({ source: sourceData, target: targetData, itemId, selection: partName, attribute, effectId, rollCharacter: rollCharacterCheck, rollSkill: rollSkillCheck });
+    result = applyCheckedItemUse({ source: sourceData, target: targetData, itemId, selection: partName, attribute, effectId, actorOdyssey: getOdysseyData2(source), rollCharacter: rollCharacterCheck, rollSkill: rollSkillCheck });
     actorName = getCharacterName(source);
     result.summary = itemUseSummary(result) + " \u2192 " + getCharacterName(target);
     if (result.mode !== "none") {
@@ -10473,7 +10750,8 @@ async function performRollSkillOnce(options = {}) {
     return;
   }
   const modifier2 = options.modifier ?? (Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0);
-  const odyssey = getOdysseyData(token);
+  const odyssey = getOdysseyData2(token);
+  if (odyssey.pilotMissing) throw Error("Vehicle driver is unavailable.");
   if (!options.raw && !Object.hasOwn(odyssey.skills, skillName)) throw new Error("Skill no longer exists.");
   const result = rollSkillCheck(options.raw ? 0 : odyssey.skills[skillName] ?? 0, modifier2);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
@@ -10960,6 +11238,7 @@ function bindUiEvents() {
       return;
     }
     if (target.dataset.action === "set-odyssey-attribute") {
+      if (getOdysseyData2(getCharacterById(activeTokenId)).pilot) return;
       const attribute = target.dataset.attribute;
       if (!attribute) return;
       void setOdysseyAttribute(attribute, target.value).catch((error) => {
@@ -11110,6 +11389,24 @@ lib_default.onReady(async () => {
       tracker: getTrackerData,
       getPoolTokens: async () => (await lib_default.scene.items.getItems()).filter(isCharacterToken),
       getTokens: () => characterListCache,
+      getEffective: getOdysseyData2,
+      activateAbility: async (tokenId, itemId, abilityId) => {
+        await updateTrackerData2(tokenId, (current2) => {
+          const next = structuredClone(current2);
+          activateImplantAbility(next, itemId, abilityId);
+          return next;
+        });
+        await syncState();
+        scheduleRender();
+      },
+      setVehicle: setVehicleState,
+      selectImplantAttack: (tokenId, key) => {
+        const token = getCharacterById(tokenId), weapon = getWeaponByName(token, key);
+        syncAttackWeaponInputs(tokenId, key, weapon.damage, weapon.accuracy);
+        const skill = resolveAbilitySkill(getOdysseyData2(token), weapon.boundSkill);
+        if (skill) saveAttackDraftValue(tokenId, "skill", skill);
+        scheduleRender();
+      },
       useItem: useCharacterItem,
       getToken: (id) => getCharacterById(id ?? activeTokenId),
       getRole: () => playerRole,

@@ -2,7 +2,7 @@ import {ATTRIBUTES,effectiveOdyssey,useItemOnTracker} from './characterRules.js'
 export function itemUseRequirement(odyssey,item) {
  const skill=String(item.useSkill||'').trim();if(!skill)return {mode:'none',skill:''};
  const match=Object.keys(odyssey.skills||{}).find(key=>key.toLowerCase()===skill.toLowerCase()||String(odyssey.skillLabels?.[key]||key).toLowerCase()===skill.toLowerCase());
- const learned=match&&(!Object.hasOwn(odyssey.grantedSkills||{},match)||match.startsWith('implant:'));
+ const learned=match&&(odyssey.availableSkills?odyssey.availableSkills.includes(match):!Object.hasOwn(odyssey.grantedSkills||{},match)||match.startsWith('implant:'));
  return learned?{mode:'skill',skill:odyssey.skillLabels?.[match]||skill,key:match,level:odyssey.skills[match]}:{mode:'attribute',skill};
 }
 const passed=result=>['success','critical-success'].includes(result.outcome);
@@ -17,11 +17,11 @@ export function resolveItemUseCheck({odyssey,item,attribute,rollCharacter,rollSk
 }
 // Validate and project the effect before any roll. Cancellation/invalid targets
 // do not spend a unit; failed checks spend exactly one without changing target.
-export function applyCheckedItemUse({source,target,itemId,selection,attribute,effectId,rollCharacter,rollSkill}) {
+export function applyCheckedItemUse({source,target,itemId,selection,attribute,effectId,rollCharacter,rollSkill,actorOdyssey}) {
  const item=source.odyssey.inventory.items.find(row=>row.id===itemId);
  if(!item||!['consumable','medical'].includes(item.kind)||item.quantity<1)throw Error('No usable item available.');
  const projected=structuredClone(target);useItemOnTracker(projected,item,selection,effectId);
- const check=resolveItemUseCheck({odyssey:effectiveOdyssey(source.odyssey),item,attribute,rollCharacter,rollSkill});
+ const check=resolveItemUseCheck({odyssey:actorOdyssey||effectiveOdyssey(source.odyssey),item,attribute,rollCharacter,rollSkill});
  const same=source===target,nextSource=same&&check.success?projected:structuredClone(source);
  nextSource.odyssey.inventory.items.find(row=>row.id===itemId).quantity--;
  return {...check,itemName:item.name,source:nextSource,target:same?nextSource:check.success?projected:target};

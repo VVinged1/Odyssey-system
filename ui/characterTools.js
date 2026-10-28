@@ -80,16 +80,25 @@ export function installCharacterTools(host) {
   };
   const readSelect=(root,attribute,value)=>Array.from(root.querySelectorAll(`[${attribute}]`)).find(e=>e.getAttribute(attribute)===String(value))?.value || '';
   async function handle(action,node) {
+    if(action==='vehicle-toggle'||action==='vehicle-enter'||action==='vehicle-exit'){
+      const vehicle=getToken(),data=vehicle&&host.tracker(vehicle);if(!vehicle||vehicle.visible===false&&getRole()!=='GM')throw Error('Vehicle is unavailable.');
+      if(action==='vehicle-toggle'){if(getRole()!=='GM')throw Error('Only the GM can configure vehicles.');if(data.odyssey.vehicle?.pilotTokenId)throw Error('Exit the vehicle before changing its type.');await host.setVehicle(vehicle.id,!data.odyssey.vehicle?.enabled);}
+      else if(action==='vehicle-exit')await host.setVehicle(vehicle.id,true,'');
+      else{const tokens=host.getTokens(),choices=tokens.filter(t=>t.id!==vehicle.id&&canControl(t)&&!host.tracker(t).odyssey.vehicle?.enabled&&!tokens.some(v=>host.tracker(v).odyssey.vehicle?.pilotTokenId===t.id));const value=await formDialog('Enter vehicle',[{name:'pilot',label:'Driver / pilot',value:'',required:true,options:[['','Choose character'],...choices.map(t=>[t.id,t.name||t.id])]}],{submitLabel:'Enter',message:'Vehicle body, items and weapons stay on this token. Characteristics and skill rolls use the driver.'});if(!value)return;await host.setVehicle(vehicle.id,true,value.pilot);}
+      status('Vehicle updated.','success');return;
+    }
     const token=check(); const tokenId=token.id, panel=node.closest('#selectedTokenPanel'), id=node.dataset.id;
     const gmActions=['add-item','edit-item','delete-item','add-mag','fill-mag','set-mag-rounds','empty-mag','delete-mag','mount-mag','apply-template'];
     if(action==='open-item-pool')check(tokenId,true);
     if(gmActions.includes(action)||action.includes('template')||action.includes('library')||action.startsWith('account-')) check(tokenId,true);
+    if(action==='activate-implant'){await host.activateAbility(tokenId,id,node.dataset.abilityId);status('Implant bonuses activated.','success');return;}
+    if(action==='implant-attack'){host.selectImplantAttack(tokenId,node.dataset.key);status('Implant attack selected. Choose a target in Attack.','success');return;}
     if(action==='add-item'||action==='edit-entry') {
       check(tokenId,true);const t=host.tracker(token),o=t.odyssey,type=node.dataset.entryType||'item';
       const existing=action==='edit-entry'?findInventoryEntry(t,type,id):null;
       if(action==='edit-entry'&&!existing)throw new Error('Item no longer exists.');
       const kind=type.startsWith('weapon-')?'weapon':type==='item'?(['item','tool'].includes(existing?.kind)?'resource':existing?.kind==='medical'?'consumable':existing?.kind||'resource'):type;
-      const values=await itemEditor({existing:{...existing,...(type.startsWith('weapon-')?{weaponKind:type.slice(7)}:{})},type:kind,skills:Object.entries(o.skills).map(([k])=>[k,o.skillLabels[k]||k]),parts:Object.entries(t.body).map(([k,p])=>[k,p.label||k]),ammunition:o.ammunition,magazines:o.inventory.magazines});if(!values)return;
+      const values=await itemEditor({existing:{...existing,...(type.startsWith('weapon-')?{weaponKind:type.slice(7)}:{})},type:kind,skills:Object.entries(o.skills).map(([k])=>[k,o.skillLabels[k]||k,o.skillCategories[k]]),parts:Object.entries(t.body).map(([k,p])=>[k,p.label||k]),ammunition:o.ammunition,magazines:o.inventory.magazines});if(!values)return;
       const entryId=existing?.id||newId(),entryType=values.kind==='weapon'?'weapon-'+values.weaponKind:['ammo','magazine'].includes(values.kind)?values.kind:'item';let blueprint;
       await mutate(tokenId,t=>{saveInventoryEntry(t,existing?{type,id}:null,values,entryId);blueprint=captureBlueprint(sanitize(t),entryType,entryId);},true);
       try{await putBlueprints([blueprint]);}catch(e){throw new Error('Item saved on character; campaign pool was not updated: '+e.message);}
@@ -115,7 +124,7 @@ export function installCharacterTools(host) {
       check(tokenId,true);if(!await formDialog('Remove item?',[],{danger:true,message:'Remove this item from this token?'}))return;
       await mutate(tokenId,t=>deleteInventoryEntry(t,node.dataset.entryType,id),true);
     } else if(action==='add-skill'||action==='edit-skill') {
-      check(tokenId,true);const key=node.dataset.skill,o=host.tracker(token).odyssey;
+      check(tokenId,true);if(host.getEffective?.(token).pilot)throw Error('Edit skills on the driver character token.');const key=node.dataset.skill,o=host.tracker(token).odyssey;
       const value=await skillEditor(o,key);if(!value)return;
       const skillKey=key||newId();await mutate(tokenId,t=>{
         const d=t.odyssey;if(key&&!Object.hasOwn(d.skills,key))throw new Error('Skill no longer exists.');
@@ -144,7 +153,7 @@ export function installCharacterTools(host) {
       }});if(!value)return;
       check(tokenId);const target=host.getToken(value.target||tokenId);if(!target)throw new Error('Target no longer exists.');
       const currentItem=host.tracker(check(tokenId)).odyssey.inventory.items.find(row=>row.id===id);if(!currentItem)throw Error('Item no longer exists.');
-      const useOdyssey=effectiveOdyssey(host.tracker(check(tokenId)).odyssey),requirement=itemUseRequirement(useOdyssey,currentItem);let attribute='';
+      const useOdyssey=host.getEffective?host.getEffective(check(tokenId)):effectiveOdyssey(host.tracker(check(tokenId)).odyssey),requirement=itemUseRequirement(useOdyssey,currentItem);let attribute='';
       if(requirement.mode==='attribute'){
         const choice=await formDialog('Use '+currentItem.name+' · choose characteristic',[{name:'attribute',label:'Characteristic',value:'',required:true,options:[['','Choose a characteristic'],...ATTRIBUTES.map(key=>[key,key+' ('+(useOdyssey.attributes[key]||0)+')'])]}],{submitLabel:'Roll and use',message:'Unknown skill: '+requirement.skill+'. First pass a characteristic check, then d100 vs d100. A failed check spends one item without an effect.'});if(!choice)return;attribute=choice.attribute;
       }
@@ -224,5 +233,9 @@ export function installCharacterTools(host) {
   const reload=()=>{try {library=readLibrary(window.localStorage,sanitize);storageError='';render();}catch(e){storageError=e.message;render();}};
   window.addEventListener('storage',event=>{if(event.key===LIBRARY_STORAGE_KEY)reload();});
   const disabledWhileBusy=html=>busy?html.replaceAll('<button ', '<button disabled ').replaceAll('<select ', '<select disabled ').replaceAll('<input ', '<input disabled '):html;
-  return {syncPool:schedulePoolScan,isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>getRole()!=='GM'?'':disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
+  return {renderVehicle:token=>{
+      const vehicle=host.tracker(token).odyssey.vehicle;if(!vehicle?.enabled&&getRole()!=='GM')return '';
+      const driver=vehicle?.pilotTokenId&&getToken(vehicle.pilotTokenId),canExit=getRole()==='GM'||driver&&canControl(driver);
+      return '<div class="cp-screen cp-row od-vehicle"><span class="cp-section-title">Vehicle</span>'+(vehicle?.enabled?(vehicle.pilotTokenId?'<span class="cp-pill">Driver: '+esc(driver?.name||'Unavailable')+'</span>'+(canExit?'<button type="button" data-od-action="vehicle-exit" title="Exit vehicle">Exit vehicle</button>':''):'<span class="cp-muted">No driver</span><button type="button" data-od-action="vehicle-enter" title="Enter vehicle">Enter vehicle</button>'):'')+(getRole()==='GM'?'<button type="button" data-od-action="vehicle-toggle" title="'+(vehicle?.enabled?'Make ordinary character':'Mark as vehicle')+'">'+(vehicle?.enabled?'Make ordinary character':'Mark as vehicle')+'</button>':'')+'</div>';
+    },syncPool:schedulePoolScan,isBusy:()=>busy,renderInventory:tracker=>disabledWhileBusy(inventoryView(tracker,getRole()==='GM')),renderTemplates:()=>getRole()!=='GM'?'':disabledWhileBusy(`${storageError?`<p class="cp-banner err">Local library could not be read: ${esc(storageError)}. Export JSON before replacing it.</p>`:''}${templatesView(library,getRole()==='GM')}`)};
 }

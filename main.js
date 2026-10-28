@@ -1,3 +1,4 @@
+import {implantAttacks,resolveAbilitySkill,activateImplantAbility} from './implantAbilities.js';
 import {applyCheckedItemUse,itemUseSummary} from './itemUse.js';
 import {createFieldDrafts,createTokenWriteQueue} from './fieldDrafts.js';
 import {rangeAdjustment,rangeAdjustmentLabel} from './rangeRules.js';
@@ -36,7 +37,7 @@ import {
   getBodyPartAttackPenalty,
   getBodyPartLabel,
   getCharacterName,
-  getOdysseyData,
+  getOdysseyData as getTokenOdysseyData,
   getTargetableBodyParts,
   getTrackerData,
   hasConfiguredSpecial,
@@ -331,7 +332,8 @@ function getAbilitiesSkillEntries(odyssey) {
 }
 
 function getAttackSkillEntries(odyssey) {
-  return [...getCombatSkillEntries(odyssey), ...getAbilitiesSkillEntries(odyssey)].filter(
+  const assigned=implantAttacks(odyssey).map(w=>resolveAbilitySkill(odyssey,w.boundSkill)).filter(Boolean);
+  return [...new Map([...getCombatSkillEntries(odyssey), ...getAbilitiesSkillEntries(odyssey),...assigned.map(key=>[key,odyssey.skills[key]])]).entries()].filter(
     ([skillName]) => !ATTACK_ONLY_EXCLUDED_SKILLS.has(skillName),
   );
 }
@@ -584,8 +586,9 @@ function isEditable() {
   return playerRole === "GM";
 }
 
+function getOdysseyData(token){return getTokenOdysseyData(token,characterListCache);}
 function canUseToken(token) {
-  return canPlayerControlToken(playerRole, playerId, token);
+  return canPlayerControlToken(playerRole, playerId, token,characterListCache);
 }
 
 function canEditTokenData(token) {
@@ -1260,6 +1263,7 @@ function getAttackSelectableWeapons(token) {
   return [
     { name: UNARMED_WEAPON_NAME, damage: 0, accuracy: 0 },
     ...meleeWeapons,
+    ...implantAttacks(odyssey),
     ...(odyssey.weapons?.ranged ?? []).map((weapon, rangedIndex) => ({ ...weapon, damage: 0, rangedIndex, selectionKey: `ranged:${weapon.id}` })),
   ];
 }
@@ -1280,6 +1284,7 @@ function syncAttackWeaponInputs(tokenId, weaponName, weaponDamage, weaponAccurac
   scheduleRender();
   if (!tokenId) return;
 
+  const chosen=getWeaponByName(getCharacterById(tokenId),weaponName);if(chosen.implantId){const skill=resolveAbilitySkill(getOdysseyData(getCharacterById(tokenId)),chosen.boundSkill);if(skill){saveAttackDraftValue(tokenId,'skill',skill);ui.selectedTokenPanel.querySelectorAll('[data-attack-field="skill"],[data-manual-attack-field="skill"],[data-hud-attack-field="skill"]').forEach(field=>field.value=skill);}}
   saveAttackDraftValue(tokenId, "weaponName", weaponName);
   saveAttackDraftValue(tokenId, "weaponDamage", String(weaponDamage));
   saveAttackDraftValue(tokenId, "weaponAccuracy", String(weaponAccuracy));
@@ -2389,7 +2394,7 @@ function legacyRenderSelectedToken() {
 }
 
 function renderCharacteristicsBlock(data) {
-  return renderCollapsibleSection("Characteristics", attributeCards(data.odyssey, ATTRIBUTE_UI_FIELDS, isEditable()), true);
+  return renderCollapsibleSection("Characteristics", attributeCards(data.odyssey, ATTRIBUTE_UI_FIELDS, isEditable()&&!data.odyssey.pilot), true);
 }
 
 function renderSkillsBlock(data, disabledAttr) {
@@ -2776,7 +2781,7 @@ function renderOdysseyDiceBlock(token, data, tokenLocked) {
 
 function renderEnglishSkillsBlock(data) {
   const groups=[["Combat",getCombatSkillEntries(data.odyssey)],["Abilities",getAbilitiesSkillEntries(data.odyssey)],["Applied",getAppliedSkillEntries(data.odyssey)]];
-  return renderCollapsibleSection("Skills",skillCards(data.odyssey,groups.map(([label,entries])=>[label,entries.filter(([key])=>!Object.hasOwn(ARMOR_TRAINING,key))]),isEditable()),true);
+  return renderCollapsibleSection("Skills",skillCards(data.odyssey,groups.map(([label,entries])=>[label,entries.filter(([key])=>!Object.hasOwn(ARMOR_TRAINING,key))]),isEditable()&&!data.odyssey.pilot),true);
 }
 
 function renderAmmunitionBlock(odyssey) {
@@ -3386,6 +3391,7 @@ function renderSelectedToken() {
           `
           : ""
       }
+      ${characterTools?characterTools.renderVehicle(token):''}
       ${canUseToken(token) ? effectChips(odyssey,isEditable()) : ""}
       ${canUseToken(token) ? renderCharacteristicsBlock({ odyssey }) : ""}
       ${canUseToken(token) ? renderEnglishSkillsBlock({ odyssey }, gmOnlyDisabled) : ""}
@@ -4253,7 +4259,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const attackerOdyssey = getOdysseyData(attacker);
   const targetData = target ? getTrackerData(target) : null;
   const targetOdyssey = target ? getOdysseyData(target) : null;
-  const skillName =
+  let skillName =
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="skill"]') || getActionFieldValue('[data-attack-field="skill"]')
       : getActionFieldValue('[data-attack-field="skill"]');
@@ -4261,7 +4267,10 @@ async function performAttackOnce({ manualDefense = false } = {}) {
     manualDefense
       ? getActionFieldValue('[data-manual-attack-field="weaponName"]') || getActionFieldValue('[data-attack-field="weaponName"]')
       : getActionFieldValue('[data-attack-field="weaponName"]');
+  if(attackerOdyssey.pilotMissing)throw Error('Vehicle driver is unavailable. Exit the vehicle or select another driver.');
+  if(weaponName?.startsWith('implant:')&&!implantAttacks(attackerOdyssey).some(w=>w.selectionKey===weaponName))throw Error('Implant attack is no longer equipped. Select a weapon.');
   const selectedWeapon = getWeaponByName(attacker, weaponName);
+  if(selectedWeapon.implantId){skillName=resolveAbilitySkill(attackerOdyssey,selectedWeapon.boundSkill);if(!skillName)throw Error('Learn or grant the implant attack skill before attacking.');}
   const shotPrefix = manualDefense ? "data-manual-attack-field" : "data-attack-field";
   const shot = selectedWeapon.rangedIndex == null ? null : getAmmoShot(
     attackerOdyssey,
@@ -4377,7 +4386,7 @@ async function performAttackOnce({ manualDefense = false } = {}) {
   const strengthBonus = !shot && getSkillStrengthBonusFlag(attackerOdyssey, skillName)
     ? Math.max((attackerOdyssey.attributes.Strength ?? 0) - 10, 0)
     : 0;
-  const finalWeaponDamage = shot ? shot.damage : weaponDamage + strengthBonus;
+  const finalWeaponDamage = shot ? shot.damage : (selectedWeapon.implantId?selectedWeapon.damage:weaponDamage) + strengthBonus;
   const baseTargetParry = target
     ? (targetOdyssey?.skills?.[PARRY_SKILL_NAME] ?? 0)
     : manualParry;
@@ -4439,6 +4448,8 @@ async function performAttackOnce({ manualDefense = false } = {}) {
 
   await updateTrackerData(attacker.id, (current) => {
     const next = structuredClone(current);
+    if(attackerOdyssey.pilot?.id&&next.odyssey.vehicle?.pilotTokenId!==attackerOdyssey.pilot.id)throw Error('Vehicle driver changed. Retry the attack.');
+    if(selectedWeapon.implantId){const ability=implantAttacks(next.odyssey).find(w=>w.id===selectedWeapon.id);if(!ability||ability.damage!==selectedWeapon.damage||ability.accuracy!==selectedWeapon.accuracy||ability.boundSkill!==selectedWeapon.boundSkill)throw Error('Implant attack changed. Retry the attack.');}
     if (shot) {
       if (next.odyssey.weapons.ranged[selectedWeapon.rangedIndex]?.id !== selectedWeapon.id) throw new Error("Weapon changed. Please retry the attack.");
       consumeAmmo(next.odyssey, selectedWeapon.rangedIndex, shot);
@@ -4669,6 +4680,7 @@ async function performRollCharOnce(options = {}) {
   if (!ATTRIBUTE_UI_FIELDS.some(([key]) => key === attribute)) throw new Error("Unknown characteristic.");
   const modifier = options.modifier ?? (Number(getActionFieldValue('[data-roll-char-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
+  if(odyssey.pilotMissing)throw Error('Vehicle driver is unavailable.');
   const result = rollCharacterCheck(odyssey.attributes[attribute] ?? 0, modifier);
   const attributeLabel =
     ATTRIBUTE_UI_FIELDS.find(([key]) => key === attribute)?.[1] ?? attribute;
@@ -4702,16 +4714,30 @@ async function performRollCharOnce(options = {}) {
   setStatus(summary, isResolvedCheckResultSuccess(result.result) ? "success" : "error");
 }
 
+async function setVehicleState(vehicleId,enabled,pilotId=''){
+ const fresh=(await OBR.scene.items.getItems()).filter(isCharacterToken);
+ await queueTrackerWrite(vehicleId,()=>OBR.scene.items.updateItems([vehicleId],changed=>{
+  const items=[...fresh.filter(t=>t.id!==vehicleId),...changed];const vehicle=changed.find(t=>t.id===vehicleId);if(!vehicle)throw Error('Vehicle is unavailable.');const data=getTrackerData(vehicle),current=data.odyssey.vehicle;
+  if(playerRole!=='GM'&&(!current?.enabled||!enabled))throw Error('Only the GM can configure vehicles.');
+  if(current?.pilotTokenId&&pilotId&&current.pilotTokenId!==pilotId)throw Error('Vehicle already has a driver. Exit first.');
+  if(!pilotId&&current?.pilotTokenId&&playerRole!=='GM'){const previous=items.find(t=>t.id===current.pilotTokenId);if(!previous||!canPlayerControlToken(playerRole,playerId,previous))throw Error('Only the driver or GM can exit this vehicle.');}
+  if(pilotId){const pilot=items.find(t=>t.id===pilotId);if(!pilot||pilot.id===vehicle.id||getTrackerData(pilot).odyssey.vehicle?.enabled||!canPlayerControlToken(playerRole,playerId,pilot))throw Error('Choose a character you control as driver.');if(items.some(t=>t.id!==vehicleId&&getTrackerData(t).odyssey.vehicle?.pilotTokenId===pilotId))throw Error('This character is already driving another vehicle.');}
+  if(enabled)data.odyssey.vehicle={enabled:true,pilotTokenId:pilotId};else delete data.odyssey.vehicle;
+  vehicle.metadata[META_KEY]=sanitizeTrackerData(data);
+ }));await syncState();scheduleRender();
+}
+
 async function useCharacterItem(sourceId,itemId,targetId,partName,attribute='') {
   const effectId=crypto.randomUUID();let result,actorName;
   await queueTrackerWrite(sourceId,()=>OBR.scene.items.updateItems([...new Set([sourceId,targetId])],items=>{
     const source=items.find(t=>t.id===sourceId),target=items.find(t=>t.id===targetId);
     if(!source||!target||!canUseToken(source))throw new Error('Character is unavailable.');
     if(playerRole!=='GM'&&(target.visible===false||getTrackerData(target).body[partName]?.hidden))throw new Error('Target is unavailable.');
+    if(getOdysseyData(source).pilotMissing)throw Error('Vehicle driver is unavailable.');
     const sourceData=getTrackerData(source),targetData=source===target?sourceData:getTrackerData(target);
     const item=sourceData.odyssey.inventory.items.find(i=>i.id===itemId);
     if(playerRole!=='GM'&&item?.subtype==='repairkit'){const gear=targetData.odyssey.inventory.items.find(i=>i.id===partName);if(gear?.equippedPart&&targetData.body[gear.equippedPart]?.hidden)throw new Error('Target is unavailable.');}
-    result=applyCheckedItemUse({source:sourceData,target:targetData,itemId,selection:partName,attribute,effectId,rollCharacter:rollCharacterCheck,rollSkill:rollSkillCheck});
+    result=applyCheckedItemUse({source:sourceData,target:targetData,itemId,selection:partName,attribute,effectId,actorOdyssey:getOdysseyData(source),rollCharacter:rollCharacterCheck,rollSkill:rollSkillCheck});
     actorName=getCharacterName(source);result.summary=itemUseSummary(result)+' → '+getCharacterName(target);
     if(result.mode!=='none'){
       const last=result.stages.at(-1)?.result;result.source.lastRoll={eventId:0,actorName,summary:result.summary,outcome:'item-use',total:last?.totalPrimary??last?.roll??0,targetPart:item?.subtype==='medkit'?partName:'',timestamp:new Date().toISOString(),source:'owlbear-extension'};
@@ -4744,6 +4770,7 @@ async function performRollSkillOnce(options = {}) {
 
   const modifier = options.modifier ?? (Number(getActionFieldValue('[data-roll-skill-field="modifier"]')) || 0);
   const odyssey = getOdysseyData(token);
+  if(odyssey.pilotMissing)throw Error('Vehicle driver is unavailable.');
   if (!options.raw && !Object.hasOwn(odyssey.skills, skillName)) throw new Error("Skill no longer exists.");
   const result = rollSkillCheck(options.raw ? 0 : (odyssey.skills[skillName] ?? 0), modifier);
   const summary = `${getResolvedCheckResultIcon(result.result)} Skill ${skillName}: ${result.totalPrimary} vs ${result.totalSecondary} (${result.result})`;
@@ -5269,6 +5296,7 @@ function bindUiEvents() {
     }
 
     if (target.dataset.action === "set-odyssey-attribute") {
+      if(getOdysseyData(getCharacterById(activeTokenId)).pilot)return;
       const attribute = target.dataset.attribute;
       if (!attribute) return;
       void setOdysseyAttribute(attribute, target.value).catch((error) => {
@@ -5432,7 +5460,7 @@ OBR.onReady(async () => {
       defaultHeight: 860,
     });
     characterTools = installCharacterTools({OBR, sanitize:sanitizeTrackerData, tracker:getTrackerData,
-      getPoolTokens:async()=>(await OBR.scene.items.getItems()).filter(isCharacterToken),getTokens:()=>characterListCache, useItem:useCharacterItem, getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
+      getPoolTokens:async()=>(await OBR.scene.items.getItems()).filter(isCharacterToken),getTokens:()=>characterListCache,getEffective:getOdysseyData,activateAbility:async(tokenId,itemId,abilityId)=>{await updateTrackerData(tokenId,current=>{const next=structuredClone(current);activateImplantAbility(next,itemId,abilityId);return next;});await syncState();scheduleRender();}, setVehicle:setVehicleState, selectImplantAttack:(tokenId,key)=>{const token=getCharacterById(tokenId),weapon=getWeaponByName(token,key);syncAttackWeaponInputs(tokenId,key,weapon.damage,weapon.accuracy);const skill=resolveAbilitySkill(getOdysseyData(token),weapon.boundSkill);if(skill)saveAttackDraftValue(tokenId,'skill',skill);scheduleRender();}, useItem:useCharacterItem, getToken:id => getCharacterById(id ?? activeTokenId), getRole:() => playerRole,
       canControl:canUseToken, update:updateTrackerData, refreshOverlay:ensureOverlayForToken,
       render:scheduleRender, status:setStatus, download:downloadTextFile,
       resetDraft:id => { pendingFieldDrafts.clear(id);attackFormDrafts.delete(id); for (const [key,timer] of inputAutosaveTimers) { if (key.startsWith(id+"|")) {clearTimeout(timer);inputAutosaveTimers.delete(key);} } },

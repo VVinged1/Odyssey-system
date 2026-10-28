@@ -372,8 +372,9 @@ export function sanitizeOdysseyData(raw) {
   next.weapons.melee = sanitizeWeapons(raw.weapons?.melee);
   next.weapons.ranged = sanitizeWeapons(raw.weapons?.ranged, true);
   next.ammunition = sanitizeAmmunition(raw.ammunition);
-  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged);
+  next.inventory = normalizeInventory(raw.inventory, next.weapons.ranged,'',next.skillLabels);
   next.effects = normalizeEffects(raw.effects);
+  if(raw.vehicle?.enabled)next.vehicle={enabled:true,pilotTokenId:String(raw.vehicle.pilotTokenId||'').trim().slice(0,120)};
   next.preferences = {parryMode: ["off","1","2","3","4","5"].includes(raw.preferences?.parryMode) ? raw.preferences.parryMode : "off"};
   for (const [key,label] of Object.entries(ARMOR_TRAINING)) { next.skills[key]=clamp(Number(raw.skills?.[key])||0,0,1); next.skillLabels[key]=label;next.skillCategories[key]="passive";next.skillStrengthBonuses[key]=false;next.skillPerks[key]??=[]; }
 
@@ -488,15 +489,22 @@ export function formatLastRoll(lastRoll) {
   return parts.join(" | ");
 }
 
-export function getOdysseyData(item) {
-  return effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey));
+export function getOdysseyData(item, tokens=[]) {
+  const own=effectiveOdyssey(sanitizeOdysseyData(getTrackerData(item).odyssey)),id=own.vehicle?.pilotTokenId;
+  if(!id)return own;
+  const pilot=tokens.find(t=>t.id===id&&t.id!==item.id&&isCharacterToken(t));
+  if(!pilot||getTrackerData(pilot).odyssey.vehicle?.enabled)return {...own,pilotMissing:true};
+  const driver=effectiveOdyssey(getTrackerData(pilot).odyssey),fields=['attributes','baseAttributes','skills','baseSkills','skillLabels','skillCategories','skillPerks','skillDescriptions','skillPerkDescriptions','skillStrengthBonuses','skillRangeReduction','grantedSkills','skillAliases','availableSkills','modifiers','rangeReduction'];
+  const result={...own,pilot:{id:pilot.id,name:getCharacterName(pilot)}};for(const key of fields)result[key]=driver[key];
+  result.effectRows=[...(driver.effectRows||[]),...(own.effectRows||[])];return result;
 }
 
-export function canPlayerControlToken(playerRole, playerId, token) {
+export function canPlayerControlToken(playerRole, playerId, token, tokens=[]) {
   if (!token || !isCharacterToken(token)) return false;
   if (playerRole === "GM") return true;
   const odyssey = getOdysseyData(token);
-  return Boolean(playerId) && odyssey.owner.playerId === playerId;
+  const pilot=odyssey.vehicle?.pilotTokenId&&tokens.find(t=>t.id===odyssey.vehicle.pilotTokenId&&isCharacterToken(t)&&!getTrackerData(t).odyssey.vehicle?.enabled);
+  return Boolean(playerId) && (odyssey.owner.playerId === playerId||Boolean(pilot&&getTrackerData(pilot).odyssey.owner.playerId===playerId));
 }
 
 export function getAvailableWeapons(token, mode = "melee") {

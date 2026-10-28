@@ -9,3 +9,5 @@
 
 .cp-info{width:22px;height:22px;min-width:22px;padding:2px;flex:none;border-radius:50%}.cp-perk-descriptions{margin:3px 0 2px 8px;display:flex;flex-wrap:wrap;gap:4px}.cp-perk-descriptions .cp-pill{display:inline-flex;gap:4px;align-items:center}.cp-info.od-icon-button{width:22px;height:22px;padding:2px}.od-description-dialog p{white-space:pre-wrap;overflow-wrap:anywhere}.od-bonuses>.od-range-reduction{grid-column:1/-1}
 .od-range-readout[hidden]{display:none}
+
+.od-tooltip{position:fixed;inset:auto;margin:0;max-width:min(320px,calc(100vw - 16px));padding:9px 12px;border:1px solid #47658d;border-radius:8px;background:rgba(9,19,34,.96);color:#e1ecfc;box-shadow:0 5px 18px #0008;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.4;pointer-events:none;opacity:0;transition:opacity .18s ease;z-index:2147483647}.od-tooltip.visible{opacity:1}.od-named-group>summary{cursor:pointer;padding:8px}.od-ability-row{min-width:0}.od-ability-row .cp-row input{min-width:0}

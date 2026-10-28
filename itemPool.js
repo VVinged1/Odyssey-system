@@ -33,9 +33,9 @@ export function captureBlueprint(tracker,type,id) {
     values={};for(const key of ['kind','name','description','armor','criticalMax','playerRemovable','slots','subtype','healCritical','abilities','bonuses'])if(entry[key]!==undefined)values[key]=structuredClone(entry[key]);
     values.quantity=1;values.criticalDamage=0;values.slots??=[entry.slot||'any'];
     if(values.bonuses) {
-      const skills={};for(const [key,value]of Object.entries(values.bonuses.skills||{})){const label=o.skillLabels[key]||key;skills[label]=(skills[label]||0)+value;}values.bonuses.skills=skills;
+      const skills={};for(const [key,value]of Object.entries(values.bonuses.skills||{})){const label=o.skillLabels[key]||key;skills[label]=(skills[label]||0)+value;}values.bonuses.skills=skills;if(values.bonuses.skillCategories){values.bonuses.skillCategories=Object.fromEntries(Object.entries(values.bonuses.skillCategories).map(([key,value])=>[o.skillLabels[key]||key,value]));}
     }
-    if(values.abilities)values.abilities=values.abilities.map((ability,index)=>({...ability,id:'ability-'+index}));
+    if(values.abilities)values.abilities=values.abilities.map((ability,index)=>({...ability,id:'ability-'+index,...(ability.skill?{skill:o.skillLabels[ability.skill]||ability.skill}:{}),...(ability.bonuses?{bonuses:{...ability.bonuses,skills:Object.fromEntries(Object.entries(ability.bonuses.skills||{}).map(([key,value])=>[o.skillLabels[key]||key,value]))}}:{})}));
   }
   if(entry.useSkill)values.useSkill=String(o.skillLabels[entry.useSkill]||entry.useSkill).trim().slice(0,80);
   if(entry.description)values.description=String(entry.description).slice(0,2000);
@@ -78,7 +78,7 @@ export function copyBlueprint(tracker,raw,quantity=1,id=newId()) {
   if(values.ammoIds)values.ammoIds=values.ammoIds.map(key=>ammoIds.get(key)).filter(Boolean);
   if(values.acceptedMagazineIds)values.acceptedMagazineIds=values.acceptedMagazineIds.flatMap(key=>magazineIds.get(key)||[]);
   if(values.bonuses?.skills) {
-    const skills={};for(const [label,value]of Object.entries(values.bonuses.skills)){const key=Object.keys(o.skills).find(key=>key.toLowerCase()===label.toLowerCase()||(o.skillLabels[key]||key).toLowerCase()===label.toLowerCase())||label;skills[key]=(skills[key]||0)+value;}values.bonuses.skills=skills;
+    const skills={};for(const [label,value]of Object.entries(values.bonuses.skills)){const key=Object.keys(o.skills).find(key=>key.toLowerCase()===label.toLowerCase()||(o.skillLabels[key]||key).toLowerCase()===label.toLowerCase())||label;skills[key]=(skills[key]||0)+value;}const categories={};for(const [label,value]of Object.entries(values.bonuses.skillCategories||{})){const key=Object.keys(o.skills).find(key=>key.toLowerCase()===label.toLowerCase()||(o.skillLabels[key]||key).toLowerCase()===label.toLowerCase())||label;categories[key]=value;}if(Object.keys(categories).length)values.bonuses.skillCategories=categories;values.bonuses.skills=skills;
   }
   if(blueprint.type==='ammo') {
     const existing=o.ammunition.find(a=>sameAmmo(a,values));if(existing){if(existing.quantity+quantity>999999)throw new Error('Ammo reserve is full.');existing.quantity+=quantity;return existing.id;}

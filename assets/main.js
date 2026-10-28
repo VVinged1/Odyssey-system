@@ -1964,19 +1964,59 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
   values.acceptedMagazineIds ?? (values.acceptedMagazineIds = existing.id ? magazines.filter((m) => m.id === existing.magazineId || m.capacity === existing.capacity && (!m.loaded || (existing.ammoIds || []).includes(m.loadedAmmoId))).map((m) => m.id) : []);
   const magazineChoices = [...new Map(magazines.map((m) => [JSON.stringify([m.name, m.capacity]), m])).values()];
   const skillChoices = [...skills];
-  for (const key of Object.keys(existing.bonuses?.skills || {})) if (!skillChoices.some(([k]) => k === key)) skillChoices.push([key, key]);
+  const findSkill = (rows2, name) => rows2.find(([key, label]) => [key, label].some((v) => String(v).trim().toLowerCase() === String(name).trim().toLowerCase()));
+  const ownSkill = (name) => findSkill(skills, name);
+  if (values.bonuses) {
+    values.bonuses = structuredClone(values.bonuses);
+    const merged = {}, categories = {};
+    for (const [key, value] of Object.entries(values.bonuses.skills || {})) {
+      const own = ownSkill(key), canonical = own?.[0] || key;
+      merged[canonical] = (merged[canonical] || 0) + value;
+      const category = own?.[2] || values.bonuses.skillCategories?.[key];
+      if (["combat", "applied"].includes(category)) categories[canonical] = category;
+    }
+    values.bonuses.skills = merged;
+    values.bonuses.skillCategories = categories;
+  }
+  for (const key of Object.keys(values.bonuses?.skills || {})) if (!skillChoices.some(([k]) => k === key)) skillChoices.push([key, key]);
   dialog.innerHTML = `<form><h2>${existing.id ? "Edit item" : "New item"}</h2>${select("kind", "Type", ITEM_TYPES, type)}${field("name", "Name", existing.name || "")}${field("quantity", "Quantity / ammo reserve", existing.quantity ?? 1, "number", 999999)}<div data-type-fields></div><label>Description<textarea name="description" maxlength="2000">${esc(existing.description || "")}</textarea></label><div class="cp-row"><button type="button" data-cancel>Cancel</button><button type="submit">Save</button></div></form>`;
   const form = dialog.querySelector("form"), host = dialog.querySelector("[data-type-fields]");
   const rangeEditor = (prefix, value = {}) => `<fieldset class="od-range-reduction"><legend>Range penalty reduction \xB7 per band</legend>${RANGE_BANDS.map(([key, label]) => field(prefix + key, label, value[key] || 0, "number")).join("")}</fieldset>`;
   function bonusEditor(bonuses = {}, allowSkills = true, allowRange = true) {
-    return `<fieldset class="od-bonuses"><legend>Passive bonuses</legend>${allowRange ? rangeEditor("bonusRange:", bonuses.rangeReduction) : ""}${ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("")}${allowSkills ? skillChoices.map(([k, label]) => '<div class="cp-row">' + field("skill:" + k, `${label} \xB7 skill level`, bonuses.skills?.[k] || 0, "number") + select("skillCategory:" + k, "Category", [["combat", "Combat"], ["applied", "Applied"]], bonuses.skillCategories?.[k] || skills.find(([key]) => key === k)?.[2] || "applied") + "</div>").join("") + `<div class="od-new-bonus-skill">${field("newBonusSkillName", "New skill name")}${field("newBonusSkillValue", "Level bonus", 1, "number", 10)}${select("newBonusSkillCategory", "Category", [["combat", "Combat"], ["applied", "Applied"]], "applied")}<button type="button" data-add-bonus-skill>Add skill bonus</button></div>` : ""}</fieldset>`;
+    const assigned = Object.entries(bonuses.skills || {}), available = skillChoices.filter(([key]) => !assigned.some(([assignedKey]) => key === assignedKey));
+    const rows2 = assigned.map(([key, value]) => {
+      const own = ownSkill(key), label = own?.[1] || skillChoices.find(([k]) => k === key)?.[1] || key;
+      const category = own ? ["combat", "applied"].includes(own[2]) ? '<input type="hidden" name="skillCategory:' + esc(key) + '" value="' + esc(own[2]) + '">' : "" : select("skillCategory:" + key, "Category", [["combat", "Combat"], ["applied", "Applied"]], bonuses.skillCategories?.[key] || "applied");
+      return '<div class="od-bonus-skill-row">' + field("skill:" + key, label + " \xB7 level bonus", value, "number") + category + '<button type="button" data-remove-bonus-skill="' + esc(key) + '" aria-label="Remove ' + esc(label) + ' bonus" title="Remove skill bonus">\xD7</button></div>';
+    }).join("");
+    const picker = '<div class="od-bonus-skill-picker">' + select("bonusSkillChoice", "Skill", [["", "Choose skill"], ...available.map(([key, label]) => [key, label])], "") + field("bonusSkillValue", "Level bonus", 1, "number", 10) + '<button type="button" data-add-existing-bonus-skill title="Add selected skill bonus">+ Skill bonus</button></div>';
+    return '<fieldset class="od-bonuses"><legend>Passive bonuses</legend>' + (allowRange ? rangeEditor("bonusRange:", bonuses.rangeReduction) : "") + ATTRIBUTES.map((k) => field("attr:" + k, k, bonuses.attributes?.[k] || 0, "number")).join("") + (allowSkills ? '<div class="od-bonus-skills">' + rows2 + picker + '<details class="od-new-bonus-skill"><summary>New skill</summary><div class="od-bonus-new-fields">' + field("newBonusSkillName", "New skill name") + field("newBonusSkillValue", "Level bonus", 1, "number", 10) + select("newBonusSkillCategory", "Category", [["combat", "Combat"], ["applied", "Applied"]], "applied") + '<button type="button" data-add-bonus-skill title="Add new skill bonus">+ Skill bonus</button></div></details></div>' : "") + "</fieldset>";
   }
+  const abilityDrafts = new Map((existing.abilities || []).map((a) => [a.id, structuredClone(a)]));
   function abilityBonusSkill(key = "", value = 0) {
     return '<div class="cp-row od-ability-bonus-skill">' + field("abilityBonusSkill", "Skill name", key) + field("abilityBonusValue", "Level bonus", value, "number", 10) + '<button type="button" data-remove-ability-bonus aria-label="Remove skill bonus">\xD7</button></div>';
   }
   function abilityRow(a = {}) {
     const kind = a.kind || "skill";
     return '<fieldset class="od-ability-row" data-ability-id="' + esc(a.id || crypto.randomUUID()) + '">' + field("abilityName", "Ability", a.name || "") + select("abilityKind", "Ability type", [["skill", "Granted skill"], ["bonus", "Activate bonuses"], ["attack", "Attack"]], kind) + (kind === "skill" ? field("abilityLevel", "Level", a.level || 0, "number", 10) : kind === "attack" ? field("abilityDamage", "Damage", a.damage || 0, "number") + field("abilityAccuracy", "Accuracy", a.accuracy || 0, "number") + field("abilitySkill", "Attack skill", a.skill || "") : ATTRIBUTES.map((k) => field("abilityAttr:" + k, k, a.bonuses?.attributes?.[k] || 0, "number")).join("") + "<div data-ability-bonus-skills>" + Object.entries(a.bonuses?.skills || {}).map(([k, v]) => abilityBonusSkill(k, v)).join("") + '</div><button type="button" data-add-ability-bonus>Add skill bonus</button>') + field("abilityDescription", "Description", a.description || "") + '<button type="button" data-remove-ability aria-label="Remove ability">\xD7</button></fieldset>';
+  }
+  function readAbilityRow(row) {
+    const previous = abilityDrafts.get(row.dataset.abilityId) || {}, get2 = (name, fallback = "") => row.querySelector('[name="' + name + '"]')?.value ?? fallback;
+    const bonuses = structuredClone(previous.bonuses || { attributes: {}, skills: {} });
+    if (row.querySelector('[name^="abilityAttr:"]')) {
+      bonuses.attributes = {};
+      for (const input of row.querySelectorAll('[name^="abilityAttr:"]')) if (Number(input.value)) bonuses.attributes[input.name.slice(12)] = Number(input.value);
+    }
+    if (row.querySelector("[data-ability-bonus-skills]")) {
+      bonuses.skills = {};
+      for (const r of row.querySelectorAll(".od-ability-bonus-skill")) {
+        const name = r.querySelector('[name="abilityBonusSkill"]').value.trim(), v = Number(r.querySelector('[name="abilityBonusValue"]').value) || 0;
+        if (name && v) bonuses.skills[name] = (bonuses.skills[name] || 0) + v;
+      }
+    }
+    const ability = { id: row.dataset.abilityId, name: get2("abilityName"), kind: get2("abilityKind"), level: Number(get2("abilityLevel", previous.level)) || 0, description: get2("abilityDescription"), damage: Number(get2("abilityDamage", previous.damage)) || 0, accuracy: Number(get2("abilityAccuracy", previous.accuracy)) || 0, skill: get2("abilitySkill", previous.skill || ""), bonuses };
+    abilityDrafts.set(ability.id, ability);
+    return ability;
   }
   function collect() {
     const data = Object.fromEntries(new FormData(form));
@@ -2002,15 +2042,7 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
       values.bonuses = bonuses;
     }
     if (form.elements["weaponRange:clinch"]) values.rangeReduction = normalizeRangeReduction(Object.fromEntries(RANGE_BANDS.map(([key]) => [key, data["weaponRange:" + key]])));
-    if (form.querySelector("[data-abilities]")) values.abilities = [...form.querySelectorAll(".od-ability-row")].map((row) => {
-      const get2 = (name) => row.querySelector('[name="' + name + '"]')?.value || "", bonuses2 = { attributes: {}, skills: {} };
-      for (const input of row.querySelectorAll('[name^="abilityAttr:"]')) if (Number(input.value)) bonuses2.attributes[input.name.slice(12)] = Number(input.value);
-      for (const r of row.querySelectorAll(".od-ability-bonus-skill")) {
-        const name = r.querySelector('[name="abilityBonusSkill"]').value.trim(), v = Number(r.querySelector('[name="abilityBonusValue"]').value) || 0;
-        if (name && v) bonuses2.skills[name] = (bonuses2.skills[name] || 0) + v;
-      }
-      return { id: row.dataset.abilityId, name: get2("abilityName"), kind: get2("abilityKind"), level: Number(get2("abilityLevel")) || 0, description: get2("abilityDescription"), damage: Number(get2("abilityDamage")) || 0, accuracy: Number(get2("abilityAccuracy")) || 0, skill: get2("abilitySkill"), bonuses: bonuses2 };
-    }).filter((a) => a.name.trim());
+    if (form.querySelector("[data-abilities]")) values.abilities = [...form.querySelectorAll(".od-ability-row")].map(readAbilityRow).filter((a) => a.name.trim());
     values.ammoIds = [...form.querySelectorAll('[name="ammoCompatible"]:checked')].map((e) => e.value);
   }
   function render2() {
@@ -2047,13 +2079,44 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
     form.elements.quantity.closest("label").hidden = kind === "weapon" || kind === "magazine" && !!existing.id;
   }
   form.addEventListener("change", (e) => {
-    if (["kind", "subtype", "weaponKind", "acceptsMagazines", "abilityKind"].includes(e.target.name)) {
+    if (e.target.name === "abilityKind") {
+      const row = e.target.closest(".od-ability-row"), ability = readAbilityRow(row), scrollTop = dialog.scrollTop;
+      const template = document.createElement("template");
+      template.innerHTML = abilityRow(ability);
+      const replacement = template.content.firstElementChild;
+      row.replaceWith(replacement);
+      replacement.querySelector('[name="abilityKind"]').focus({ preventScroll: true });
+      dialog.scrollTop = scrollTop;
+      return;
+    }
+    if (["kind", "subtype", "weaponKind", "acceptsMagazines"].includes(e.target.name)) {
       collect();
       render2();
     }
   });
+  form.addEventListener("input", (e) => {
+    if (e.target.name === "newBonusSkillName") form.elements.newBonusSkillCategory.closest("label").hidden = !!ownSkill(e.target.value);
+  });
   form.addEventListener("click", (e) => {
     var _a;
+    const remove = e.target.closest("[data-remove-bonus-skill]");
+    if (remove) {
+      collect();
+      delete values.bonuses.skills[remove.dataset.removeBonusSkill];
+      delete values.bonuses.skillCategories?.[remove.dataset.removeBonusSkill];
+      render2();
+      return;
+    }
+    if (e.target.closest("[data-add-existing-bonus-skill]")) {
+      const key = form.elements.bonusSkillChoice.value, bonus = Number(form.elements.bonusSkillValue.value) || 0;
+      if (!key || !bonus) return;
+      collect();
+      values.bonuses.skills[key] = bonus;
+      const own = ownSkill(key);
+      if (own && ["combat", "applied"].includes(own[2])) values.bonuses.skillCategories[key] = own[2];
+      render2();
+      return;
+    }
     if (e.target.closest("[data-add-bonus-skill]")) {
       const input = form.elements.newBonusSkillName, name = input.value.trim(), bonus = Number(form.elements.newBonusSkillValue.value) || 0;
       if (!name || name.length > 40 || ["__proto__", "constructor", "prototype"].includes(name)) {
@@ -2063,14 +2126,15 @@ function itemEditor({ existing = {}, type = "resource", skills = [], parts = [],
         return;
       }
       collect();
-      let choice = skillChoices.find(([key, label]) => key.toLowerCase() === name.toLowerCase() || label.toLowerCase() === name.toLowerCase());
+      let choice = findSkill(skillChoices, name);
       if (!choice) {
         choice = [name, name];
         skillChoices.push(choice);
       }
       values.bonuses.skills[choice[0]] = bonus;
       (_a = values.bonuses).skillCategories ?? (_a.skillCategories = {});
-      values.bonuses.skillCategories[choice[0]] = values.newBonusSkillCategory;
+      const own = ownSkill(choice[0]);
+      if (!own || ["combat", "applied"].includes(own[2])) values.bonuses.skillCategories[choice[0]] = own ? own[2] : values.newBonusSkillCategory;
       render2();
       return;
     }

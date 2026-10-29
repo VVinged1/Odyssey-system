@@ -1260,3 +1260,12 @@ select {
 @media(max-width:480px){.od-item-editor{padding:14px}.od-item-editor .od-ability-row>label:has([name="abilityName"]),.od-item-editor .od-ability-row>label:has([name="abilityKind"]){grid-column:1/-1}}
 
 .od-item-editor .od-check{flex-direction:row;align-items:center;justify-content:flex-start}
+
+/* Compact characteristics: readable fixed-height cards, more columns on wide panels. */
+.cp-attrs {grid-template-columns:repeat(3,minmax(0,1fr));max-width:282px;gap:5px;}
+.cp-screen button.cp-attr {aspect-ratio:auto;min-height:64px;height:64px;padding:6px 3px;gap:4px;}
+.cp-attr-val {font-size:23px;}
+.cp-attr-code {font-size:9px;line-height:1.15;}
+.cp-edit-value {font-size:10px;gap:3px;}
+.cp-edit-value input {max-width:58px;padding:3px 5px;min-height:26px;}
+.av-mana-row {margin:6px 0;}

@@ -16,7 +16,21 @@ try{
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('[data-action="profile-roll-char"]').first().waitFor();
  assert.equal(await page.locator('.od-hud').count(),0);assert.equal(await page.locator('[data-combat-layout="attack"] .od-combat-card').count(),3);assert.equal(await page.locator('[data-combat-layout="manual"] .od-combat-card').count(),3);
  const footer=page.locator('[data-combat-layout="attack"] .od-combat-footer');assert.equal(await footer.locator('button').count(),2);const footerButtons=await footer.locator('button').all();const widths=await Promise.all(footerButtons.map(b=>b.boundingBox()));assert.ok(Math.abs(widths[0].width-widths[1].width)<1);assert.equal(await footerButtons[0].textContent(),'Attack');assert.equal(await footerButtons[0].evaluate(e=>e.classList.contains('od-icon-button')),false);
- console.log('UI mounted'); const data=()=>page.evaluate(()=>window.odysseyTest.data());
+
+ const initialWoundToken=await page.evaluate(()=>structuredClone(window.odysseyTest.data()));await page.evaluate(()=>{const d=window.odysseyTest.data();d.body.Torso.current=2;d.body.Torso.max=3;d.body.Torso.minor=3;d.body.Torso.serious=1;window.odysseyTest.refresh();});
+ const bodyBlock=page.locator('summary').filter({hasText:/^Body Parts/}).first();if(!await bodyBlock.locator('..').evaluate(e=>e.open))await bodyBlock.click();
+ await page.locator('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="minor"][data-delta="1"]').click();await page.waitForFunction(()=>{const p=window.odysseyTest.data().body.Torso;return p.current===1&&p.minor===0&&p.serious===0;});
+ const criticalMinus=page.locator('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="critical"][data-delta="-1"]');await criticalMinus.click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.current===2);
+ await page.evaluate(()=>{const b=document.querySelector('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="minor"][data-delta="1"]');b.click();b.click();b.click();});await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.minor===3);
+ await page.locator('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="minor"][data-delta="-1"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.minor===2);
+ await page.locator('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="serious"][data-delta="1"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.serious===1);
+ await page.locator('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="serious"][data-delta="-1"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.serious===0);
+ await page.locator('[data-action="adjust-part-wound"][data-part="Torso"][data-wound="critical"][data-delta="1"]').click();await page.waitForFunction(()=>window.odysseyTest.data().body.Torso.current===1);
+ if(process.env.ODYSSEY_SCREENSHOTS){await fs.mkdir(process.env.ODYSSEY_SCREENSHOTS,{recursive:true});await page.evaluate(()=>[...document.querySelectorAll('summary')].find(e=>e.textContent.trim().startsWith('Body Parts'))?.scrollIntoView());await page.screenshot({path:path.join(process.env.ODYSSEY_SCREENSHOTS,'odyssey-wounds.png')});}
+ await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));await page.waitForFunction(()=>!document.querySelector('[data-action="adjust-part-wound"]'));await page.evaluate(()=>{const b=document.createElement('button');Object.assign(b.dataset,{action:'adjust-part-wound',part:'Torso',wound:'minor',delta:'1'});document.body.append(b);b.click();b.remove();});await page.waitForFunction(()=>document.querySelector('#statusBox').textContent.includes('Only the GM'));assert.equal(await page.evaluate(()=>window.odysseyTest.data().body.Torso.minor),2);
+ await page.evaluate(data=>{window.odysseyTest.state.items.find(i=>i.id==='hero').metadata['com.codex.body-hp/data']=data;window.odysseyTest.setRole('GM');window.odysseyTest.refresh();},initialWoundToken);await page.locator('[data-action="set-odyssey-attribute"]').first().waitFor();
+ console.log('GM M/S/C wound controls, promotions, rapid clicks and player denial passed');
+  console.log('UI mounted'); const data=()=>page.evaluate(()=>window.odysseyTest.data());
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
  assert.ok(await page.locator('[data-action="set-odyssey-attribute"]').count());
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));

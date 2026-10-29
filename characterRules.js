@@ -111,6 +111,33 @@ export function armorHealth(tracker,partName) {
   const gear=tracker.odyssey.inventory.items.filter(i=>['armor','shield'].includes(i.kind)&&i.equippedPart===partName&&i.quantity>0);
   return {max:gear.reduce((sum,i)=>sum+i.criticalMax,0),remaining:gear.reduce((sum,i)=>sum+i.criticalMax-i.criticalDamage,0)};
 }
+export function partWounds(tracker,partName){
+  const part=tracker.body?.[partName];if(!part)return {minor:0,serious:0,critical:0};
+  const pool=armorHealth(tracker,partName),bodyMax=Math.max(0,part.max-pool.max),bodyCurrent=Math.max(0,part.current-pool.remaining);
+  return {minor:Math.max(0,part.minor||0),serious:Math.max(0,part.serious||0),critical:Math.max(0,bodyMax-bodyCurrent)};
+}
+export function restorePartWound(tracker,partName,kind){
+  const part=tracker.body?.[partName];if(!part)throw Error('Body part no longer exists.');
+  if(!['minor','serious','critical'].includes(kind))throw Error('Unknown wound type.');
+  const wounds=partWounds(tracker,partName);if(!wounds[kind])return false;
+  if(kind==='minor'||kind==='serious')part[kind]=Math.max(0,part[kind]-1);
+  else part.current=Math.min(part.max,part.current+1);
+  return true;
+}
+export function adjustPartWound(tracker,partName,kind,delta){
+  if(![-1,1].includes(delta))throw Error('Choose a single wound step.');
+  if(delta===-1)return restorePartWound(tracker,partName,kind);
+  const part=tracker.body?.[partName];if(!part)throw Error('Body part no longer exists.');
+  if(!['minor','serious','critical'].includes(kind))throw Error('Unknown wound type.');
+  let critical=kind==='critical'?1:0;
+  if(kind==='minor')part.minor=(part.minor||0)+1;
+  if(kind==='serious')part.serious=(part.serious||0)+1;
+  part.serious=(part.serious||0)+Math.floor((part.minor||0)/4);part.minor=(part.minor||0)%4;
+  critical+=Math.floor(part.serious/2);part.serious%=2;
+  // Manual body-wound controls never damage or repair equipped armor.
+  if(critical){const pool=armorHealth(tracker,partName);part.current=Math.max(Math.min(pool.remaining,part.current),part.current-critical);}
+  return true;
+}
 // Manual HP edits and external HP deltas use the same combined pool as attacks.
 export function setCombinedPartMax(tracker,partName,value) {
   const part=tracker.body[partName];if(!part)return;

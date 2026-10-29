@@ -41,7 +41,7 @@ export function installCompactButtons() {
  installTooltips();
  const enhance=()=>{
   for(const button of document.querySelectorAll('button')) {
-   if(button.matches('.cp-attr,.cp-skill-card,.list-item,.od-wide-action')||button.querySelector('[data-compact-icon]'))continue;
+   if(button.matches('.cp-attr,.cp-skill-card,.list-item,.od-wide-action,.od-wound-button')||button.querySelector('[data-compact-icon]'))continue;
    const text=button.textContent.trim();if(!text||text.length<=2)continue;
    button.title=text;button.setAttribute('aria-label',text);button.classList.add('od-icon-button');
    button.innerHTML=`<svg data-compact-icon viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[iconFor(text)]}"></path></svg>`;

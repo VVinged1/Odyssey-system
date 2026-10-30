@@ -1,3 +1,4 @@
+import {playerBodyPartsView} from './ui/playerBodyParts.js';
 import {implantAttacks,resolveAbilitySkill,activateImplantAbility} from './implantAbilities.js';
 import {applyCheckedItemUse,itemUseSummary} from './itemUse.js';
 import {createFieldDrafts,createTokenWriteQueue} from './fieldDrafts.js';
@@ -3342,7 +3343,7 @@ function renderSelectedToken() {
   const tokenLocked = !canUseToken(token);
   const bodyFieldDisabled = !canEditTokenData(token) ? "disabled" : "";
   const gmOnlyDisabled = !isEditable() ? "disabled" : "";
-  const showPartBlock = isEditable();
+  const showPartBlock = isEditable() || Boolean(playerId&&data.odyssey.owner.playerId===playerId);
   const lastRollText = data.lastRoll
     ? escapeHtml(data.lastRoll.summary || "Last roll recorded")
     : "No rolls synced yet";
@@ -3413,7 +3414,7 @@ function renderSelectedToken() {
       }
       ${
         showPartBlock
-          ? renderCollapsibleSection(
+          ? isEditable() ? renderCollapsibleSection(
               "Body Parts",
               `
                 <div class="row row-gap">
@@ -3451,6 +3452,7 @@ function renderSelectedToken() {
               `,
               true,
             )
+          : renderCollapsibleSection("Body Parts",playerBodyPartsView(data,[SPECIAL_PART_NAME,...getBodyPartNames(data)]),true)
           : ""
       }
       ${

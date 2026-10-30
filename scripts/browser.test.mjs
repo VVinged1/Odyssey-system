@@ -34,7 +34,10 @@ try{
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
  assert.ok(await page.locator('[data-action="set-odyssey-attribute"]').count());
  await page.evaluate(()=>window.odysseyTest.setRole('PLAYER'));
- await page.waitForFunction(()=>!document.querySelector('[data-action="set-odyssey-attribute"]'));
+ await page.waitForFunction(()=>!document.querySelector('[data-action="set-odyssey-attribute"]'));await page.locator('[data-player-body-parts]').waitFor();assert.equal(await page.locator('[data-player-body-parts] input,[data-player-body-parts] button,[data-player-body-parts] select').count(),0);
+ await page.evaluate(()=>{window.odysseyTest.data().body['L.Arm'].hidden=true;window.odysseyTest.data().body.Torso.current=2;window.odysseyTest.refresh();});await page.waitForFunction(()=>document.querySelector('[data-player-body-parts] [data-body-part="Torso"]').textContent.includes('2 /'));assert.equal(await page.locator('[data-player-body-parts] [data-body-part="L.Arm"]').count(),0);
+ await page.evaluate(()=>window.odysseyTest.select('enemy'));await page.waitForFunction(()=>!document.querySelector('[data-player-body-parts]'));await page.evaluate(()=>{window.odysseyTest.select('hero');window.odysseyTest.data().body['L.Arm'].hidden=false;window.odysseyTest.data().body.Torso.current=3;window.odysseyTest.refresh();});await page.locator('[data-player-body-parts] [data-body-part="Torso"]').waitFor();
+
  assert.equal(await page.locator('[data-action="profile-roll-char"]').count(),9);
  assert.equal(await page.locator('.cp-passives').count(),0);assert.equal(await page.locator('[data-od-action="save-template"]').count(),0);
  console.log('Owner view'); let before=(await data()).history?.length||0;

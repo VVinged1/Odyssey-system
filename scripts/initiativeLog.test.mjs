@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {createLogEntry,persistLogEntries,publishLogEntry,LOG_KEY,LOG_CHANNEL} from '../initiative/logTransport.js';
+const state={metadata:{},sent:[]};let failBroadcast=false,failSave=false;
+const sdk={room:{getMetadata:async()=>structuredClone(state.metadata),setMetadata:async patch=>{if(failSave)throw Error('save failed');Object.assign(state.metadata,patch);}},broadcast:{sendMessage:async(channel,data)=>{if(failBroadcast)throw Error('broadcast failed');state.sent.push({channel,data});}}};
+const first=createLogEntry('Skill','d100 41 + 20 vs 81','error');
+await publishLogEntry(sdk,first,false);
+assert.equal(state.metadata[LOG_KEY],undefined,'Players broadcast without a GM metadata write');
+assert.equal(state.sent[0].channel,LOG_CHANNEL);
+await persistLogEntries(sdk,[first]);await persistLogEntries(sdk,[first]);
+assert.equal(state.metadata[LOG_KEY].length,1,'GM relay deduplicates broadcasts');
+const entries=Array.from({length:55},(_,i)=>createLogEntry('Roll '+i,'result'));
+await Promise.all(entries.map(entry=>persistLogEntries(sdk,[entry])));
+assert.equal(state.metadata[LOG_KEY].length,50);
+assert.deepEqual(state.metadata[LOG_KEY].map(e=>e.id),entries.slice(-50).reverse().map(e=>e.id));
+failBroadcast=true;const fallback=createLogEntry('Saved roll','42');await publishLogEntry(sdk,fallback,true);
+assert.equal(state.metadata[LOG_KEY][0].id,fallback.id);
+await assert.rejects(publishLogEntry(sdk,first,false),/broadcast failed/);
+failSave=true;await assert.rejects(publishLogEntry(sdk,first,true));
+failBroadcast=false;await publishLogEntry(sdk,first,true);
+failSave=false;await persistLogEntries(sdk,[first]);
+console.log('Shared log passed: player broadcast, GM relay, deduplication, queued writes, limits, delivery fallback and failure recovery.');
+
+state.metadata.extra='x'.repeat(8000);const tableEntries=Array.from({length:20},(_,i)=>createLogEntry('Dice table '+i,'│ '+('Расчёт '.repeat(120))+' │'));
+await Promise.all(tableEntries.map(entry=>persistLogEntries(sdk,[entry])));assert(new TextEncoder().encode(JSON.stringify(state.metadata)).length<=16000);assert.equal(state.metadata[LOG_KEY][0].id,tableEntries.at(-1).id);assert(state.metadata[LOG_KEY].length<20);
+console.log('Large Unicode dice tables fit the room metadata budget and retain the newest result.');

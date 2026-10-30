@@ -4,11 +4,17 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node ammunition.test.mjs && node scripts/integration.test.mjs && node scripts/itemPool.test.mjs && node scripts/range.test.mjs && node scripts/fieldDrafts.test.mjs && node scripts/campaignPoolStore.test.mjs && node scripts/itemUse.test.mjs && node scripts/vehicle-implants.test.mjs && node scripts/partWounds.test.mjs",
-    "test:ui": "node scripts/browser.test.mjs && node scripts/concurrency.test.mjs && node scripts/poolPersistence.test.mjs && node scripts/itemUse.browser.test.mjs && node scripts/vehicle-implants.browser.test.mjs && node scripts/editor-layout.browser.test.mjs"
+    "test": "node ammunition.test.mjs && node scripts/integration.test.mjs && node scripts/itemPool.test.mjs && node scripts/range.test.mjs && node scripts/fieldDrafts.test.mjs && node scripts/campaignPoolStore.test.mjs && node scripts/itemUse.test.mjs && node scripts/vehicle-implants.test.mjs && node scripts/partWounds.test.mjs && node scripts/initiativeMenu.test.mjs && node scripts/initiativeSdk.test.mjs && node scripts/initiativeLog.test.mjs",
+    "test:ui": "node scripts/browser.test.mjs && node scripts/concurrency.test.mjs && node scripts/poolPersistence.test.mjs && node scripts/itemUse.browser.test.mjs && node scripts/vehicle-implants.browser.test.mjs && node scripts/editor-layout.browser.test.mjs && node scripts/initiative.browser.test.mjs"
   },
   "dependencies": {
-    "@owlbear-rodeo/sdk": "3.1.0"
+    "@owlbear-rodeo/sdk": "3.1.0",
+    "@emotion/react": "11.10.4",
+    "@emotion/styled": "11.10.4",
+    "@mui/icons-material": "5.10.6",
+    "@mui/material": "5.10.7",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
   },
   "devDependencies": {
     "esbuild": "0.25.10",

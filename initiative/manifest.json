@@ -1,0 +1,17 @@
+{
+  "name": "Odyssey Initiative Tracker",
+  "version": "1.1.0",
+  "manifest_version": 1,
+  "author": "Codex",
+  "homepage_url": "https://vvinged1.github.io/Odyssey-system/",
+  "description": "Shared initiative with d20 + effective Reaction, manual order and token focus",
+  "icon": "https://vvinged1.github.io/Odyssey-system/icon.svg?v=1.1.0",
+  "action": {
+    "title": "Odyssey Initiative",
+    "icon": "https://vvinged1.github.io/Odyssey-system/icon.svg?v=1.1.0",
+    "popover": "https://vvinged1.github.io/Odyssey-system/initiative/index.html?v=1.1.0",
+    "height": 116,
+    "width": 760
+  },
+  "background_url": "https://vvinged1.github.io/Odyssey-system/initiative/background.html?v=1.1.0"
+}
